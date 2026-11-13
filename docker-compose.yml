@@ -1,0 +1,26 @@
+# Sobe o banco e o sistema. Antes: crie o arquivo .env a partir do .env.example
+# (para o compose, DATABASE_URL é definido abaixo; basta ANTHROPIC_API_KEY e POSTGRES_PASSWORD).
+services:
+  banco:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: licita
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: licita
+    volumes: [dados:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U licita"]
+      interval: 5s
+      retries: 10
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on: { banco: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: postgres://licita:${POSTGRES_PASSWORD}@banco:5432/licita
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      NODE_ENV: ${NODE_ENV:-production}
+    ports: ["3000:3000"]
+volumes:
+  dados:
