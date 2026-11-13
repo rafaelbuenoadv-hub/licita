@@ -68,6 +68,30 @@ after(async () => { server.close(); falso.close(); await mod.db.pool.end(); });
 
 let proc = 0;
 
+test("ajuda do campo usa o formulário e a análise retorna só referências oficiais", async () => {
+  const dados = { objeto: "Manutenção de ar-condicionado", tipo: "servicos", via: "licitacao", classe: "", obs: "" };
+  respostaEstruturada = {
+    aplicaveis: [{ indice: 0, motivo: "Disciplina a contratação de serviços." }, { indice: 99, motivo: "Referência ausente." }],
+    observacao: "Confira a modalidade.",
+  };
+  const normas = await api("POST", "/api/ia/regulamentos", dados);
+  assert.equal(normas.status, 200);
+  const analise: any = await normas.json();
+  assert.match(analise.normas, /Lei Federal nº 14\.133\/2021/);
+  assert.doesNotMatch(analise.normas, /Referência ausente/);
+  textoStream = "Descreva a manutenção preventiva e corretiva.";
+  const ajuda = await api("POST", "/api/ia/ajuda-campo", {
+    campo: "objeto",
+    contexto: { ...dados, ano: "2026", valor: "", requisitantes: ["Administração"], normas: "", pca: null },
+    mensagens: [{ role: "user", content: "Como devo descrever este objeto?" }],
+  });
+  assert.equal(ajuda.status, 200);
+  const resposta = (await ajuda.text()).trim().split("\n").map((linha) => JSON.parse(linha).d ?? "").join("");
+  assert.match(resposta, /preventiva e corretiva/);
+  assert.match(pedidos.at(-1)!.body.messages[0].content, /campo "objeto"/);
+  assert.match(pedidos.at(-1)!.body.messages[0].content, /Manutenção de ar-condicionado/);
+});
+
 test("extrair dados de um memorando usa saída estruturada e respaldo", async () => {
   respostaEstruturada = { requisitante: "Secretaria de Obras", objeto: "Construção de gavetário", valor_estimado: 114969.14, classe: "obras", tipo: "obra", via: "dispensa", normas: null, obs: "60 dias" };
   const r = await api("POST", "/api/ia/extrair", { texto: "Memorando 15/2026 da Secretaria de Obras pedindo gavetário." });

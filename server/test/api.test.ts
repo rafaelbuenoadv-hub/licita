@@ -225,6 +225,32 @@ test("áreas requisitantes adicionais são gravadas na abertura e podem ser edit
   assert.deepEqual((await req.get("/api/processos?ano=2029")).dados[0].areas_adicionais, ["Obras"]);
 });
 
+test("PCA integral de Ibaiti é acessível e o item 39 é vinculado na abertura", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const outro = await new Cliente().entrar("req@a.gov.br");
+  await migrar();
+  await migrar();
+  const plano = (await admin.get("/api/pca?ano=2026")).dados;
+  assert.equal(plano.itens.length, 120);
+  assert.equal(plano.total_planejado, null);
+  const pdf = await admin.get(plano.documento.url);
+  assert.equal(pdf.status, 200);
+  assert.equal(pdf.dados.subarray(0, 5).toString(), "%PDF-");
+  assert.equal((await outro.get(plano.documento.url)).status, 404);
+  const item = plano.itens.find((i: { ordem_oficial: number }) => i.ordem_oficial === 39);
+  assert.equal(item.pagina_oficial, 10);
+  const dados = { objeto: "Serviços de manutenção preventiva e corretiva e limpeza de aparelhos de ar condicionado nas secretarias municipais", tipo: "servicos", via: "licitacao", ano: 2026 };
+  const criado = await admin.post("/api/processos", dados);
+  assert.equal(criado.status, 201);
+  assert.equal((await admin.get(`/api/processos/${criado.dados.id}`)).dados.pca_item_id, item.id);
+  const compra = await admin.post("/api/processos", { ...dados, objeto: "Aquisição de ar-condicionado instalado", tipo: "bens" });
+  assert.equal((await admin.get(`/api/processos/${compra.dados.id}`)).dados.pca_item_id, plano.itens.find((i: { ordem_oficial: number }) => i.ordem_oficial === 8).id);
+  const sem = await admin.post("/api/processos", { ...dados, objeto: "Serviço de calibração de telescópio orbital" });
+  assert.equal((await admin.get(`/api/processos/${sem.dados.id}`)).dados.pca_item_id, null);
+  assert.equal((await admin.put(`/api/processos/${criado.dados.id}`, { ...dados, ano: 2027, pca_item_id: item.id })).status, 400);
+  assert.equal((await outro.post("/api/processos", { ...dados, pca_item_id: item.id })).status, 400);
+});
+
 test("minuta versionada, campos pendentes e exportação .docx", async () => {
   const req = await new Cliente().entrar("req@a.gov.br");
   const texto = "# ESTUDO TÉCNICO PRELIMINAR\nProcesso nº 367/2026\n## 2. Necessidade\n| Indicador | Dado |\n|---|---|\n| Sepultamentos 2024 | [[nº]] |\n| Sepultamentos 2025 | [[nº]] |\nIbaiti, [[dia]] de novembro de 2026.\n\n@ FULANA DE TAL\n@ Arquiteta";

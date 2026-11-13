@@ -1,3 +1,4 @@
+import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
@@ -27,6 +28,7 @@ const camposProc = z.object({
   classe: z.string().max(200).default(""),
   ano: z.number().int().min(2021).max(2100),
   pca_item_id: z.number().int().nullable().default(null),
+  pca_automatico: z.boolean().default(false),
   normas: z.string().max(20000).default(""),
   obs: z.string().max(20000).default(""),
 });
@@ -105,6 +107,12 @@ export async function sugestaoNumeracao(p: Processo) {
   };
 }
 
+async function validarItemPca(id: number | null, orgao: number, ano: number) {
+  if (id === null) return;
+  const item = await q1("select 1 from pca_itens where id=$1 and orgao_id=$2 and ano=$3", [id, orgao, ano]);
+  if (!item) throw new ErroHttp(400, "Selecione um item do PCA do órgão para o exercício do processo.");
+}
+
 export function rotasProcessos() {
   const r = Router();
   r.use("/processos", exigeLogin);
@@ -124,11 +132,14 @@ export function rotasProcessos() {
 
   r.post("/processos", exigePapel("requisitante", "contratacao"), async (req, res) => {
     const d = camposProc.parse(req.body);
-    if (d.pca_item_id) {
-      const ok = await q1("select 1 from pca_itens where id=$1 and orgao_id=$2", [d.pca_item_id, req.usuario!.orgao_id]);
-      if (!ok) throw new ErroHttp(400, "Item do PCA não encontrado.");
-    }
     const orgao = req.usuario!.orgao_id;
+    await validarItemPca(d.pca_item_id, orgao, d.ano);
+    if ((d.pca_automatico || req.body.pca_item_id === undefined) && d.pca_item_id === null) {
+      const itens = await q<ItemConsultaPca>(
+        "select id, descricao, tipo, tipo_oficial, ordem_oficial, pagina_oficial from pca_itens where orgao_id=$1 and ano=$2", [orgao, d.ano],
+      );
+      d.pca_item_id = consultarPca(d.objeto, d.tipo, itens).vinculo?.id ?? null;
+    }
     const p = await tx(async (c) => {
       // Próximo protocolo do órgão no exercício; a linha da sequência fica travada até o fim da transação.
       const k = (await c.query(
@@ -170,6 +181,7 @@ export function rotasProcessos() {
   r.put("/processos/:id", exigePapel("requisitante", "contratacao"), async (req, res) => {
     const p = await processoDo(req);
     const d = camposProc.parse(req.body);
+    if (d.pca_item_id !== p.pca_item_id || d.ano !== p.ano) await validarItemPca(d.pca_item_id, p.orgao_id, d.ano);
     await q(
       `update processos set requisitante=$1, objeto=$2, tipo=$3, via=$4, valor_estimado=$5, classe=$6, ano=$7, pca_item_id=$8, normas=$9, obs=$10, areas_adicionais=coalesce($12::text[], areas_adicionais), atualizado_em=now()
         where id=$11`,

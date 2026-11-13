@@ -7,7 +7,7 @@
   "scripts": {
     "dev:server": "tsx watch --env-file-if-exists=.env server/index.ts",
     "dev:web": "vite",
-    "build": "tsc -p server/tsconfig.json && node --input-type=module -e \"import { cpSync } from 'node:fs'; cpSync('server/timbrados', 'dist/server/timbrados', { recursive: true })\" && vite build",
+    "build": "tsc -p server/tsconfig.json && node --input-type=module -e \"import { cpSync } from 'node:fs'; cpSync('server/timbrados', 'dist/server/timbrados', { recursive: true }); cpSync('server/documentos', 'dist/server/documentos', { recursive: true })\" && vite build",
     "start": "node --env-file-if-exists=.env dist/server/index.js",
     "migrate": "tsx --env-file-if-exists=.env server/migrate.ts",
     "seed": "tsx --env-file-if-exists=.env server/seed.ts",

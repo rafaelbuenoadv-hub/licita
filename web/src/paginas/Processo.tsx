@@ -4,7 +4,7 @@ import { api, brl, dataBR, dataHora, fluxo, fmtNum, numBR } from "../api";
 import { Folha } from "../comp/Folha";
 import { ETAPAS, TIPOS, VIAS, feita, feitos, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../../shared/etapas";
 import { tem, useEu } from "../main";
-import { CamposProcesso, paraApi, type DadosProc } from "./NovoProcesso";
+import { CamposProcesso, paraApi, type DadosProc, type PlanoConsulta } from "./NovoProcesso";
 import { Solicitacoes } from "./Solicitacoes";
 
 const ACOES: Record<string, string> = {
@@ -49,6 +49,7 @@ export function ProcessoPg() {
         </div>
       </div>
       {aviso && <p className={"note " + (aviso.tipo ?? "")}>{aviso.t} <button className="lnk" onClick={() => setAviso(null)}>Fechar</button></p>}
+      <p className="small"><strong>PCA</strong> · {p.pca_item_id ? "Vinculado ao plano do exercício" : "Sem vínculo confirmado. Consulte Dados do processo para conferir o objeto."}</p>
       <Dados p={p} recarregar={carregar} setAviso={setAviso} />
       <Numeracao key={`n${p.numero}|${p.procedimento}`} p={p} recarregar={carregar} setAviso={setAviso} />
 
@@ -113,9 +114,9 @@ function Dados({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<
     requisitante: p.requisitante, areas_adicionais: p.areas_adicionais, objeto: p.objeto, tipo: p.tipo, via: p.via,
     valor: fmtNum(p.valor_estimado), classe: p.classe, ano: String(p.ano), pca_item_id: p.pca_item_id ? String(p.pca_item_id) : "", normas: p.normas, obs: p.obs,
   }));
-  const [pca, setPca] = useState<any[]>([]);
+  const [plano, setPlano] = useState<PlanoConsulta | null>(null);
   const [confirma, setConfirma] = useState(false);
-  useEffect(() => { api.get(`/pca?ano=${d.ano}`).then((r) => setPca(r.itens)).catch(() => {}); }, [d.ano]);
+  useEffect(() => { api.get<PlanoConsulta>(`/pca?ano=${d.ano}`).then(setPlano).catch(() => setPlano(null)); }, [d.ano]);
   const salvar = async (ev: FormEvent) => {
     ev.preventDefault();
     try { await api.put(`/processos/${p.id}`, paraApi(d)); await recarregar(); setAviso({ t: "Dados do processo salvos.", tipo: "ok" }); }
@@ -130,7 +131,7 @@ function Dados({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<
     <details className="panel box">
       <summary>Dados do processo</summary>
       <form className="pad stack" onSubmit={salvar}>
-        <fieldset disabled={!pode} style={{ border: 0, padding: 0, margin: 0 }}><CamposProcesso d={d} set={setD} pca={pca} /></fieldset>
+        <fieldset disabled={!pode} style={{ border: 0, padding: 0, margin: 0 }}><CamposProcesso d={d} set={setD} plano={plano} podeEditar={pode} /></fieldset>
         <p className="small muted">Mudar o tipo de objeto ou a forma de contratação altera os itens de conferência; marcações que deixarem de existir são removidas.</p>
         <div className="tools">
           {pode && <button className="btn pri">Salvar dados</button>}

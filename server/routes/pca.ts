@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { Router } from "express";
 import { z } from "zod";
 import { q, q1, auditar } from "../db.js";
@@ -5,6 +6,7 @@ import { exigeLogin, exigePapel } from "../auth.js";
 import { ErroHttp } from "../erros.js";
 import { limitesDoOrgao } from "./admin.js";
 import { processoDo } from "./processos.js";
+import { ehMunicipioIbaiti } from "../municipio-ibaiti.js";
 
 const itemPca = z.object({
   ano: z.number().int().min(2021).max(2100),
@@ -28,7 +30,7 @@ export async function resumoFracionamento(orgao: number, ano: number) {
   const procs = await q(
     `select id, protocolo, numero, objeto, classe, tipo, via, valor_estimado, situacao, pca_item_id from processos
       where orgao_id=$1 and ano=$2 and situacao <> 'cancelado'`, [orgao, ano]);
-  const itens = await q("select * from pca_itens where orgao_id=$1 and ano=$2 order by trimestre nulls last, id", [orgao, ano]);
+  const itens = await q("select * from pca_itens where orgao_id=$1 and ano=$2 order by ordem_oficial nulls last, trimestre nulls last, id", [orgao, ano]);
   const classes = new Map<string, { classe: string; inciso: "I" | "II"; planejado: number; processos: number; dispensas: number; ids: number[] }>();
   const pega = (classe: string, tipo: string) => {
     const k = norm(classe) || "(sem natureza informada)";
@@ -60,12 +62,27 @@ export function rotasPca() {
 
   r.get("/pca", async (req, res) => {
     const ano = Number(req.query.ano ?? new Date().getFullYear());
-    const d = await resumoFracionamento(req.usuario!.orgao_id, ano);
+    const orgaoId = req.usuario!.orgao_id;
+    const d = await resumoFracionamento(orgaoId, ano);
+    const orgao = ano === 2026
+      ? await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [orgaoId])
+      : undefined;
+    const documento = orgao && ehMunicipioIbaiti(orgao) ? {
+      titulo: "PCA oficial de Ibaiti — 2026",
+      url: "/api/pca/2026/documento",
+    } : null;
+    const itensComValor = d.itens.filter((i) => i.valor_estimado != null);
     res.json({
-      ano, ...d,
+      ano, ...d, documento, itens_sem_valor: d.itens.length - itensComValor.length,
       fora_do_plano: d.processos.filter((p) => !p.pca_item_id).map((p) => ({ id: p.id, protocolo: p.protocolo, numero: p.numero, objeto: p.objeto, valor_estimado: p.valor_estimado })),
-      total_planejado: d.itens.reduce((s, i) => s + (i.valor_estimado ?? 0), 0),
+      total_planejado: itensComValor.length ? itensComValor.reduce((s, i) => s + i.valor_estimado, 0) : null,
     });
+  });
+
+  r.get("/pca/2026/documento", async (req, res) => {
+    const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [req.usuario!.orgao_id]);
+    if (!orgao || !ehMunicipioIbaiti(orgao)) throw new ErroHttp(404, "PCA oficial não encontrado.");
+    res.sendFile(fileURLToPath(new URL("../documentos/pca-ibaiti-2026.pdf", import.meta.url)));
   });
 
   r.post("/pca", exigePapel("contratacao", "requisitante"), async (req, res) => {
@@ -79,14 +96,14 @@ export function rotasPca() {
   r.put("/pca/:id", exigePapel("contratacao", "requisitante"), async (req, res) => {
     const d = itemPca.parse(req.body);
     const r1 = await q(
-      `update pca_itens set ano=$1, descricao=$2, classe=$3, tipo=$4, valor_estimado=$5, trimestre=$6, requisitante=$7 where id=$8 and orgao_id=$9 returning id`,
+      `update pca_itens set ano=$1, descricao=$2, classe=$3, tipo=$4, valor_estimado=$5, trimestre=$6, requisitante=$7 where id=$8 and orgao_id=$9 and ordem_oficial is null returning id`,
       [d.ano, d.descricao, d.classe, d.tipo, d.valor_estimado, d.trimestre, d.requisitante, Number(req.params.id), req.usuario!.orgao_id]);
     if (!r1.length) throw new ErroHttp(404, "Item não encontrado.");
     await auditar({ orgao: req.usuario!.orgao_id, usuario: req.usuario!.id, acao: "pca.alterado", detalhe: { id: req.params.id } });
     res.json({ ok: true });
   });
   r.delete("/pca/:id", exigePapel("contratacao"), async (req, res) => {
-    const r1 = await q("delete from pca_itens where id=$1 and orgao_id=$2 returning id", [Number(req.params.id), req.usuario!.orgao_id]);
+    const r1 = await q("delete from pca_itens where id=$1 and orgao_id=$2 and ordem_oficial is null returning id", [Number(req.params.id), req.usuario!.orgao_id]);
     if (!r1.length) throw new ErroHttp(404, "Item não encontrado.");
     await auditar({ orgao: req.usuario!.orgao_id, usuario: req.usuario!.id, acao: "pca.removido", detalhe: { id: req.params.id } });
     res.json({ ok: true });
