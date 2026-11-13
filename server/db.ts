@@ -35,8 +35,8 @@ export async function tx<T>(fn: (c: pg.PoolClient) => Promise<T>) {
 
 export async function auditar(a: {
   orgao: number; usuario?: number | null; processo?: number | null; contrato?: number | null; acao: string; detalhe?: object;
-}) {
-  await pool.query(
+}, conexao: pg.Pool | pg.PoolClient = pool) {
+  await conexao.query(
     "insert into auditoria (orgao_id, usuario_id, processo_id, contrato_id, acao, detalhe) values ($1,$2,$3,$4,$5,$6)",
     [a.orgao, a.usuario ?? null, a.processo ?? null, a.contrato ?? null, a.acao, JSON.stringify(a.detalhe ?? {})],
   );

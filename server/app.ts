@@ -7,6 +7,7 @@ import { ZodError } from "zod";
 import { carregarUsuario } from "./auth.js";
 import { rotasAuth } from "./routes/auth.js";
 import { rotasAdmin } from "./routes/admin.js";
+import { rotasSecretarios } from "./routes/secretarios.js";
 import { rotasProcessos } from "./routes/processos.js";
 import { rotasIA } from "./routes/ia.js";
 import { rotasPca } from "./routes/pca.js";
@@ -36,6 +37,7 @@ export function criarApp() {
   api.get("/saude", (_req, res) => { res.json({ ok: true }); });
   api.use(rotasAuth());
   api.use(rotasAdmin());
+  api.use(rotasSecretarios());
   api.use(rotasProcessos());
   api.use(rotasIA());
   api.use(rotasPca());

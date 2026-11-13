@@ -11,6 +11,19 @@ create table if not exists orgaos (
   criado_em timestamptz not null default now()
 );
 
+create table if not exists secretarios (
+  id serial primary key,
+  orgao_id int not null references orgaos(id) on delete cascade,
+  codigo_portal text,
+  secretaria text not null,
+  nome text not null,
+  email text not null default '',
+  telefone text not null default '',
+  fonte text not null default '',
+  unique (orgao_id, codigo_portal)
+);
+create unique index if not exists secretarios_orgao_secretaria on secretarios(orgao_id, lower(secretaria));
+
 create table if not exists usuarios (
   id serial primary key,
   orgao_id int not null references orgaos(id) on delete cascade,

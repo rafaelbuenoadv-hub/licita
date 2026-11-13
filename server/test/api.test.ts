@@ -77,6 +77,49 @@ test("alteração sem cabeçalho da aplicação é recusada (CSRF)", async () =>
   assert.equal(r.status, 403);
 });
 
+test("cadastro de secretários importa dados oficiais apenas para Ibaiti e preserva edições", async () => {
+  const caminho = "/api/admin/secretarios";
+  const orgIbaiti = (await q1("insert into orgaos (nome, cnpj) values ('Município de Ibaiti', '77.008.068/0001-41') returning id"))!.id;
+  await usuario(orgIbaiti, "admin@ibaiti.gov.br", ["admin"]);
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const requisitante = await new Cliente().entrar("req@a.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+
+  assert.equal((await new Cliente().get(caminho)).status, 401);
+  assert.equal((await requisitante.get(caminho)).status, 403);
+  assert.equal((await outro.post(`${caminho}/importar-ibaiti`)).status, 403);
+  assert.deepEqual((await admin.get(caminho)).dados, { lista: [], pode_importar_ibaiti: true });
+
+  const importacoes = await Promise.all([
+    admin.post(`${caminho}/importar-ibaiti`),
+    admin.post(`${caminho}/importar-ibaiti`),
+  ]);
+  assert.deepEqual(importacoes.map((r) => r.status), [200, 200]);
+  assert.deepEqual(importacoes.map((r) => r.dados.inseridos).sort((a, b) => a - b), [0, 13]);
+  const { lista } = (await admin.get(caminho)).dados;
+  assert.equal(lista.length, 13);
+  const planejamento = lista.find((s: { secretaria: string }) => s.secretaria === "Planejamento e Orçamento");
+  assert.equal(planejamento.nome, "Rafael Augusto Bueno de Oliveira");
+  assert.equal(planejamento.email, "convenios@ibaiti.pr.gov.br");
+  assert.equal((await outro.put(`${caminho}/${planejamento.id}`, planejamento)).status, 404);
+
+  const agricultura = lista.find((s: { secretaria: string }) => s.secretaria.startsWith("Agricultura"));
+  assert.equal(agricultura.nome, "Fernando de Oliveira");
+  assert.equal(agricultura.telefone, "");
+  const novo = { secretaria: "Unidade de teste", nome: "Titular de teste" };
+  assert.equal((await admin.post(caminho, { ...novo, fonte: "javascript:alert(1)" })).status, 400);
+  const criado = await admin.post(caminho, novo);
+  assert.equal(criado.status, 201);
+  assert.equal((await admin.post(caminho, { ...novo, secretaria: " unidade de teste " })).status, 409);
+  assert.equal((await admin.put(`${caminho}/${criado.dados.id}`, planejamento)).status, 409);
+
+  const editado = { ...planejamento, nome: "Novo titular de teste", secretaria: "Planejamento e Orçamento Municipal" };
+  assert.equal((await admin.put(`${caminho}/${planejamento.id}`, editado)).status, 200);
+  assert.deepEqual((await admin.post(`${caminho}/importar-ibaiti`)).dados, { inseridos: 0 });
+  assert.deepEqual((await admin.get(caminho)).dados.lista.find((s: { id: number }) => s.id === planejamento.id), editado);
+  assert.deepEqual((await outro.get(caminho)).dados, { lista: [], pode_importar_ibaiti: false });
+});
+
 test("cria processo e respeita ordem das etapas e papéis", async () => {
   const req = await new Cliente().entrar("req@a.gov.br");
   const r = await req.post("/api/processos", { objeto: "Construção de gavetário com 33 unidades", tipo: "obra", via: "dispensa", ano: 2026, valor_estimado: 114969.14, classe: "Obras de construção civil", numero: "367/2026" });
