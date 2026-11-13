@@ -67,6 +67,9 @@ create table if not exists secretarios (
 );
 create unique index if not exists secretarios_orgao_secretaria on secretarios(orgao_id, lower(secretaria));
 
+alter table secretarios add column if not exists portaria text;
+alter table secretarios add column if not exists fonte_portaria text not null default '';
+
 create table if not exists usuarios (
   id serial primary key,
   orgao_id int not null references orgaos(id) on delete cascade,

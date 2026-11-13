@@ -17,3 +17,22 @@ export const secretariosIbaiti = [
   { codigo: "saude", secretaria: "Saúde", nome: "Amabily da Silva Laverde", email: "semusa@ibaiti.pr.gov.br", telefone: "(43) 3546-7481 / 7480" },
   { codigo: "trabalho-emprego", secretaria: "Trabalho e Emprego", nome: "Alexandre Sousa Nunes", email: "emprego@ibaiti.pr.gov.br", telefone: "(43) 3546-1000" },
 ].map((s) => ({ ...s, fonte: s.fonte ?? portal }));
+
+const atos: Record<string, [string, string]> = {
+  administracao: ["564/2026", "https://www.ibaiti.pr.gov.br/legislacao/detalhe/22440/pspan-stylebackground-colorrgb255255255colorrgb515151portaria-n564-2026-nomear-claudio-girolimetto-secretario-de-administracaospanp"],
+  agricultura: ["609/2026", "https://ibaiti.pr.gov.br/legislacao/detalhe/22499/pspan-stylebackground-colorrgb255255255colorrgb515151portaria-n609-2026-nomear-fernando-de-oliveira-secretario-de-agriculturaspanp/"],
+  "assistencia-social": ["237/2025", "https://www.ibaiti.pr.gov.br/legislacao/lista/2025/categoria/9/portarias/page/6"],
+  "assuntos-institucionais": ["004/2025", "https://www.ibaiti.pr.gov.br/public/admin/globalarq/diario-eletronico/diario/R2ZAw2Ac2xasT3A3.pdf"],
+  "cultura-esporte-lazer": ["469/2026", diario],
+  educacao: ["008/2025", "https://www.ibaiti.pr.gov.br/public/admin/globalarq/licitacao/arquivo/3d197a737c461df91f0597ba84f7bf95.pdf"],
+  financas: ["003/2025", "https://www.ibaiti.pr.gov.br/legislacao/detalhe/20652/pportaria-n003-2025-nomear-luis-carlos-bernardi-gelinski-secretario-de-financasp/"],
+  gestao: ["576/2026", "https://www.ibaiti.pr.gov.br/public/admin/globalarq/diario-eletronico/diario/aTcA2232ZRwAAxs3.pdf"],
+  governo: ["063/2025", "https://www.ibaiti.pr.gov.br/legislacao/detalhe/20719/pspan-stylebackground-colorrgb255255255colorrgb515151portaria-n063-nomear-elaine-de-oliveira-serial-secretaria-de-governospanp/"],
+  "planejamento-orcamento": ["353/2025", "https://www.ibaiti.pr.gov.br/public/admin/globalarq/diario-eletronico/diario/Z232T2AA3aAwxRsc.pdf"],
+  saude: ["009/2025", "https://www.ibaiti.pr.gov.br/public/admin/globalarq/licitacao/arquivo/e0c3965b713253d8dc7070fbcacb5554.pdf"],
+  "trabalho-emprego": ["007/2025", "https://www.ibaiti.pr.gov.br/admin/globalarq/diario-eletronico/diario/ZAwR3AcTA2xa223s.pdf"],
+};
+
+export const secretariosIbaitiComAtos = secretariosIbaiti.map((s) => ({
+  ...s, portaria: atos[s.codigo]?.[0] ?? null, fonte_portaria: atos[s.codigo]?.[1] ?? "",
+}));

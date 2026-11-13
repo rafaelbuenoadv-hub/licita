@@ -1,3 +1,4 @@
+import { preencherPortarias, secretariosDoProcesso, sugestoesPortaria } from "../portarias.js";
 import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
@@ -284,7 +285,8 @@ export function rotasProcessos() {
     const versoes = await q(
       `select m.versao, m.origem, m.criado_em, u.nome as autor, length(m.texto) as caracteres from minutas m left join usuarios u on u.id = m.usuario_id
         where m.processo_id=$1 and m.etapa=$2 order by m.versao desc`, [p.id, req.params.etapa]);
-    res.json({ vigente: vig ?? null, versoes });
+    const sugestoes_cadastro = vig ? sugestoesPortaria(vig.texto, await secretariosDoProcesso(p)) : [];
+    res.json({ vigente: vig ?? null, versoes, sugestoes_cadastro });
   });
   r.get("/processos/:id/minutas/:etapa/versoes/:v", async (req, res) => {
     const p = await processoDo(req);
@@ -297,7 +299,7 @@ export function rotasProcessos() {
     const e = exigeEtapaEditavel(req, p, await checksDo(p.id), String(req.params.etapa));
     if (!e.modelo) throw new ErroHttp(400, "Esta etapa não tem documento.");
     const { texto, origem } = z.object({ texto: z.string().max(400000), origem: z.enum(["manual", "ia", "importado"]).default("manual") }).parse(req.body);
-    const r1 = await salvarMinuta(p.id, e.id, texto, origem, req.usuario!.id);
+    const r1 = await salvarMinuta(p.id, e.id, preencherPortarias(texto, await secretariosDoProcesso(p)), origem, req.usuario!.id);
     if (r1.nova) await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "minuta.salva", detalhe: { etapa: e.id, versao: r1.versao, origem } });
     res.json(r1);
   });

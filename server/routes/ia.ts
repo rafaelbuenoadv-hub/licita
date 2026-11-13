@@ -1,3 +1,4 @@
+import { preencherPortarias, secretariosDoProcesso } from "../portarias.js";
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { q, q1, auditar } from "../db.js";
@@ -31,6 +32,8 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   const solicitacoes = await q<{ secretaria: string; referencia: string; descricao: string; texto_arquivo: string }>(
     "select secretaria, referencia, descricao, texto_arquivo from solicitacoes_processo where processo_id=$1 order by id", [p.id],
   );
+  const cadastro = await secretariosDoProcesso(p);
+  const { secretarios } = cadastro;
   const modelo = (await q1("select texto from modelos where orgao_id=$1 and etapa=$2", [p.orgao_id, e.id]))?.texto ?? e.modelo;
   const minutas = await q(
     `select distinct on (etapa) etapa, texto from minutas where processo_id=$1 order by etapa, versao desc`, [p.id]);
@@ -46,6 +49,10 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   l.push(`Tipo de objeto: ${TIPOS[p.tipo]}`, `Forma de contratação: ${VIAS[p.via]}`, `Valor estimado: ${moeda(p.valor_estimado)}`);
   l.push(`Exercício: ${p.ano}`, `Natureza/ramo (para fracionamento): ${p.classe || "não informada"}`);
   l.push(`Regulamentos locais do órgão: ${orgao?.normas || "não informados"}`, `Regulamentos citados neste processo: ${p.normas || "nenhum"}`);
+  if (secretarios.length) {
+    l.push("SECRETÁRIOS DAS ÁREAS REQUISITANTES — use o ato somente para a nomeação desse titular. Para atos desconhecidos ou ambíguos, use [[portaria de nomeação — nome ou secretaria]].");
+    for (const s of secretarios) l.push(`- ${s.secretaria}: ${s.nome} · ${s.portaria ? `Portaria nº ${s.portaria}` : "portaria a confirmar"}`);
+  }
   if (itemPca) {
     const referencia = itemPca.ordem_oficial ? `item ${itemPca.ordem_oficial}, página ${itemPca.pagina_oficial} — ` : "";
     l.push(`Item vinculado ao PCA ${p.ano}: ${referencia}${itemPca.descricao}`);
@@ -81,7 +88,7 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   const orcs = await q("select fornecedor, valor, nome, texto from orcamentos where processo_id=$1 order by id", [p.id]);
   if (orcs.length) l.push("", "ORÇAMENTOS ANEXADOS À SOLICITAÇÃO", ...orcs.map((o, i) => `${i + 1}. ${o.fornecedor} — ${moeda(o.valor)} — arquivo: ${o.nome}`));
   for (const o of orcs) if (o.texto) l.push("", `TEXTO DO ORÇAMENTO DE ${o.fornecedor} (${o.nome})`, corta(o.texto));
-  return { texto: l.join("\n"), etapa: e, checks: c };
+  return { texto: l.join("\n"), etapa: e, checks: c, cadastro };
 }
 
 /** Resposta em linhas JSON (NDJSON): {"d": trecho} ... {"fim": true, ...} ou {"erro": "..."} */
@@ -150,7 +157,7 @@ export function rotasIA() {
         }],
         onTexto: (t) => f.envia({ d: t }),
       });
-      const s = await salvarMinuta(p.id, ctx.etapa.id, out.texto, "ia", req.usuario!.id);
+      const s = await salvarMinuta(p.id, ctx.etapa.id, preencherPortarias(out.texto, ctx.cadastro), "ia", req.usuario!.id);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "minuta.ia", detalhe: { etapa: ctx.etapa.id, versao: s.versao, truncado: out.truncado } });
       f.fim({ fim: true, versao: s.versao, truncado: out.truncado });
     } catch (e) {
