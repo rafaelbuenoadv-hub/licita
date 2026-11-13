@@ -1,4 +1,4 @@
-import { preencherPortarias, secretariosDoProcesso, sugestoesPortaria } from "../portarias.js";
+import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesPortaria } from "../portarias.js";
 import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
@@ -55,9 +55,13 @@ export async function minutaVigente(processoId: number, etapa: string) {
     `select m.versao, m.texto, m.origem, m.criado_em, u.nome as autor from minutas m left join usuarios u on u.id = m.usuario_id
       where m.processo_id = $1 and m.etapa = $2 order by m.versao desc limit 1`, [processoId, etapa]);
 }
-export async function salvarMinuta(processoId: number, etapa: string, texto: string, origem: string, usuario: number) {
+export async function salvarMinuta(processoId: number, etapa: string, texto: string, origem: string, usuario: number, versaoEsperada?: number) {
   return tx(async (c) => {
+    await c.query("select id from processos where id=$1 for update", [processoId]);
     const ult = (await c.query("select versao, texto from minutas where processo_id=$1 and etapa=$2 order by versao desc limit 1 for update", [processoId, etapa])).rows[0];
+    if (versaoEsperada !== undefined && (ult?.versao ?? 0) !== versaoEsperada) {
+      throw new ErroHttp(409, "A minuta foi alterada. Recarregue antes de aplicar.");
+    }
     if (ult && ult.texto === texto) return { versao: ult.versao as number, nova: false };
     const versao = (ult?.versao ?? 0) + 1;
     await c.query("insert into minutas (processo_id, etapa, versao, texto, origem, usuario_id) values ($1,$2,$3,$4,$5,$6)", [processoId, etapa, versao, texto, origem, usuario]);
@@ -285,8 +289,17 @@ export function rotasProcessos() {
     const versoes = await q(
       `select m.versao, m.origem, m.criado_em, u.nome as autor, length(m.texto) as caracteres from minutas m left join usuarios u on u.id = m.usuario_id
         where m.processo_id=$1 and m.etapa=$2 order by m.versao desc`, [p.id, req.params.etapa]);
-    const sugestoes_cadastro = vig ? sugestoesPortaria(vig.texto, await secretariosDoProcesso(p)) : [];
-    res.json({ vigente: vig ?? null, versoes, sugestoes_cadastro });
+    const dfd = req.params.etapa === "dfd";
+    const cadastro = dfd || vig ? await secretariosDoProcesso(p) : undefined;
+    const sugestoes_cadastro = vig && cadastro ? sugestoesPortaria(vig.texto, cadastro) : [];
+    const texto = vig?.texto ?? "";
+    const titulares_dfd = dfd && cadastro ? {
+      pode_inserir: inserirTitularesDfd(texto, cadastro) !== texto,
+      areas_sem_cadastro: cadastro.areasSemCadastro,
+      areas_sem_portaria: cadastro.secretarios.filter((s) => !s.portaria).map((s) => s.secretaria),
+      total: cadastro.secretarios.length,
+    } : null;
+    res.json({ vigente: vig ?? null, versoes, sugestoes_cadastro, titulares_dfd });
   });
   r.get("/processos/:id/minutas/:etapa/versoes/:v", async (req, res) => {
     const p = await processoDo(req);
@@ -303,6 +316,19 @@ export function rotasProcessos() {
     if (r1.nova) await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "minuta.salva", detalhe: { etapa: e.id, versao: r1.versao, origem } });
     res.json(r1);
   });
+  r.post("/processos/:id/minutas/dfd/titulares", async (req, res) => {
+    const p = await processoDo(req);
+    exigeEtapaEditavel(req, p, await checksDo(p.id), "dfd");
+    const { versao } = z.object({ versao: z.number().int().nonnegative() }).parse(req.body);
+    const vig = await minutaVigente(p.id, "dfd");
+    if ((vig?.versao ?? 0) !== versao) throw new ErroHttp(409, "A minuta foi alterada. Recarregue antes de aplicar.");
+    const cadastro = await secretariosDoProcesso(p);
+    if (!cadastro.secretarios.length) throw new ErroHttp(400, "Nenhuma área requisitante tem titular identificado no cadastro.");
+    const texto = inserirTitularesDfd(preencherPortarias(vig?.texto ?? "", cadastro), cadastro);
+    const resultado = await salvarMinuta(p.id, "dfd", texto, "pendencias", req.usuario!.id, versao);
+    if (resultado.nova) await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "minuta.titulares", detalhe: { versao: resultado.versao } });
+    res.json(resultado);
+  });
   r.post("/processos/:id/minutas/:etapa/pendencias", async (req, res) => {
     const p = await processoDo(req);
     const e = exigeEtapaEditavel(req, p, await checksDo(p.id), String(req.params.etapa));
@@ -312,7 +338,7 @@ export function rotasProcessos() {
     if (vig.versao !== versao) throw new ErroHttp(409, "A minuta foi alterada por outra pessoa. Recarregue antes de aplicar.");
     const { texto, aplicados } = aplicarPendencias(vig.texto, valores);
     if (!aplicados) throw new ErroHttp(400, "Preencha ao menos um campo antes de aplicar.");
-    const r1 = await salvarMinuta(p.id, e.id, texto, "pendencias", req.usuario!.id);
+    const r1 = await salvarMinuta(p.id, e.id, texto, "pendencias", req.usuario!.id, versao);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "minuta.pendencias", detalhe: { etapa: e.id, versao: r1.versao, aplicados } });
     res.json({ ...r1, aplicados });
   });

@@ -11,6 +11,7 @@ const ACOES: Record<string, string> = {
   "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação", "processo.numerado": "gerou o nº do processo e do procedimento",
   "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA",
   "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
+  "minuta.titulares": "incluiu os titulares no DFD",
   "solicitacao.incluida": "adicionou solicitação de secretaria",
   "ia.sugestoes": "pediu sugestões à IA", "contrato.criado": "registrou contrato",
 };
@@ -274,7 +275,7 @@ function Fracionamento({ id }: { id: number }) {
 function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolean; setAviso: (a: any) => void }) {
   const [timbrado, setTimbrado] = useState("");
   const { ia } = useEu();
-  const [m, setM] = useState<{ vigente: any; versoes: any[] } | null>(null);
+  const [m, setM] = useState<{ vigente: any; versoes: any[]; titulares_dfd: { pode_inserir: boolean; total: number; areas_sem_cadastro: string[]; areas_sem_portaria: string[] } | null } | null>(null);
   const [modo, setModo] = useState<"ver" | "editar">("ver");
   const [rascunho, setRascunho] = useState("");
   const [vendo, setVendo] = useState<any>(null); // versão antiga em exibição
@@ -286,13 +287,15 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
   const [sug, setSug] = useState<Record<string, any>>({});
   const ctl = useRef<AbortController | null>(null);
 
+  const areasDfd = e.id === "dfd" ? JSON.stringify([p.requisitante, p.areas_adicionais, p.solicitacoes?.map((s: { secretaria: string }) => s.secretaria)]) : "";
+
   const carregar = useCallback(async () => {
     const r = await api.get(`/processos/${p.id}/minutas/${e.id}`);
     const cadastro = r.sugestoes_cadastro as { i: number; valor: string; fonte: string }[];
     setM(r); setRascunho(r.vigente?.texto ?? ""); setVendo(null);
     setVals(Object.fromEntries(cadastro.map((x) => [x.i, x.valor])));
     setSug(Object.fromEntries(cadastro.map((x) => [x.i, { ...x, cadastro: true }])));
-  }, [p.id, e.id]);
+  }, [p.id, e.id, areasDfd]);
   useEffect(() => { carregar(); return () => ctl.current?.abort(); }, [carregar]);
   if (!m) return <div className="sec"><p className="muted">Carregando minuta…</p></div>;
 
@@ -333,6 +336,16 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
     catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
     finally { setBusy(""); }
   };
+  const inserirTitulares = async () => {
+    setBusy("aplicar");
+    try {
+      const r = await api.post(`/processos/${p.id}/minutas/dfd/titulares`, { versao: m.vigente?.versao ?? 0 });
+      await carregar();
+      setAviso({ t: r.nova ? "Titulares e portarias inseridos no DFD. Revise o documento antes de usar." : "Os titulares já constam nesta versão.", tipo: "ok" });
+    } catch (erro) {
+      setAviso({ t: erro instanceof Error ? erro.message : "Não foi possível incluir os titulares.", tipo: "bad" });
+    } finally { setBusy(""); }
+  };
   const verVersao = async (v: string) => {
     if (!v || Number(v) === m.vigente?.versao) return setVendo(null);
     setVendo(await api.get(`/processos/${p.id}/minutas/${e.id}/versoes/${v}`));
@@ -366,6 +379,14 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
               {m.versoes.map((v: any) => <option key={v.versao} value={v.versao}>{v.versao} · {dataBR(v.criado_em)}</option>)}</select></label>}
         </>}
       </div>
+      {m.titulares_dfd && !vendo && modo === "ver" && busy !== "redigir" && <div className="stack">
+        {editavel && m.titulares_dfd.pode_inserir && <div>
+          <button className="btn" disabled={busy !== ""} onClick={inserirTitulares}>Inserir titulares e portarias</button>
+        </div>}
+        {!m.titulares_dfd.total && !m.titulares_dfd.areas_sem_cadastro.length && <p className="small muted">Informe a área requisitante nos dados do processo.</p>}
+        {m.titulares_dfd.areas_sem_cadastro.length > 0 && <p className="small muted">Confira o cadastro de secretários para {m.titulares_dfd.areas_sem_cadastro.join(", ")}.</p>}
+        {m.titulares_dfd.areas_sem_portaria.length > 0 && <p className="small muted">Portaria pendente no cadastro de {m.titulares_dfd.areas_sem_portaria.join(", ")}.</p>}
+      </div>}
       {confirma && <label className="campo">Orientação para a IA (opcional)<input id="orient" value={orient} onChange={(ev) => setOrient(ev.target.value)} placeholder="ex.: incluir quadro de alternativas com pré-moldado" /></label>}
       {vendo && <p className="note">Você está vendo a versão {vendo.versao}. {editavel && <button className="lnk" onClick={() => salvar(vendo.texto, "Versão restaurada")}>Restaurar como versão atual</button>}</p>}
       {modo === "editar" && busy !== "redigir" ? <>

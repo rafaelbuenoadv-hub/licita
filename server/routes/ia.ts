@@ -1,4 +1,4 @@
-import { preencherPortarias, secretariosDoProcesso } from "../portarias.js";
+import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso } from "../portarias.js";
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { q, q1, auditar } from "../db.js";
@@ -160,7 +160,9 @@ export function rotasIA() {
         }],
         onTexto: (t) => f.envia({ d: t }),
       });
-      const s = await salvarMinuta(p.id, ctx.etapa.id, preencherPortarias(out.texto, ctx.cadastro), "ia", req.usuario!.id);
+      const texto = preencherPortarias(out.texto, ctx.cadastro);
+      const minuta = ctx.etapa.id === "dfd" ? inserirTitularesDfd(texto, ctx.cadastro) : texto;
+      const s = await salvarMinuta(p.id, ctx.etapa.id, minuta, "ia", req.usuario!.id);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "minuta.ia", detalhe: { etapa: ctx.etapa.id, versao: s.versao, truncado: out.truncado } });
       f.fim({ fim: true, versao: s.versao, truncado: out.truncado });
     } catch (e) {
