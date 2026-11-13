@@ -35,10 +35,11 @@ export function Pca() {
         <label className="campo" style={{ width: 120 }}>Exercício<select id="pca-ano" value={ano} onChange={(e) => setAno(Number(e.target.value))}>
           {[1, 0, -1, -2].map((k) => { const a = new Date().getFullYear() + k; return <option key={a}>{a}</option>; })}</select></label></div>
       {!d ? <p className="muted">Carregando plano…</p> : <>
+        {d.documento && <p><a className="btn" href={d.documento.url} target="_blank" rel="noreferrer">Abrir PCA completo (PDF)</a></p>}
         <div className="kpis">
-          <div className="panel kpi"><span className="lbl">Total planejado</span><b>{brl(d.total_planejado)}</b></div>
+          <div className="panel kpi"><span className="lbl">Total planejado</span><b>{brl(d.total_planejado)}</b>{d.itens_sem_valor > 0 && <small>{d.itens_sem_valor} itens sem valor informado</small>}</div>
           <div className="panel kpi"><span className="lbl">Itens no plano</span><b>{d.itens.length}</b></div>
-          <div className="panel kpi"><span className="lbl">Processos fora do plano</span><b>{d.fora_do_plano.length}</b></div>
+          <div className="panel kpi"><span className="lbl">Processos sem vínculo no PCA</span><b>{d.fora_do_plano.length}</b></div>
           <div className="panel kpi"><span className="lbl">Limites de dispensa {ano}</span>
             <span className="small">{["I", "II"].map((i) => { const l = d.limites.find((x: any) => x.inciso === i); return <div key={i}>Inciso {i}: {l ? brl(l.valor) : "não cadastrado"}</div>; })}</span></div>
         </div>
@@ -57,10 +58,10 @@ export function Pca() {
           <div className="pad-s"><h2>Itens do plano</h2></div>
           {d.itens.length === 0 ? <p className="pad-s muted">Nenhum item cadastrado para {ano}. Use o formulário abaixo para incluir as demandas do exercício.</p> :
             <div className="tw"><table className="t">
-              <thead><tr><th>Descrição</th><th>Natureza</th><th>Tipo</th><th>Trim.</th><th>Área</th><th className="r">Valor</th><th /></tr></thead>
+              <thead><tr><th>Descrição</th><th>Natureza</th><th>Tipo</th><th>Período</th><th>Área</th><th className="r">Valor</th><th /></tr></thead>
               <tbody>{d.itens.map((i: any) => (
-                <tr key={i.id}><td>{i.descricao}</td><td className="small">{i.classe}</td><td className="small">{TIPOS[i.tipo as keyof typeof TIPOS]}</td><td>{i.trimestre ?? "—"}</td><td className="small">{i.requisitante}</td><td className="r">{brl(i.valor_estimado)}</td>
-                  <td className="r">{pode && <><button className="lnk" onClick={() => setF({ id: i.id, descricao: i.descricao, classe: i.classe, tipo: i.tipo, valor: fmtNum(i.valor_estimado), trimestre: i.trimestre ? String(i.trimestre) : "", requisitante: i.requisitante })}>Editar</button>{tem(eu, "contratacao") && <> · <button className="lnk" onClick={() => remover(i.id)}>Remover</button></>}</>}</td></tr>))}</tbody>
+                <tr key={i.id}><td>{i.ordem_oficial ? `Item ${i.ordem_oficial} · ` : ""}{i.descricao}</td><td className="small">{i.classe}</td><td className="small">{i.tipo_oficial ?? TIPOS[i.tipo as keyof typeof TIPOS]}</td><td>{i.periodo_oficial ?? i.trimestre ?? "—"}</td><td className="small">{i.requisitante}</td><td className="r">{brl(i.valor_estimado)}</td>
+                  <td className="r">{pode && !i.ordem_oficial && <><button className="lnk" onClick={() => setF({ id: i.id, descricao: i.descricao, classe: i.classe, tipo: i.tipo, valor: fmtNum(i.valor_estimado), trimestre: i.trimestre ? String(i.trimestre) : "", requisitante: i.requisitante })}>Editar</button>{tem(eu, "contratacao") && <> · <button className="lnk" onClick={() => remover(i.id)}>Remover</button></>}</>}</td></tr>))}</tbody>
             </table></div>}
           {pode && <form className="pad stack" onSubmit={salvar} style={{ borderTop: "1px solid var(--line)" }}>
             <h3>{f.id ? "Editar item" : "Incluir item"}</h3>
