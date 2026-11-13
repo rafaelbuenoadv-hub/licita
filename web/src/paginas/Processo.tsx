@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, brl, dataBR, dataHora, fluxo, fmtNum } from "../api";
+import { api, brl, dataBR, dataHora, fluxo, fmtNum, numBR } from "../api";
 import { Folha } from "../comp/Folha";
 import { ETAPAS, TIPOS, VIAS, feita, feitos, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../../shared/etapas";
 import { tem, useEu } from "../main";
 import { CamposProcesso, paraApi, type DadosProc } from "./NovoProcesso";
 
 const ACOES: Record<string, string> = {
-  "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação",
+  "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação", "processo.numerado": "gerou o nº do processo e do procedimento",
   "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA",
-  "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "anexo.removido": "removeu documento",
+  "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "anexo.removido": "removeu documento",
   "ia.sugestoes": "pediu sugestões à IA", "contrato.criado": "registrou contrato",
 };
 
@@ -37,7 +37,7 @@ export function ProcessoPg() {
     <>
       <div className="row">
         <div className="stack" style={{ gap: 2 }}>
-          <span className="lbl mono">{[p.numero && `PA ${p.numero}`, p.procedimento].filter(Boolean).join(" · ") || "Processo"}</span>
+          <span className="lbl mono">{[`Protocolo ${p.protocolo}`, p.numero && `PA ${p.numero}`, p.procedimento].filter(Boolean).join(" · ")}</span>
           <h1>{p.objeto}</h1>
           <span className="small muted">{[TIPOS[p.tipo as keyof typeof TIPOS], VIAS[p.via as keyof typeof VIAS], brl(p.valor_estimado), `Exercício ${p.ano}`].join(" · ")}</span>
         </div>
@@ -48,6 +48,7 @@ export function ProcessoPg() {
       </div>
       {aviso && <p className={"note " + (aviso.tipo ?? "")}>{aviso.t} <button className="lnk" onClick={() => setAviso(null)}>Fechar</button></p>}
       <Dados p={p} recarregar={carregar} setAviso={setAviso} />
+      <Numeracao key={`n${p.numero}|${p.procedimento}`} p={p} recarregar={carregar} setAviso={setAviso} />
 
       <div className="mesa">
         <nav className="panel trilha" aria-label="Etapas">
@@ -66,8 +67,40 @@ export function ProcessoPg() {
       </div>
 
       <Anexos p={p} recarregar={carregar} podeIncluir={tem(eu, "requisitante", "contratacao", "juridico")} />
-      <Historico id={p.id} versao={p.checagens.length + (p.minutas?.length ?? 0)} />
+      <Historico id={p.id} versao={p.checagens.length + (p.minutas?.length ?? 0) + (p.orcamentos?.length ?? 0)} />
     </>
+  );
+}
+
+/* ---------- numeração final ---------- */
+function Numeracao({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void }) {
+  const tem = Boolean(p.numero || p.procedimento);
+  const [f, setF] = useState({ numero: p.numeracao.sugestao.numero as string, procedimento: p.numeracao.sugestao.procedimento as string });
+  const [busy, setBusy] = useState(false);
+  const pode = p.pode.numerar && p.numeracao.liberada && p.situacao !== "cancelado";
+  const gravar = async (ev: FormEvent) => {
+    ev.preventDefault(); setBusy(true);
+    try { await api.post(`/processos/${p.id}/numeracao`, f); await recarregar(); setAviso({ t: "Nº do processo e do procedimento gravados.", tipo: "ok" }); }
+    catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <details className="panel box" open={p.numeracao.liberada && !tem}>
+      <summary>Nº do processo e do procedimento{tem ? "" : " (gerados por último)"}</summary>
+      <form className="pad stack" onSubmit={gravar}>
+        <p className="small muted">
+          {!p.numeracao.liberada ? `Até o fim da preparação o processo é identificado só pelo protocolo ${p.protocolo}. A numeração é liberada quando a trilha chega à etapa de autorização e publicação.`
+            : tem ? "Numeração gravada. Quem atua em contratações pode corrigir, se necessário."
+            : "A trilha chegou à última etapa. O sistema sugere os próximos números do exercício; confira com a numeração oficial do órgão e ajuste antes de gravar."}
+        </p>
+        {(p.numeracao.liberada || tem) && <fieldset disabled={!pode} style={{ border: 0, padding: 0, margin: 0 }}><div className="form">
+          <label>Processo administrativo nº<input id="n-numero" value={f.numero} onChange={(e) => setF({ ...f, numero: e.target.value })} required maxLength={60} /></label>
+          <label>Procedimento e nº<input id="n-procedimento" value={f.procedimento} onChange={(e) => setF({ ...f, procedimento: e.target.value })} required maxLength={120} /></label>
+        </div></fieldset>}
+        {pode && <div><button className="btn pri" disabled={busy}>{busy ? "Gravando…" : tem ? "Corrigir numeração" : "Gerar numeração"}</button></div>}
+        {p.numeracao.liberada && !p.pode.numerar && !tem && <p className="small muted">A numeração é gravada pelo setor de contratações ou pela autoridade competente.</p>}
+      </form>
+    </details>
   );
 }
 
@@ -75,7 +108,7 @@ export function ProcessoPg() {
 function Dados({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void }) {
   const { eu } = useEu();
   const [d, setD] = useState<DadosProc>(() => ({
-    numero: p.numero, procedimento: p.procedimento, requisitante: p.requisitante, objeto: p.objeto, tipo: p.tipo, via: p.via,
+    requisitante: p.requisitante, objeto: p.objeto, tipo: p.tipo, via: p.via,
     valor: fmtNum(p.valor_estimado), classe: p.classe, ano: String(p.ano), pca_item_id: p.pca_item_id ? String(p.pca_item_id) : "", normas: p.normas, obs: p.obs,
   }));
   const [pca, setPca] = useState<any[]>([]);
@@ -146,6 +179,7 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
             </li>);
         })}</ul>
       </div>
+      {(e.id === "dfd" || e.id === "precos") && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} />}
       {e.id === "precos" && p.via === "dispensa" && <Fracionamento id={p.id} />}
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>
         <ul className="aten">{e.atencao.map((a: string) => <li key={a}>{a}</li>)}</ul></div>
@@ -156,6 +190,57 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
           : <span className={"pill " + (ok ? "ok" : "")}>{ok ? "Fase preparatória concluída" : "Última etapa"}</span>}
       </div>
     </section>
+  );
+}
+
+/* Orçamentos recebidos: ficam na Solicitação e reaparecem na etapa de orçamento estimado. */
+function Orcamentos({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void }) {
+  const { eu } = useEu();
+  const pode = tem(eu, "requisitante", "contratacao") && p.situacao !== "cancelado";
+  const [f, setF] = useState({ fornecedor: "", valor: "" });
+  const [arq, setArq] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const lista: any[] = p.orcamentos ?? [];
+  const comValor = lista.filter((o) => o.valor != null);
+  const enviar = async (ev: FormEvent) => {
+    ev.preventDefault();
+    const v = numBR(f.valor);
+    if (Number.isNaN(v)) return setAviso({ t: "Valor do orçamento inválido. Use, por exemplo, 12.500,00.", tipo: "bad" });
+    if (!arq) return setAviso({ t: "Escolha o arquivo do orçamento.", tipo: "bad" });
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("fornecedor", f.fornecedor); fd.append("valor", v == null ? "" : String(v)); fd.append("arquivo", arq);
+      await api.post(`/processos/${p.id}/orcamentos`, fd);
+      setF({ fornecedor: "", valor: "" }); setArq(null);
+      await recarregar(); setAviso({ t: `Orçamento de ${f.fornecedor} anexado.`, tipo: "ok" });
+    } catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
+    finally { setBusy(false); }
+  };
+  const remover = async (o: any) => {
+    try { await api.del(`/processos/${p.id}/orcamentos/${o.id}`); await recarregar(); }
+    catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
+  };
+  return (
+    <div className="sec"><span className="lbl">Orçamentos</span>
+      <p className="small muted">Anexe aqui os orçamentos recebidos dos fornecedores (PDF, Word, planilha ou foto). Eles ficam guardados no processo e a IA consulta os que têm texto legível.</p>
+      {lista.length === 0 ? <p className="muted">Nenhum orçamento anexado.</p> :
+        <div className="tw"><table className="t">
+          <thead><tr><th>Fornecedor</th><th className="r">Valor</th><th>Arquivo</th><th /></tr></thead>
+          <tbody>{lista.map((o) => (
+            <tr key={o.id}><td>{o.fornecedor}</td><td className="r">{brl(o.valor)}</td>
+              <td><a href={`/api/processos/${p.id}/orcamentos/${o.id}/arquivo`} download>{o.nome}</a>
+                <div className="small muted">{o.usuario ?? "—"} · {dataHora(o.criado_em)}</div></td>
+              <td className="r">{pode && <button className="lnk" onClick={() => remover(o)}>Remover</button>}</td></tr>))}</tbody>
+        </table></div>}
+      {comValor.length > 1 && <p className="small muted">{comValor.length} orçamentos com valor · menor: {brl(Math.min(...comValor.map((o) => o.valor)))} · média: {brl(comValor.reduce((s, o) => s + o.valor, 0) / comValor.length)}</p>}
+      {pode && <form className="form" onSubmit={enviar}>
+        <label>Fornecedor<input id="o-fornecedor" value={f.fornecedor} onChange={(e) => setF({ ...f, fornecedor: e.target.value })} required minLength={2} maxLength={200} /></label>
+        <label>Valor do orçamento (R$)<input id="o-valor" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} inputMode="decimal" placeholder="0,00" /></label>
+        <label>Arquivo<input id="o-arquivo" type="file" accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv" onChange={(e) => setArq(e.target.files?.[0] ?? null)} key={lista.length} /></label>
+        <div style={{ alignSelf: "end" }}><button className="btn pri" disabled={busy}>{busy ? "Enviando…" : "Anexar orçamento"}</button></div>
+      </form>}
+    </div>
   );
 }
 
@@ -170,7 +255,7 @@ function Fracionamento({ id }: { id: number }) {
         {c.limite != null ? <> · limite do inciso {c.inciso}: <b className="num">{brl(c.limite)}</b> <span className="small muted">({c.limite_fonte})</span></> : <> · limite do inciso {c.inciso} não cadastrado para o exercício</>}</p>
       {c.alerta === "excede" && <p className="note bad">O somatório passa do limite: há risco de fracionamento. Reavalie a forma de contratação.</p>}
       {c.alerta === "planejado_excede" && <p className="note">O planejado no PCA para esta natureza passa do limite. Justifique por que esta contratação não fraciona a despesa.</p>}
-      {d.outros.length > 0 && <p className="small muted">Outras dispensas da mesma natureza: {d.outros.map((o: any) => `${o.numero || "s/nº"} (${brl(o.valor_estimado)})`).join("; ")}.</p>}
+      {d.outros.length > 0 && <p className="small muted">Outras dispensas da mesma natureza: {d.outros.map((o: any) => `${o.numero ? `PA ${o.numero}` : o.protocolo} (${brl(o.valor_estimado)})`).join("; ")}.</p>}
     </div>
   );
 }

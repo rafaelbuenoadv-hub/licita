@@ -80,7 +80,7 @@ export function Pca() {
         {d.fora_do_plano.length > 0 && <section className="panel">
           <div className="pad-s"><h2>Processos sem item do plano</h2><p className="small muted">Precisam de justificativa no DFD e no ETP (art. 18, § 1º, II).</p></div>
           <div className="tw"><table className="t"><tbody>{d.fora_do_plano.map((x: any) => (
-            <tr key={x.id}><td className="mono">{x.numero || "—"}</td><td><Link to={`/processos/${x.id}`}>{x.objeto}</Link></td><td className="r">{brl(x.valor_estimado)}</td></tr>))}</tbody></table></div>
+            <tr key={x.id}><td className="mono">{x.protocolo}</td><td><Link to={`/processos/${x.id}`}>{x.objeto}</Link></td><td className="r">{brl(x.valor_estimado)}</td></tr>))}</tbody></table></div>
         </section>}
       </>}
     </>

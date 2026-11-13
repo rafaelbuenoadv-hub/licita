@@ -17,7 +17,7 @@ export function CamposContrato({ f, set, processos }: { f: typeof vazioContrato;
       {processos && <label className="wide">Processo de origem<select {...c("processo_id")} onChange={(e) => {
         const p = processos.find((x) => String(x.id) === e.target.value);
         set({ ...f, processo_id: e.target.value, objeto: f.objeto || p?.objeto || "", tipo_objeto: p?.tipo === "obra" ? "obra" : p?.tipo === "bens" ? "compra" : f.tipo_objeto });
-      }}><option value="">Sem processo vinculado</option>{processos.map((p) => <option key={p.id} value={p.id}>{p.numero ? `PA ${p.numero} · ` : ""}{p.objeto.slice(0, 90)}</option>)}</select></label>}
+      }}><option value="">Sem processo vinculado</option>{processos.map((p) => <option key={p.id} value={p.id}>{p.protocolo} · {p.numero ? `PA ${p.numero} · ` : ""}{p.objeto.slice(0, 90)}</option>)}</select></label>}
       <label>Número do contrato<input {...c("numero")} required /></label>
       <label>Tipo de objeto<select {...c("tipo_objeto")}>{Object.entries(TIPO_OBJ).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
       <label>Contratada<input {...c("contratada")} required /></label>

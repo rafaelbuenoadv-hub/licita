@@ -99,7 +99,7 @@ export function rotasContratos() {
   r.get("/contratos/:id", async (req, res) => {
     const c = await contratoDo(req);
     const extra = await completo(c.id);
-    const processo = c.processo_id ? await q1("select id, numero, procedimento, objeto from processos where id=$1", [c.processo_id]) : null;
+    const processo = c.processo_id ? await q1("select id, protocolo, numero, procedimento, objeto from processos where id=$1", [c.processo_id]) : null;
     res.json({ ...c, ...extra, processo, ...calcular(c, extra.aditivos, extra.medicoes) });
   });
 

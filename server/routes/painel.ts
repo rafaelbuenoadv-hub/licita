@@ -11,7 +11,7 @@ export function rotasPainel() {
     const orgao = req.usuario!.orgao_id;
     const ano = new Date().getFullYear();
     const procs = await q(
-      `select p.id, p.numero, p.objeto, p.tipo, p.via, p.situacao, p.atualizado_em,
+      `select p.id, p.protocolo, p.numero, p.objeto, p.tipo, p.via, p.situacao, p.atualizado_em,
               coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
          from processos p where p.orgao_id=$1 and p.situacao = 'preparacao' order by p.atualizado_em`, [orgao]);
     const emPreparo = procs.map(({ itens, ...p }) => {

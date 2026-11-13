@@ -82,6 +82,12 @@ test("cria processo e respeita ordem das etapas e papéis", async () => {
   const r = await req.post("/api/processos", { objeto: "Construção de gavetário com 33 unidades", tipo: "obra", via: "dispensa", ano: 2026, valor_estimado: 114969.14, classe: "Obras de construção civil", numero: "367/2026" });
   assert.equal(r.status, 201, JSON.stringify(r.dados));
   procId = r.dados.id;
+  // O processo nasce só com o protocolo; número enviado na abertura é ignorado.
+  assert.equal(r.dados.protocolo, "2026/0001");
+  const novo = await req.get(`/api/processos/${procId}`);
+  assert.equal(novo.dados.numero, "");
+  assert.equal(novo.dados.procedimento, "");
+  assert.equal(novo.dados.numeracao.liberada, false);
 
   // Item do ETP antes de concluir a solicitação: bloqueado.
   assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: "e1", marcado: true })).status, 409);
@@ -198,4 +204,137 @@ test("admin gerencia usuários e limites do próprio órgão", async () => {
   const b = await new Cliente().entrar("admin@b.gov.br");
   const limB = (await b.get("/api/limites")).dados;
   assert.ok(!limB.some((l: any) => l.inciso === "II"), "limite do órgão A não pode aparecer para o órgão B");
+});
+
+test("protocolo sequencial por órgão; nº do processo e do procedimento só na última etapa", async () => {
+  const adm = await new Cliente().entrar("admin@a.gov.br");
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const b = await new Cliente().entrar("admin@b.gov.br");
+  const base = { objeto: "Aquisição de material de expediente", tipo: "bens", via: "dispensa", ano: 2026, classe: "Material de expediente" };
+  // Aberturas simultâneas não repetem protocolo.
+  const rs = await Promise.all([1, 2, 3].map(() => lic.post("/api/processos", base)));
+  const protos = rs.map((r) => r.dados.protocolo).sort();
+  assert.deepEqual(protos, ["2026/0003", "2026/0004", "2026/0005"]);
+  const id = rs[0].dados.id;
+  // Outro órgão começa a própria sequência; outro exercício também.
+  assert.equal((await b.post("/api/processos", base)).dados.protocolo, "2026/0001");
+  assert.equal((await lic.post("/api/processos", { ...base, ano: 2027 })).dados.protocolo, "2027/0001");
+  assert.ok((await lic.get("/api/processos?ano=2026")).dados.every((p: any) => /^2026\/\d{4}$/.test(p.protocolo)));
+
+  // Antes da última etapa a numeração é recusada; alterar os dados não grava número.
+  const num = { numero: "500/2026", procedimento: "Dispensa nº 43/2026" };
+  assert.equal((await lic.post(`/api/processos/${id}/numeracao`, num)).status, 409);
+  assert.equal((await lic.put(`/api/processos/${id}`, { ...base, numero: "999/2026", procedimento: "X" })).status, 200);
+  assert.equal((await lic.get(`/api/processos/${id}`)).dados.numero, "");
+
+  // Conclui todas as etapas menos a última.
+  const pb = { tipo: "bens", via: "dispensa" } as const;
+  for (const e of ETAPAS.slice(0, -1)) for (const i of itensDe(e, pb)) {
+    assert.equal((await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true })).status, 200, i.id);
+  }
+  const det = await lic.get(`/api/processos/${id}`);
+  assert.equal(det.dados.etapa_atual, ETAPAS.length - 1);
+  assert.equal(det.dados.numeracao.liberada, true);
+  assert.deepEqual(det.dados.numeracao.sugestao, { numero: "1/2026", procedimento: "Dispensa nº 1/2026" });
+  // Só contratações ou autoridade gravam; o número pode ser ajustado ao oficial.
+  assert.equal((await req.post(`/api/processos/${id}/numeracao`, num)).status, 403);
+  assert.equal((await b.post(`/api/processos/${id}/numeracao`, num)).status, 404);
+  assert.equal((await lic.post(`/api/processos/${id}/numeracao`, num)).status, 200);
+  const dep = await lic.get(`/api/processos/${id}`);
+  assert.equal(dep.dados.numero, "500/2026");
+  assert.equal(dep.dados.procedimento, "Dispensa nº 43/2026");
+  assert.equal(dep.dados.protocolo, "2026/0003");
+  // A sugestão do processo seguinte continua a partir do maior número usado.
+  const outro = await lic.get(`/api/processos/${rs[1].dados.id}`);
+  assert.deepEqual(outro.dados.numeracao.sugestao, { numero: "501/2026", procedimento: "Dispensa nº 44/2026" });
+});
+
+test("migração dá protocolo a processos antigos sem repetir", async () => {
+  const o = (await q1("insert into orgaos (nome) values ('Município C') returning id"))!.id;
+  for (const ob of ["Antigo 1", "Antigo 2"]) await q1("insert into processos (orgao_id, objeto, tipo, via, ano) values ($1,$2,'bens','dispensa',2025)", [o, ob]);
+  await migrar();
+  await migrar();
+  const rows = (await pool.query("select protocolo from processos where orgao_id=$1 order by id", [o])).rows.map((r) => r.protocolo);
+  assert.deepEqual(rows, ["2025/0001", "2025/0002"]);
+  await usuario(o, "lic@c.gov.br", ["contratacao"]);
+  const lic = await new Cliente().entrar("lic@c.gov.br");
+  assert.equal((await lic.post("/api/processos", { objeto: "Novo no órgão C", tipo: "bens", via: "dispensa", ano: 2025 })).dados.protocolo, "2025/0003");
+});
+
+test("orçamentos da solicitação: anexa, baixa o arquivo original e remove", async () => {
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const jur = await new Cliente().entrar("jur@a.gov.br");
+  const b = await new Cliente().entrar("admin@b.gov.br");
+  const form = (nome: string, conteudo: string | Buffer, campos: Record<string, string>) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(campos)) fd.append(k, v);
+    fd.append("arquivo", new Blob([conteudo]), nome);
+    return fd;
+  };
+  const url = `/api/processos/${procId}/orcamentos`;
+  const r1 = await req.req("POST", url, form("orçamento construtora.txt", "Proposta: R$ 110.000,00", { fornecedor: "Construtora X", valor: "110000" }));
+  assert.equal(r1.status, 201, JSON.stringify(r1.dados));
+  assert.equal(r1.dados.lido, true);
+  // Foto do orçamento: guarda o arquivo mesmo sem texto; valor é opcional.
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const r2 = await req.req("POST", url, form("foto.png", png, { fornecedor: "Empreiteira Y", valor: "" }));
+  assert.equal(r2.status, 201, JSON.stringify(r2.dados));
+  assert.equal(r2.dados.lido, false);
+  assert.equal((await req.req("POST", url, form("virus.exe", "x", { fornecedor: "Z", valor: "1" }))).status, 415);
+  assert.equal((await req.req("POST", url, form("a.txt", "x", { fornecedor: "", valor: "1" }))).status, 400);
+  assert.equal((await jur.req("POST", url, form("a.txt", "x", { fornecedor: "Outra", valor: "1" }))).status, 403);
+  assert.equal((await b.req("POST", url, form("a.txt", "x", { fornecedor: "Outra", valor: "1" }))).status, 404);
+
+  const det = await jur.get(`/api/processos/${procId}`);
+  assert.deepEqual(det.dados.orcamentos.map((o: any) => [o.fornecedor, o.valor, o.nome, o.lido]), [["Construtora X", 110000, "orçamento construtora.txt", true], ["Empreiteira Y", null, "foto.png", false]]);
+  const arq = await jur.get(`${url}/${r2.dados.id}/arquivo`);
+  assert.equal(arq.status, 200);
+  assert.equal(arq.tipo, "image/png");
+  assert.deepEqual(arq.dados, png);
+  assert.equal((await b.get(`${url}/${r2.dados.id}/arquivo`)).status, 404);
+  assert.equal((await jur.req("DELETE", `${url}/${r2.dados.id}`)).status, 403);
+  assert.equal((await req.req("DELETE", `${url}/${r2.dados.id}`)).status, 200);
+  assert.equal((await req.get(`/api/processos/${procId}`)).dados.orcamentos.length, 1);
+});
+
+test("mensagens entre usuários do mesmo órgão", async () => {
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const jur = await new Cliente().entrar("jur@a.gov.br");
+  const b = await new Cliente().entrar("admin@b.gov.br");
+  assert.equal((await new Cliente().get("/api/mensagens")).status, 401);
+  const dest = (await req.get("/api/mensagens/destinatarios")).dados;
+  const id = (email: string) => dest.find((u: any) => u.nome === email)?.id as number;
+  assert.ok(id("lic") && id("jur"));
+  assert.ok(!dest.some((u: any) => u.nome === "req"), "não lista o próprio usuário");
+  const idB = (await q1("select id from usuarios where email='admin@b.gov.br'"))!.id;
+  assert.ok(!dest.some((u: any) => u.id === idB), "não lista usuário de outro órgão");
+
+  const msg = { assunto: "Orçamentos do gavetário", texto: "Anexei dois orçamentos. Pode conferir?", processo_id: procId };
+  assert.equal((await req.post("/api/mensagens", { ...msg, para: [idB] })).status, 400);
+  assert.equal((await req.post("/api/mensagens", { ...msg, para: [] })).status, 400);
+  assert.equal((await req.post("/api/mensagens", { ...msg, para: [id("lic")], assunto: " " })).status, 400);
+  const env = await req.post("/api/mensagens", { ...msg, para: [id("lic"), id("jur"), id("lic")] });
+  assert.equal(env.status, 201, JSON.stringify(env.dados));
+  assert.equal(env.dados.enviadas, 2);
+
+  assert.equal((await lic.get("/api/mensagens/nao-lidas")).dados.total, 1);
+  assert.equal((await req.get("/api/mensagens/nao-lidas")).dados.total, 0);
+  const entrada = (await lic.get("/api/mensagens")).dados;
+  assert.equal(entrada.length, 1);
+  assert.equal(entrada[0].de_nome, "req");
+  assert.equal(entrada[0].assunto, msg.assunto);
+  assert.equal(entrada[0].processo_protocolo, "2026/0001");
+  assert.equal(entrada[0].lida_em, null);
+  assert.equal((await req.get("/api/mensagens?caixa=enviadas")).dados.length, 2);
+  assert.equal((await b.get("/api/mensagens")).dados.length, 0);
+
+  // Só o destinatário marca como lida.
+  assert.equal((await jur.post(`/api/mensagens/${entrada[0].id}/lida`)).status, 404);
+  assert.equal((await req.post(`/api/mensagens/${entrada[0].id}/lida`)).status, 404);
+  assert.equal((await lic.post(`/api/mensagens/${entrada[0].id}/lida`)).status, 200);
+  assert.equal((await lic.get("/api/mensagens/nao-lidas")).dados.total, 0);
+  assert.ok((await req.get("/api/mensagens?caixa=enviadas")).dados.find((m: any) => m.para_nome === "lic").lida_em);
+  assert.equal((await jur.get("/api/mensagens/nao-lidas")).dados.total, 1);
 });

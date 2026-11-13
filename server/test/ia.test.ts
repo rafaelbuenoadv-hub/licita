@@ -69,7 +69,7 @@ after(async () => { server.close(); falso.close(); await mod.db.pool.end(); });
 let proc = 0;
 
 test("extrair dados de um memorando usa saída estruturada e respaldo", async () => {
-  respostaEstruturada = { numero: "15/2026", procedimento: null, requisitante: "Secretaria de Obras", objeto: "Construção de gavetário", valor_estimado: 114969.14, classe: "obras", tipo: "obra", via: "dispensa", normas: null, obs: "60 dias" };
+  respostaEstruturada = { requisitante: "Secretaria de Obras", objeto: "Construção de gavetário", valor_estimado: 114969.14, classe: "obras", tipo: "obra", via: "dispensa", normas: null, obs: "60 dias" };
   const r = await api("POST", "/api/ia/extrair", { texto: "Memorando 15/2026 da Secretaria de Obras pedindo gavetário." });
   assert.equal(r.status, 200);
   const j: any = await r.json();

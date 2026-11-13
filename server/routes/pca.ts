@@ -26,7 +26,7 @@ export async function resumoFracionamento(orgao: number, ano: number) {
   const limites = (await limitesDoOrgao(orgao)).filter((l) => l.ano === ano);
   const lim = (inciso: "I" | "II") => limites.find((l) => l.inciso === inciso) ?? null;
   const procs = await q(
-    `select id, numero, objeto, classe, tipo, via, valor_estimado, situacao, pca_item_id from processos
+    `select id, protocolo, numero, objeto, classe, tipo, via, valor_estimado, situacao, pca_item_id from processos
       where orgao_id=$1 and ano=$2 and situacao <> 'cancelado'`, [orgao, ano]);
   const itens = await q("select * from pca_itens where orgao_id=$1 and ano=$2 order by trimestre nulls last, id", [orgao, ano]);
   const classes = new Map<string, { classe: string; inciso: "I" | "II"; planejado: number; processos: number; dispensas: number; ids: number[] }>();
@@ -63,7 +63,7 @@ export function rotasPca() {
     const d = await resumoFracionamento(req.usuario!.orgao_id, ano);
     res.json({
       ano, ...d,
-      fora_do_plano: d.processos.filter((p) => !p.pca_item_id).map((p) => ({ id: p.id, numero: p.numero, objeto: p.objeto, valor_estimado: p.valor_estimado })),
+      fora_do_plano: d.processos.filter((p) => !p.pca_item_id).map((p) => ({ id: p.id, protocolo: p.protocolo, numero: p.numero, objeto: p.objeto, valor_estimado: p.valor_estimado })),
       total_planejado: d.itens.reduce((s, i) => s + (i.valor_estimado ?? 0), 0),
     });
   });

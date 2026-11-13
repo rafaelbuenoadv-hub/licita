@@ -13,6 +13,7 @@ import { Pca } from "./paginas/Pca";
 import { Contratos } from "./paginas/Contratos";
 import { ContratoPg } from "./paginas/Contrato";
 import { Config } from "./paginas/Config";
+import { Mensagens } from "./paginas/Mensagens";
 
 export interface Eu { id: number; nome: string; email: string; cargo: string; papeis: Papel[]; orgao_id: number; orgao_nome: string }
 const Ctx = createContext<{ eu: Eu; ia: { disponivel: boolean; modelo: string } } | null>(null);
@@ -26,6 +27,16 @@ export const tem = (eu: Eu, ...p: Papel[]) => eu.papeis.includes("admin") || p.s
 function App() {
   const [eu, setEu] = useState<Eu | null | undefined>(undefined);
   const [ia, setIa] = useState({ disponivel: false, modelo: "" });
+  const [naoLidas, setNaoLidas] = useState(0);
+  const logado = !!eu;
+  useEffect(() => {
+    if (!logado) return;
+    const ver = () => api.get<{ total: number }>("/mensagens/nao-lidas").then((r) => setNaoLidas(r.total)).catch(() => {});
+    ver();
+    const t = setInterval(ver, 60000);
+    window.addEventListener("licita:mensagens", ver);
+    return () => { clearInterval(t); window.removeEventListener("licita:mensagens", ver); };
+  }, [logado]);
   const carregar = () => api.get<Eu>("/auth/eu").then((u) => { setEu(u); api.get("/ia/status").then(setIa).catch(() => {}); }).catch(() => setEu(null));
   useEffect(() => {
     carregar();
@@ -47,6 +58,7 @@ function App() {
             <NavLink to="/processos" className={({ isActive }) => (isActive ? "ativo" : "")}>Processos</NavLink>
             <NavLink to="/pca" className={({ isActive }) => (isActive ? "ativo" : "")}>Plano de contratações</NavLink>
             <NavLink to="/contratos" className={({ isActive }) => (isActive ? "ativo" : "")}>Contratos</NavLink>
+            <NavLink to="/mensagens" className={({ isActive }) => (isActive ? "ativo" : "")}>Mensagens{naoLidas > 0 && <span className="conta" aria-label={`${naoLidas} não lidas`}>{naoLidas}</span>}</NavLink>
             <NavLink to="/config" className={({ isActive }) => (isActive ? "ativo" : "")}>Configurações</NavLink>
             <div className="pe"><span>{eu.nome}</span><button className="lnk" onClick={sair}>Sair</button></div>
           </nav>
@@ -59,6 +71,7 @@ function App() {
               <Route path="/pca" element={<Pca />} />
               <Route path="/contratos" element={<Contratos />} />
               <Route path="/contratos/:id" element={<ContratoPg />} />
+              <Route path="/mensagens" element={<Mensagens />} />
               <Route path="/config" element={<Config />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

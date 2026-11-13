@@ -27,7 +27,7 @@ Como responder:
 
 export const FORMATO_MINUTA = `Formato obrigatório da minuta, sem comentário antes ou depois do documento:
 - primeira linha: "# " seguido do título em maiúsculas;
-- em seguida, linha com a identificação do processo e do procedimento;
+- em seguida, linha com a identificação: o protocolo e, se já gerados, o nº do processo e o do procedimento;
 - cada seção em linha própria, iniciada por "## " e numerada;
 - parágrafos em texto corrido; alíneas como "a) ...";
 - quadros como tabela com barras verticais (| coluna | coluna |), cabeçalho na primeira linha;

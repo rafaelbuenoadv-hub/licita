@@ -12,10 +12,11 @@ import {
 } from "../../shared/etapas.js";
 
 export const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+/** Nome do arquivo enviado. O navegador manda em UTF-8 e o multer lê como latin1: sem isto, "orçamento" vira "orÃ§amento". */
+export const nomeEnviado = (f: Express.Multer.File) => Buffer.from(f.originalname, "latin1").toString("utf8");
 
+// O nº do processo e o do procedimento não entram aqui: são gravados ao final, em /processos/:id/numeracao.
 const camposProc = z.object({
-  numero: z.string().max(60).default(""),
-  procedimento: z.string().max(120).default(""),
   requisitante: z.string().max(200).default(""),
   objeto: z.string().min(5).max(4000),
   tipo: z.enum(["bens", "servicos", "obra"]),
@@ -29,7 +30,7 @@ const camposProc = z.object({
 });
 
 export interface Processo {
-  id: number; orgao_id: number; tipo: Tipo; via: Via; objeto: string; numero: string; procedimento: string;
+  id: number; orgao_id: number; tipo: Tipo; via: Via; objeto: string; protocolo: string; numero: string; procedimento: string;
   requisitante: string; valor_estimado: number | null; classe: string; ano: number; normas: string; obs: string;
   situacao: string; pca_item_id: number | null;
 }
@@ -68,6 +69,32 @@ function exigeEtapaEditavel(req: Request, p: Processo, checks: Checks, etapaId: 
   return ETAPAS[ix];
 }
 
+const TIPOS_ORC: Record<string, string> = {
+  pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xls: "application/vnd.ms-excel",
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", txt: "text/plain; charset=utf-8", csv: "text/csv; charset=utf-8",
+};
+const tipoOrcamento = (nome: string): string | undefined => TIPOS_ORC[nome.toLowerCase().split(".").pop() ?? ""];
+
+/** A numeração é liberada quando só falta a última etapa (autorização e publicação) ou tudo já foi concluído. */
+export const numeracaoLiberada = (p: Processo, c: Checks) => atual(p, c) >= ETAPAS.length - 1 || concluido(p, c);
+
+const ROTULO_PROC: Record<Via, string> = { licitacao: "Licitação", dispensa: "Dispensa", inexigibilidade: "Inexigibilidade" };
+/** Sugere o próximo número: maior "N/ano" já usado pelo órgão no exercício, mais um. Quem grava pode ajustar. */
+export async function sugestaoNumeracao(p: Processo) {
+  const prox = async (coluna: "numero" | "procedimento", filtroVia: boolean) => {
+    const rows = await q<{ v: string }>(
+      `select ${coluna} as v from processos where orgao_id=$1 and ano=$2 and id<>$3 and ${coluna} <> ''${filtroVia ? " and via=$4" : ""}`,
+      filtroVia ? [p.orgao_id, p.ano, p.id, p.via] : [p.orgao_id, p.ano, p.id]);
+    const usados = rows.map((r) => new RegExp(`(\\d+)\\s*/\\s*${p.ano}`).exec(r.v)?.[1]).filter(Boolean).map(Number);
+    return Math.max(0, ...usados) + 1;
+  };
+  return {
+    numero: p.numero || `${await prox("numero", false)}/${p.ano}`,
+    procedimento: p.procedimento || `${ROTULO_PROC[p.via]} nº ${await prox("procedimento", true)}/${p.ano}`,
+  };
+}
+
 export function rotasProcessos() {
   const r = Router();
   r.use("/processos", exigeLogin);
@@ -75,7 +102,7 @@ export function rotasProcessos() {
   r.get("/processos", async (req, res) => {
     const ano = req.query.ano ? Number(req.query.ano) : null;
     const rows = await q(
-      `select p.id, p.numero, p.procedimento, p.objeto, p.tipo, p.via, p.valor_estimado, p.ano, p.situacao, p.requisitante, p.atualizado_em,
+      `select p.id, p.protocolo, p.numero, p.procedimento, p.objeto, p.tipo, p.via, p.valor_estimado, p.ano, p.situacao, p.requisitante, p.atualizado_em,
               coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
          from processos p where p.orgao_id = $1 and ($2::int is null or p.ano = $2) order by p.atualizado_em desc`,
       [req.usuario!.orgao_id, ano]);
@@ -91,12 +118,20 @@ export function rotasProcessos() {
       const ok = await q1("select 1 from pca_itens where id=$1 and orgao_id=$2", [d.pca_item_id, req.usuario!.orgao_id]);
       if (!ok) throw new ErroHttp(400, "Item do PCA não encontrado.");
     }
-    const p = await q1(
-      `insert into processos (orgao_id, numero, procedimento, requisitante, objeto, tipo, via, valor_estimado, classe, ano, pca_item_id, normas, obs, criado_por)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
-      [req.usuario!.orgao_id, d.numero, d.procedimento, d.requisitante, d.objeto, d.tipo, d.via, d.valor_estimado, d.classe, d.ano, d.pca_item_id, d.normas, d.obs, req.usuario!.id]);
-    await auditar({ orgao: req.usuario!.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "processo.criado", detalhe: { objeto: d.objeto } });
-    res.status(201).json({ id: p.id });
+    const orgao = req.usuario!.orgao_id;
+    const p = await tx(async (c) => {
+      // Próximo protocolo do órgão no exercício; a linha da sequência fica travada até o fim da transação.
+      const k = (await c.query(
+        `insert into sequencias (orgao_id, ano, chave, ultimo) values ($1,$2,'protocolo',1)
+         on conflict (orgao_id, ano, chave) do update set ultimo = sequencias.ultimo + 1 returning ultimo`, [orgao, d.ano])).rows[0].ultimo as number;
+      const protocolo = `${d.ano}/${String(k).padStart(4, "0")}`;
+      return (await c.query(
+        `insert into processos (orgao_id, protocolo, requisitante, objeto, tipo, via, valor_estimado, classe, ano, pca_item_id, normas, obs, criado_por)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id, protocolo`,
+        [orgao, protocolo, d.requisitante, d.objeto, d.tipo, d.via, d.valor_estimado, d.classe, d.ano, d.pca_item_id, d.normas, d.obs, req.usuario!.id])).rows[0] as { id: number; protocolo: string };
+    });
+    await auditar({ orgao, usuario: req.usuario!.id, processo: p.id, acao: "processo.criado", detalhe: { objeto: d.objeto, protocolo: p.protocolo } });
+    res.status(201).json({ id: p.id, protocolo: p.protocolo });
   });
 
   r.get("/processos/:id", async (req, res) => {
@@ -106,10 +141,14 @@ export function rotasProcessos() {
     const minutas = await q(
       `select distinct on (etapa) etapa, versao, origem, criado_em from minutas where processo_id = $1 order by etapa, versao desc`, [p.id]);
     const anexos = await q("select id, nome, length(texto) as caracteres, criado_em from anexos where processo_id = $1 order by id", [p.id]);
+    const orcamentos = await q(
+      `select o.id, o.fornecedor, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, u.nome as usuario
+         from orcamentos o left join usuarios u on u.id = o.usuario_id where o.processo_id = $1 order by o.id`, [p.id]);
     const c: Checks = Object.fromEntries(checagens.map((x) => [x.item, true]));
     res.json({
-      ...p, checagens, minutas, anexos, etapa_atual: atual(p, c), concluido: concluido(p, c),
-      pode: { editar: temPapel(req.usuario!, "requisitante", "contratacao"), etapas: ETAPAS.filter((e) => podeMarcar(req.usuario!.papeis, e)).map((e) => e.id) },
+      ...p, checagens, minutas, anexos, orcamentos, etapa_atual: atual(p, c), concluido: concluido(p, c),
+      numeracao: { liberada: numeracaoLiberada(p, c), sugestao: await sugestaoNumeracao(p) },
+      pode: { editar: temPapel(req.usuario!, "requisitante", "contratacao"), numerar: temPapel(req.usuario!, "contratacao", "autoridade"), etapas: ETAPAS.filter((e) => podeMarcar(req.usuario!.papeis, e)).map((e) => e.id) },
     });
   });
 
@@ -117,13 +156,24 @@ export function rotasProcessos() {
     const p = await processoDo(req);
     const d = camposProc.parse(req.body);
     await q(
-      `update processos set numero=$1, procedimento=$2, requisitante=$3, objeto=$4, tipo=$5, via=$6, valor_estimado=$7, classe=$8, ano=$9, pca_item_id=$10, normas=$11, obs=$12, atualizado_em=now()
-        where id=$13`,
-      [d.numero, d.procedimento, d.requisitante, d.objeto, d.tipo, d.via, d.valor_estimado, d.classe, d.ano, d.pca_item_id, d.normas, d.obs, p.id]);
+      `update processos set requisitante=$1, objeto=$2, tipo=$3, via=$4, valor_estimado=$5, classe=$6, ano=$7, pca_item_id=$8, normas=$9, obs=$10, atualizado_em=now()
+        where id=$11`,
+      [d.requisitante, d.objeto, d.tipo, d.via, d.valor_estimado, d.classe, d.ano, d.pca_item_id, d.normas, d.obs, p.id]);
     // Mudança de tipo ou via altera os itens aplicáveis: remove marcações que deixaram de existir.
     const validos = ETAPAS.flatMap((e) => itensDe(e, d).map((i) => i.id));
     await q("delete from checagens where processo_id=$1 and not (item = any($2))", [p.id, validos]);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "processo.alterado" });
+    res.json({ ok: true });
+  });
+
+  // Numeração final: o nº do processo e o do procedimento só são gravados quando o processo chega à última etapa.
+  r.post("/processos/:id/numeracao", exigePapel("contratacao", "autoridade"), async (req, res) => {
+    const p = await processoDo(req);
+    const d = z.object({ numero: z.string().trim().min(1).max(60), procedimento: z.string().trim().min(1).max(120) }).parse(req.body);
+    if (p.situacao === "cancelado") throw new ErroHttp(409, "Processo cancelado.");
+    if (!numeracaoLiberada(p, await checksDo(p.id))) throw new ErroHttp(409, "O nº do processo e o do procedimento são gerados por último: conclua as etapas anteriores à publicação.");
+    await q("update processos set numero=$1, procedimento=$2, atualizado_em=now() where id=$3", [d.numero, d.procedimento, p.id]);
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "processo.numerado", detalhe: d });
     res.json({ ok: true });
   });
 
@@ -198,7 +248,7 @@ export function rotasProcessos() {
       : await minutaVigente(p.id, String(req.params.etapa));
     if (!e || !m) throw new ErroHttp(404, "Minuta não encontrada.");
     const buf = await minutaParaDocx(m.texto, e.doc ?? e.nome);
-    const nome = `${e.nome}${p.numero ? ` - PA ${p.numero}` : ""} - v${m.versao}.docx`.replace(/[\\/:*?"<>|]/g, "-");
+    const nome = `${e.nome} - ${p.numero ? `PA ${p.numero}` : `Protocolo ${p.protocolo}`} - v${m.versao}.docx`.replace(/[\\/:*?"<>|]/g, "-");
     const ascii = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7e]/g, "_");
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(nome)}`);
@@ -210,9 +260,10 @@ export function rotasProcessos() {
     const p = await processoDo(req);
     if (!temPapel(req.usuario!, "requisitante", "contratacao", "juridico")) throw new ErroHttp(403, "Seu perfil não pode anexar documentos.");
     if (!req.file) throw new ErroHttp(400, "Envie um arquivo.");
-    const texto = await extrairTexto(req.file.originalname, req.file.buffer);
-    const a = await q1("insert into anexos (processo_id, nome, texto, usuario_id) values ($1,$2,$3,$4) returning id", [p.id, req.file.originalname, texto, req.usuario!.id]);
-    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "anexo.incluido", detalhe: { nome: req.file.originalname } });
+    const nome = nomeEnviado(req.file);
+    const texto = await extrairTexto(nome, req.file.buffer);
+    const a = await q1("insert into anexos (processo_id, nome, texto, usuario_id) values ($1,$2,$3,$4) returning id", [p.id, nome, texto, req.usuario!.id]);
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "anexo.incluido", detalhe: { nome } });
     res.status(201).json({ id: a.id, caracteres: texto.length });
   });
   r.get("/processos/:id/anexos/:aid", async (req, res) => {
@@ -225,6 +276,44 @@ export function rotasProcessos() {
     const p = await processoDo(req);
     await q("delete from anexos where id=$1 and processo_id=$2", [Number(req.params.aid), p.id]);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "anexo.removido", detalhe: { id: req.params.aid } });
+    res.json({ ok: true });
+  });
+
+  // Orçamentos da solicitação: guarda o arquivo original; o texto é lido quando possível, para a IA consultar.
+  r.post("/processos/:id/orcamentos", exigePapel("requisitante", "contratacao"), upload.single("arquivo"), async (req, res) => {
+    const p = await processoDo(req);
+    if (p.situacao === "cancelado") throw new ErroHttp(409, "Processo cancelado.");
+    if (!req.file) throw new ErroHttp(400, "Envie o arquivo do orçamento.");
+    const nome = nomeEnviado(req.file);
+    if (!tipoOrcamento(nome)) throw new ErroHttp(415, "Formato não aceito. Envie .pdf, .docx, .xlsx, .xls, .jpg, .png, .txt ou .csv.");
+    const d = z.object({
+      fornecedor: z.string().trim().min(2).max(200),
+      valor: z.preprocess((v) => (v === "" || v == null ? null : Number(v)), z.number().nonnegative().nullable()),
+    }).parse(req.body);
+    // A leitura do texto é um extra: planilha, imagem ou PDF que não puder ser lido fica só com o arquivo.
+    const texto = /\.(docx|pdf|txt|csv)$/i.test(nome) ? await extrairTexto(nome, req.file.buffer).catch(() => "") : "";
+    const o = await q1("insert into orcamentos (processo_id, fornecedor, valor, nome, arquivo, texto, usuario_id) values ($1,$2,$3,$4,$5,$6,$7) returning id",
+      [p.id, d.fornecedor, d.valor, nome, req.file.buffer, texto, req.usuario!.id]);
+    await q("update processos set atualizado_em = now() where id = $1", [p.id]);
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.incluido", detalhe: { fornecedor: d.fornecedor, valor: d.valor, nome } });
+    res.status(201).json({ id: o.id, lido: texto !== "" });
+  });
+  r.get("/processos/:id/orcamentos/:oid/arquivo", async (req, res) => {
+    const p = await processoDo(req);
+    const o = await q1<{ nome: string; arquivo: Buffer }>("select nome, arquivo from orcamentos where id=$1 and processo_id=$2", [Number(req.params.oid), p.id]);
+    if (!o) throw new ErroHttp(404, "Orçamento não encontrado.");
+    const ascii = o.nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7e]|["\\]/g, "_");
+    // Sempre como download e com tipo definido pela extensão: o arquivo veio de fora e não deve abrir como página.
+    res.setHeader("Content-Type", tipoOrcamento(o.nome) ?? "application/octet-stream");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(o.nome)}`);
+    res.send(o.arquivo);
+  });
+  r.delete("/processos/:id/orcamentos/:oid", exigePapel("requisitante", "contratacao"), async (req, res) => {
+    const p = await processoDo(req);
+    const o = await q1("delete from orcamentos where id=$1 and processo_id=$2 returning fornecedor, nome", [Number(req.params.oid), p.id]);
+    if (!o) throw new ErroHttp(404, "Orçamento não encontrado.");
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.removido", detalhe: o });
     res.json({ ok: true });
   });
 

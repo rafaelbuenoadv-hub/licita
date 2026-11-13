@@ -5,22 +5,20 @@ import { TIPOS, VIAS } from "../../../shared/etapas";
 import { useEu } from "../main";
 
 export interface DadosProc {
-  numero: string; procedimento: string; requisitante: string; objeto: string; tipo: string; via: string;
+  requisitante: string; objeto: string; tipo: string; via: string;
   valor: string; classe: string; ano: string; pca_item_id: string; normas: string; obs: string;
 }
-export const vazio = (): DadosProc => ({ numero: "", procedimento: "", requisitante: "", objeto: "", tipo: "bens", via: "licitacao", valor: "", classe: "", ano: String(new Date().getFullYear()), pca_item_id: "", normas: "", obs: "" });
+export const vazio = (): DadosProc => ({ requisitante: "", objeto: "", tipo: "bens", via: "licitacao", valor: "", classe: "", ano: String(new Date().getFullYear()), pca_item_id: "", normas: "", obs: "" });
 export function paraApi(d: DadosProc) {
   const v = numBR(d.valor);
   if (Number.isNaN(v)) throw new Error("Valor estimado inválido. Use, por exemplo, 114.969,14.");
-  return { numero: d.numero, procedimento: d.procedimento, requisitante: d.requisitante, objeto: d.objeto, tipo: d.tipo, via: d.via, valor_estimado: v, classe: d.classe, ano: Number(d.ano), pca_item_id: d.pca_item_id ? Number(d.pca_item_id) : null, normas: d.normas, obs: d.obs };
+  return { requisitante: d.requisitante, objeto: d.objeto, tipo: d.tipo, via: d.via, valor_estimado: v, classe: d.classe, ano: Number(d.ano), pca_item_id: d.pca_item_id ? Number(d.pca_item_id) : null, normas: d.normas, obs: d.obs };
 }
 
 export function CamposProcesso({ d, set, pca }: { d: DadosProc; set: (d: DadosProc) => void; pca: any[] }) {
   const c = (k: keyof DadosProc) => ({ id: "p-" + k, value: d[k], onChange: (e: any) => set({ ...d, [k]: e.target.value }) });
   return (
     <div className="form">
-      <label>Processo administrativo nº<input {...c("numero")} placeholder="ex.: 367/2026" /></label>
-      <label>Procedimento e nº<input {...c("procedimento")} placeholder="ex.: Dispensa Eletrônica nº 43/2026" /></label>
       <label>Área requisitante<input {...c("requisitante")} /></label>
       <label>Exercício<input {...c("ano")} inputMode="numeric" /></label>
       <label>Tipo de objeto<select {...c("tipo")}>{Object.entries(TIPOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
@@ -56,7 +54,7 @@ export function NovoProcesso() {
       const r = await api.post("/ia/extrair", fd);
       const x = r.dados; let n = 0;
       const novo = { ...d };
-      for (const k of ["numero", "procedimento", "requisitante", "objeto", "classe", "normas", "obs", "tipo", "via"] as const) if (x[k]) { (novo as any)[k] = x[k]; n++; }
+      for (const k of ["requisitante", "objeto", "classe", "normas", "obs", "tipo", "via"] as const) if (x[k]) { (novo as any)[k] = x[k]; n++; }
       if (x.valor_estimado != null) { novo.valor = fmtNum(x.valor_estimado); n++; }
       setD(novo);
       setTextoOrigem({ nome: arq?.name ?? "Texto de origem.txt", texto: r.texto });
@@ -96,6 +94,7 @@ export function NovoProcesso() {
       {msg && <p className={"note " + (msg.tipo ?? "")}>{msg.t}</p>}
       <form className="panel pad stack" onSubmit={criar}>
         <CamposProcesso d={d} set={setD} pca={pca} />
+        <p className="small muted">O processo recebe um protocolo automático ao ser criado. O nº do processo administrativo e o do procedimento são gerados por último, quando a trilha chega à etapa de autorização e publicação.</p>
         <div><button className="btn pri" disabled={busy !== ""}>{busy === "salvar" ? "Criando…" : "Criar e abrir a trilha"}</button></div>
       </form>
     </>

@@ -40,7 +40,7 @@ export function ContratoPg() {
         <summary>Dados do contrato</summary>
         <div className="pad stack">
           <p className="small">Gestor: {c.gestor || "—"} · Fiscal: {c.fiscal || "—"} · Substituto: {c.fiscal_substituto || "—"} · CNPJ {c.cnpj || "—"} · Início {dataBR(c.inicio)}
-            {c.processo && <> · Processo <Link to={`/processos/${c.processo.id}`}>{c.processo.numero ? `PA ${c.processo.numero}` : "vinculado"}</Link></>}</p>
+            {c.processo && <> · Processo <Link to={`/processos/${c.processo.id}`}>{c.processo.numero ? `PA ${c.processo.numero}` : `protocolo ${c.processo.protocolo}`}</Link></>}</p>
           {editar && tem(eu, "contratacao") && <EditarContrato c={c} aoSalvar={() => ok("Contrato atualizado.")} aoFalhar={falha} />}
         </div>
       </details>

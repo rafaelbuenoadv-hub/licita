@@ -28,7 +28,9 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
 
   const l: string[] = ["DADOS DO PROCESSO"];
   l.push(`Órgão: ${orgao?.nome ?? ""}${orgao?.municipio ? ` (${orgao.municipio}/${orgao.uf ?? ""})` : ""}`);
-  l.push(`Processo administrativo nº: ${p.numero || "não informado"}`, `Procedimento: ${p.procedimento || "não informado"}`);
+  l.push(`Protocolo: ${p.protocolo}`);
+  if (p.numero || p.procedimento) l.push(`Processo administrativo nº: ${p.numero || "ainda não gerado"}`, `Procedimento: ${p.procedimento || "ainda não gerado"}`);
+  else l.push("Nº do processo administrativo e do procedimento: são gerados só ao final da fase preparatória. Até lá, identifique as peças pelo Protocolo e não marque esses números como dado pendente.");
   l.push(`Área requisitante: ${p.requisitante || "não informada"}`, `Objeto: ${p.objeto}`);
   l.push(`Tipo de objeto: ${TIPOS[p.tipo]}`, `Forma de contratação: ${VIAS[p.via]}`, `Valor estimado: ${moeda(p.valor_estimado)}`);
   l.push(`Exercício: ${p.ano}`, `Natureza/ramo (para fracionamento): ${p.classe || "não informada"}`);
@@ -48,6 +50,9 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
     l.push("", m.etapa === e.id ? `MINUTA ATUAL DESTA ETAPA (${nome})` : `OUTRA PEÇA DO PROCESSO: ${nome}`, corta(m.texto));
   }
   for (const a of anexos) l.push("", `DOCUMENTO DE APOIO ANEXADO: ${a.nome}`, corta(a.texto));
+  const orcs = await q("select fornecedor, valor, nome, texto from orcamentos where processo_id=$1 order by id", [p.id]);
+  if (orcs.length) l.push("", "ORÇAMENTOS ANEXADOS À SOLICITAÇÃO", ...orcs.map((o, i) => `${i + 1}. ${o.fornecedor} — ${moeda(o.valor)} — arquivo: ${o.nome}`));
+  for (const o of orcs) if (o.texto) l.push("", `TEXTO DO ORÇAMENTO DE ${o.fornecedor} (${o.nome})`, corta(o.texto));
   return { texto: l.join("\n"), etapa: e, checks: c };
 }
 
@@ -165,7 +170,7 @@ Para cada campo pendente, proponha o texto que substitui a marca, de modo que a 
     if (req.file) texto = await extrairTexto(req.file.originalname, req.file.buffer);
     if (!texto.trim()) throw new ErroHttp(400, "Envie um arquivo ou cole o texto.");
     const esquema = z.object({
-      numero: z.string().nullable(), procedimento: z.string().nullable(), requisitante: z.string().nullable(),
+      requisitante: z.string().nullable(),
       objeto: z.string().nullable(), valor_estimado: z.number().nullable(), classe: z.string().nullable(),
       tipo: z.enum(["bens", "servicos", "obra"]).nullable(), via: z.enum(["licitacao", "dispensa", "inexigibilidade"]).nullable(),
       normas: z.string().nullable(), obs: z.string().nullable(),

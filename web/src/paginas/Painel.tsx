@@ -61,7 +61,7 @@ export function Painel() {
           <div className="tw"><table className="t"><tbody>
             {d.processos.parados.map((p: any) => (
               <tr key={p.id} className="link" onClick={() => nav(`/processos/${p.id}`)}>
-                <td className="mono">{p.numero || "—"}</td><td>{p.objeto}</td><td>{p.etapa}</td><td className="r">{p.parado_dias} dias</td></tr>))}
+                <td className="mono">{p.protocolo}</td><td>{p.objeto}</td><td>{p.etapa}</td><td className="r">{p.parado_dias} dias</td></tr>))}
           </tbody></table></div>}
       </section>
     </>
