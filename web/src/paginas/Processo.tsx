@@ -110,7 +110,7 @@ function Numeracao({ p, recarregar, setAviso }: { p: any; recarregar: () => Prom
 function Dados({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void }) {
   const { eu } = useEu();
   const [d, setD] = useState<DadosProc>(() => ({
-    requisitante: p.requisitante, objeto: p.objeto, tipo: p.tipo, via: p.via,
+    requisitante: p.requisitante, areas_adicionais: p.areas_adicionais, objeto: p.objeto, tipo: p.tipo, via: p.via,
     valor: fmtNum(p.valor_estimado), classe: p.classe, ano: String(p.ano), pca_item_id: p.pca_item_id ? String(p.pca_item_id) : "", normas: p.normas, obs: p.obs,
   }));
   const [pca, setPca] = useState<any[]>([]);
@@ -271,6 +271,7 @@ function Fracionamento({ id }: { id: number }) {
 
 /* ---------- minuta ---------- */
 function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolean; setAviso: (a: any) => void }) {
+  const [timbrado, setTimbrado] = useState("");
   const { ia } = useEu();
   const [m, setM] = useState<{ vigente: any; versoes: any[] } | null>(null);
   const [modo, setModo] = useState<"ver" | "editar">("ver");
@@ -344,7 +345,18 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
           : <button className="btn pri" disabled={!editavel || !ia.disponivel || busy !== ""} onClick={() => (texto ? setConfirma(true) : redigir())}>{texto ? "Redigir de novo com IA" : "Redigir minuta com IA"}</button>}
         {busy !== "redigir" && <>
           <button className="btn" disabled={!editavel || !!vendo} onClick={() => { setModo(modo === "ver" ? "editar" : "ver"); setRascunho(texto); }}>{modo === "ver" ? "Editar texto" : "Ver na folha"}</button>
-          {texto && <a className="btn" href={`/api/processos/${p.id}/minutas/${e.id}/docx${vendo ? `?versao=${vendo.versao}` : ""}`}>Baixar Word</a>}
+          {texto && p.timbrados?.length > 0 && (
+            <label>Timbrado do Word
+              <select value={timbrado} onChange={(ev) => setTimbrado(ev.target.value)}>
+                <option value="">Sem timbrado</option>
+                {p.timbrados.map((t: { codigo: string; nome: string }) => <option key={t.codigo} value={t.codigo}>{t.nome}</option>)}
+              </select>
+            </label>
+          )}
+          {texto && <a className="btn" href={`/api/processos/${p.id}/minutas/${e.id}/docx?${new URLSearchParams({
+            ...(vendo ? { versao: String(vendo.versao) } : {}),
+            ...(timbrado ? { timbrado } : {}),
+          })}`}>Baixar Word</a>}
           {m.versoes.length > 1 && <label className="campo" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>Versão
             <select id="versao" value={vendo?.versao ?? m.vigente?.versao} onChange={(ev) => verVersao(ev.target.value)} style={{ width: "auto" }}>
               {m.versoes.map((v: any) => <option key={v.versao} value={v.versao}>{v.versao} · {dataBR(v.criado_em)}</option>)}</select></label>}

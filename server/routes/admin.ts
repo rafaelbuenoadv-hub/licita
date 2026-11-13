@@ -3,7 +3,9 @@ import { z } from "zod";
 import { q, q1, auditar } from "../db.js";
 import { exigeLogin, exigePapel, hashSenha, senhaValida } from "../auth.js";
 import { ETAPAS, PAPEIS, type Papel } from "../../shared/etapas.js";
-import { normasOficiais } from "../normas-municipais.js";
+import { minutaParaDocx } from "../docx.js";
+import { lerTimbrado, timbradosDoOrgao } from "../timbrados.js";
+import { normasOficiais } from "../normas-oficiais.js";
 
 const papelEnum = z.enum(Object.keys(PAPEIS) as [Papel, ...Papel[]]);
 
@@ -16,7 +18,14 @@ export function rotasAdmin() {
     const orgao = await q1<{ nome: string; cnpj: string | null }>(
       "select id, nome, cnpj, municipio, uf, normas from orgaos where id = $1", [req.usuario!.orgao_id],
     );
-    res.json({ ...orgao, normas_oficiais: await normasOficiais(orgao) });
+    res.json({ ...orgao, normas_oficiais: await normasOficiais(orgao), timbrados: timbradosDoOrgao(orgao) });
+  });
+  r.get("/orgao/timbrados/:codigo", exigeLogin, async (req, res) => {
+    const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [req.usuario!.orgao_id]);
+    const modelo = await lerTimbrado(orgao, req.params.codigo);
+    if (!modelo) return res.status(404).json({ erro: "Timbrado não encontrado." });
+    res.attachment(`Timbrado-${req.params.codigo}.docx`);
+    res.send(await minutaParaDocx("", "Timbrado", modelo));
   });
   r.put("/admin/orgao", exigePapel("admin"), async (req, res) => {
     const d = z.object({ nome: z.string().min(2), cnpj: z.string().optional(), municipio: z.string().optional(), uf: z.string().max(2).optional(), normas: z.string().max(20000) }).parse(req.body);
