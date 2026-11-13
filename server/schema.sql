@@ -11,6 +11,20 @@ create table if not exists orgaos (
   criado_em timestamptz not null default now()
 );
 
+create table if not exists normas_federais (
+  tipo text not null check (tipo in ('Decreto', 'Lei')),
+  numero int not null,
+  ano int not null,
+  assunto text not null,
+  fonte text not null,
+  primary key (tipo, numero, ano)
+);
+
+insert into normas_federais (tipo, numero, ano, assunto, fonte) values
+  ('Lei', 14133, 2021, 'Lei de Licitações e Contratos Administrativos.',
+    'https://www2.camara.leg.br/legin/fed/lei/2021/lei-14133-1-abril-2021-791222-normaatualizada-pl.pdf')
+on conflict (tipo, numero, ano) do nothing;
+
 create table if not exists normas_municipais (
   cnpj text not null,
   tipo text not null check (tipo in ('Decreto', 'Lei')),
@@ -115,6 +129,8 @@ create table if not exists processos (
   atualizado_em timestamptz not null default now()
 );
 create index if not exists processos_orgao on processos(orgao_id, ano);
+
+alter table processos add column if not exists areas_adicionais text[] not null default '{}';
 
 create table if not exists solicitacoes_processo (
   id serial primary key,

@@ -13,6 +13,7 @@ interface Props {
   processo: {
     id: number;
     requisitante: string;
+    areas_adicionais: string[];
     situacao: string;
     pode: { editar: boolean };
     solicitacoes: Solicitacao[];
@@ -26,6 +27,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [salvando, setSalvando] = useState(false);
   const [aviso, setAviso] = useState<{ texto: string; erro?: boolean } | null>(null);
   const caminho = `/processos/${processo.id}/solicitacoes`;
+  const areas = [processo.requisitante, ...processo.areas_adicionais].filter(Boolean);
   const podeAdicionar = processo.pode.editar && processo.situacao === "preparacao";
 
   const salvar = async (ev: FormEvent<HTMLFormElement>) => {
@@ -52,7 +54,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   return (
     <section className="sec stack">
       <h3>Solicitações das secretarias</h3>
-      {processo.requisitante && <p><strong>Área requisitante inicial</strong> · {processo.requisitante}</p>}
+      {areas.length > 0 && <p><strong>Áreas requisitantes</strong> · {areas.join("; ")}</p>}
       {processo.solicitacoes.length > 0 && (
         <div className="tw">
           <table className="t">
@@ -71,7 +73,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
         <form className="stack" onSubmit={salvar}>
           <div className="form">
             <label>Secretaria<input name="secretaria" list="secretarias-solicitacao" required maxLength={200} /></label>
-            <datalist id="secretarias-solicitacao">{processo.secretarias.map((nome) => <option key={nome} value={nome} />)}</datalist>
+            <datalist id="secretarias-solicitacao">{[...new Set([...areas, ...processo.secretarias])].map((nome) => <option key={nome} value={nome} />)}</datalist>
             <label>Memorando ou referência<input name="referencia" maxLength={120} /></label>
             <label className="wide">Descrição da solicitação<textarea name="descricao" required maxLength={10000} /></label>
             <label className="wide">Documento da solicitação (opcional)<input name="arquivo" type="file" accept=".pdf,.docx,.txt,.md,.csv" /></label>

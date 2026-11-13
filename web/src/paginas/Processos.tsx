@@ -13,7 +13,7 @@ export function Processos() {
   const [busca, setBusca] = useState("");
   const nav = useNavigate();
   useEffect(() => { setLista(null); api.get(`/processos${ano ? `?ano=${ano}` : ""}`).then(setLista); }, [ano]);
-  const f = (lista ?? []).filter((p) => !busca || `${p.protocolo} ${p.numero} ${p.objeto} ${p.procedimento} ${p.requisitante}`.toLowerCase().includes(busca.toLowerCase()));
+  const f = (lista ?? []).filter((p) => !busca || `${p.protocolo} ${p.numero} ${p.objeto} ${p.procedimento} ${p.requisitante} ${p.areas_adicionais?.join(" ") ?? ""}`.toLowerCase().includes(busca.toLowerCase()));
   return (
     <>
       <div className="row"><h1>Processos</h1>{tem(eu, "requisitante", "contratacao") && <Link className="btn pri" to="/processos/novo">Novo processo</Link>}</div>

@@ -5,6 +5,7 @@ import { q, q1, tx, auditar } from "../db.js";
 import { exigeLogin, exigePapel, temPapel } from "../auth.js";
 import { ErroHttp } from "../erros.js";
 import { minutaParaDocx } from "../docx.js";
+import { lerTimbrado, timbradosDoOrgao } from "../timbrados.js";
 import { extrairTexto } from "../extrair.js";
 import {
   ETAPAS, aplicarPendencias, atual, concluido, etapaDoItem, etapaPorId, itensDe, liberada, podeMarcar,
@@ -18,6 +19,7 @@ export const nomeEnviado = (f: Express.Multer.File) => Buffer.from(f.originalnam
 // O nº do processo e o do procedimento não entram aqui: são gravados ao final, em /processos/:id/numeracao.
 const camposProc = z.object({
   requisitante: z.string().max(200).default(""),
+  areas_adicionais: z.array(z.string().trim().min(1).max(200)).max(30).optional(),
   objeto: z.string().min(5).max(4000),
   tipo: z.enum(["bens", "servicos", "obra"]),
   via: z.enum(["licitacao", "dispensa", "inexigibilidade"]),
@@ -31,7 +33,7 @@ const camposProc = z.object({
 
 export interface Processo {
   id: number; orgao_id: number; tipo: Tipo; via: Via; objeto: string; protocolo: string; numero: string; procedimento: string;
-  requisitante: string; valor_estimado: number | null; classe: string; ano: number; normas: string; obs: string;
+  requisitante: string; areas_adicionais: string[]; valor_estimado: number | null; classe: string; ano: number; normas: string; obs: string;
   situacao: string; pca_item_id: number | null;
 }
 
@@ -110,7 +112,7 @@ export function rotasProcessos() {
   r.get("/processos", async (req, res) => {
     const ano = req.query.ano ? Number(req.query.ano) : null;
     const rows = await q(
-      `select p.id, p.protocolo, p.numero, p.procedimento, p.objeto, p.tipo, p.via, p.valor_estimado, p.ano, p.situacao, p.requisitante, p.atualizado_em,
+      `select p.id, p.protocolo, p.numero, p.procedimento, p.objeto, p.tipo, p.via, p.valor_estimado, p.ano, p.situacao, p.requisitante, p.areas_adicionais, p.atualizado_em,
               coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
          from processos p where p.orgao_id = $1 and ($2::int is null or p.ano = $2) order by p.atualizado_em desc`,
       [req.usuario!.orgao_id, ano]);
@@ -134,9 +136,9 @@ export function rotasProcessos() {
          on conflict (orgao_id, ano, chave) do update set ultimo = sequencias.ultimo + 1 returning ultimo`, [orgao, d.ano])).rows[0].ultimo as number;
       const protocolo = `${d.ano}/${String(k).padStart(4, "0")}`;
       return (await c.query(
-        `insert into processos (orgao_id, protocolo, requisitante, objeto, tipo, via, valor_estimado, classe, ano, pca_item_id, normas, obs, criado_por)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id, protocolo`,
-        [orgao, protocolo, d.requisitante, d.objeto, d.tipo, d.via, d.valor_estimado, d.classe, d.ano, d.pca_item_id, d.normas, d.obs, req.usuario!.id])).rows[0] as { id: number; protocolo: string };
+        `insert into processos (orgao_id, protocolo, requisitante, objeto, tipo, via, valor_estimado, classe, ano, pca_item_id, normas, obs, criado_por, areas_adicionais)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id, protocolo`,
+        [orgao, protocolo, d.requisitante, d.objeto, d.tipo, d.via, d.valor_estimado, d.classe, d.ano, d.pca_item_id, d.normas, d.obs, req.usuario!.id, d.areas_adicionais ?? []])).rows[0] as { id: number; protocolo: string };
     });
     await auditar({ orgao, usuario: req.usuario!.id, processo: p.id, acao: "processo.criado", detalhe: { objeto: d.objeto, protocolo: p.protocolo } });
     res.status(201).json({ id: p.id, protocolo: p.protocolo });
@@ -155,10 +157,11 @@ export function rotasProcessos() {
     const solicitacoes = await q(
       "select id, secretaria, referencia, descricao, nome_arquivo from solicitacoes_processo where processo_id=$1 order by id", [p.id],
     );
+    const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [p.orgao_id]);
     const secretarias = await q<{ secretaria: string }>("select secretaria from secretarios where orgao_id=$1 order by secretaria", [p.orgao_id]);
     const c: Checks = Object.fromEntries(checagens.map((x) => [x.item, true]));
     res.json({
-      ...p, checagens, minutas, anexos, orcamentos, solicitacoes, secretarias: secretarias.map((s) => s.secretaria), etapa_atual: atual(p, c), concluido: concluido(p, c),
+      ...p, checagens, minutas, anexos, orcamentos, solicitacoes, timbrados: timbradosDoOrgao(orgao), secretarias: secretarias.map((s) => s.secretaria), etapa_atual: atual(p, c), concluido: concluido(p, c),
       numeracao: { liberada: numeracaoLiberada(p, c), sugestao: await sugestaoNumeracao(p) },
       pode: { editar: temPapel(req.usuario!, "requisitante", "contratacao"), numerar: temPapel(req.usuario!, "contratacao", "autoridade"), etapas: ETAPAS.filter((e) => podeMarcar(req.usuario!.papeis, e)).map((e) => e.id) },
     });
@@ -168,9 +171,9 @@ export function rotasProcessos() {
     const p = await processoDo(req);
     const d = camposProc.parse(req.body);
     await q(
-      `update processos set requisitante=$1, objeto=$2, tipo=$3, via=$4, valor_estimado=$5, classe=$6, ano=$7, pca_item_id=$8, normas=$9, obs=$10, atualizado_em=now()
+      `update processos set requisitante=$1, objeto=$2, tipo=$3, via=$4, valor_estimado=$5, classe=$6, ano=$7, pca_item_id=$8, normas=$9, obs=$10, areas_adicionais=coalesce($12::text[], areas_adicionais), atualizado_em=now()
         where id=$11`,
-      [d.requisitante, d.objeto, d.tipo, d.via, d.valor_estimado, d.classe, d.ano, d.pca_item_id, d.normas, d.obs, p.id]);
+      [d.requisitante, d.objeto, d.tipo, d.via, d.valor_estimado, d.classe, d.ano, d.pca_item_id, d.normas, d.obs, p.id, d.areas_adicionais ?? null]);
     // Mudança de tipo ou via altera os itens aplicáveis: remove marcações que deixaram de existir.
     const validos = ETAPAS.flatMap((e) => itensDe(e, d).map((i) => i.id));
     await q("delete from checagens where processo_id=$1 and not (item = any($2))", [p.id, validos]);
@@ -307,7 +310,13 @@ export function rotasProcessos() {
       ? await q1("select texto, versao from minutas where processo_id=$1 and etapa=$2 and versao=$3", [p.id, req.params.etapa, v])
       : await minutaVigente(p.id, String(req.params.etapa));
     if (!e || !m) throw new ErroHttp(404, "Minuta não encontrada.");
-    const buf = await minutaParaDocx(m.texto, e.doc ?? e.nome);
+    let timbrado;
+    if (req.query.timbrado) {
+      const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [p.orgao_id]);
+      timbrado = await lerTimbrado(orgao, req.query.timbrado);
+      if (!timbrado) throw new ErroHttp(404, "Timbrado não encontrado.");
+    }
+    const buf = await minutaParaDocx(m.texto, e.doc ?? e.nome, timbrado);
     const nome = `${e.nome} - ${p.numero ? `PA ${p.numero}` : `Protocolo ${p.protocolo}`} - v${m.versao}.docx`.replace(/[\\/:*?"<>|]/g, "-");
     const ascii = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7e]/g, "_");
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");

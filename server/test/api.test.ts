@@ -155,7 +155,7 @@ test("outro órgão não enxerga o processo", async () => {
   assert.equal((await b.get("/api/processos")).dados.length, 0);
 });
 
-test("normas oficiais de Ibaiti são carregadas sem alterar os regulamentos locais", async () => {
+test("normas federais e de Ibaiti são carregadas sem alterar os regulamentos locais", async () => {
   const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
   const outro = await new Cliente().entrar("admin@a.gov.br");
   const original = (await admin.get("/api/orgao")).dados;
@@ -165,10 +165,12 @@ test("normas oficiais de Ibaiti são carregadas sem alterar os regulamentos loca
   const { normas, normas_oficiais: oficiais } = (await admin.get("/api/orgao")).dados;
   assert.equal(normas, "Regulamento existente.");
   assert.deepEqual(oficiais.map((n: { tipo: string; numero: number; ano: number }) => `${n.tipo} ${n.numero}/${n.ano}`), [
-    "Decreto 2476/2023", "Decreto 2532/2024", "Decreto 2533/2024", "Decreto 2548/2024", "Decreto 2549/2024",
+    "Lei 14133/2021", "Decreto 2476/2023", "Decreto 2532/2024", "Decreto 2533/2024", "Decreto 2548/2024", "Decreto 2549/2024",
     "Lei 373/2004", "Lei 892/2018", "Lei 1316/2026",
   ]);
-  assert.deepEqual((await outro.get("/api/orgao")).dados.normas_oficiais, []);
+  assert.equal(oficiais[0].esfera, "Federal");
+  assert.match(oficiais[0].fonte, /^https:\/\/www2\.camara\.leg\.br\/.*normaatualizada-pl\.pdf$/);
+  assert.deepEqual((await outro.get("/api/orgao")).dados.normas_oficiais, [oficiais[0]]);
 });
 
 test("solicitações de outras secretarias usam o mesmo processo e preservam o anexo", async () => {
@@ -209,6 +211,20 @@ test("solicitações de outras secretarias usam o mesmo processo e preservam o a
   assert.equal((await req.post(`/api/processos/${novo.dados.id}/solicitacoes`, educacao)).status, 409);
 });
 
+test("áreas requisitantes adicionais são gravadas na abertura e podem ser editadas", async () => {
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const dados = { objeto: "Aquisição conjunta de materiais", tipo: "bens", via: "licitacao", ano: 2029, requisitante: "Administração" };
+  const criado = await req.post("/api/processos", { ...dados, areas_adicionais: ["Educação", "Saúde"] });
+  assert.equal(criado.status, 201);
+  const rota = `/api/processos/${criado.dados.id}`;
+  assert.deepEqual((await req.get(rota)).dados.areas_adicionais, ["Educação", "Saúde"]);
+  assert.equal((await req.put(rota, dados)).status, 200);
+  assert.deepEqual((await req.get(rota)).dados.areas_adicionais, ["Educação", "Saúde"]);
+  assert.equal((await req.put(rota, { ...dados, areas_adicionais: ["Obras"] })).status, 200);
+  assert.deepEqual((await req.get(rota)).dados.areas_adicionais, ["Obras"]);
+  assert.deepEqual((await req.get("/api/processos?ano=2029")).dados[0].areas_adicionais, ["Obras"]);
+});
+
 test("minuta versionada, campos pendentes e exportação .docx", async () => {
   const req = await new Cliente().entrar("req@a.gov.br");
   const texto = "# ESTUDO TÉCNICO PRELIMINAR\nProcesso nº 367/2026\n## 2. Necessidade\n| Indicador | Dado |\n|---|---|\n| Sepultamentos 2024 | [[nº]] |\n| Sepultamentos 2025 | [[nº]] |\nIbaiti, [[dia]] de novembro de 2026.\n\n@ FULANA DE TAL\n@ Arquiteta";
@@ -229,6 +245,28 @@ test("minuta versionada, campos pendentes e exportação .docx", async () => {
   assert.equal(d.dados.subarray(0, 2).toString(), "PK");
   // Minuta de etapa ainda bloqueada.
   assert.equal((await req.post(`/api/processos/${procId}/minutas/tr`, { texto: "x" })).status, 409);
+});
+
+test("Ibaiti pode baixar seus 11 timbrados e aplicá-los à minuta Word", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const outro = await new Cliente().entrar("req@a.gov.br");
+  const { timbrados } = (await admin.get("/api/orgao")).dados;
+  assert.equal(timbrados.length, 11);
+  for (const { codigo } of timbrados) {
+    const modelo = await admin.get(`/api/orgao/timbrados/${codigo}`);
+    assert.equal(modelo.status, 200);
+    assert.ok(modelo.dados.includes(Buffer.from("word/header1.xml")));
+    assert.ok(modelo.dados.includes(Buffer.from("word/footer1.xml")));
+  }
+  assert.equal((await outro.get("/api/orgao/timbrados/semad")).status, 404);
+  const { dados: { id } } = await admin.post("/api/processos", { objeto: "Processo para teste de timbrado", tipo: "bens", via: "licitacao", ano: 2028 });
+  const rota = `/api/processos/${id}/minutas/dfd`;
+  assert.equal((await admin.post(rota, { texto: "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA" })).status, 200);
+  const minuta = await admin.get(`${rota}/docx?timbrado=semad&versao=1`);
+  assert.equal(minuta.status, 200);
+  assert.ok(minuta.dados.includes(Buffer.from("word/header1.xml")));
+  assert.ok(minuta.dados.includes(Buffer.from("word/footer1.xml")));
+  assert.equal((await admin.get(`${rota}/docx?timbrado=inexistente`)).status, 404);
 });
 
 test("anexo .docx tem o texto extraído (inclusive quadros)", async () => {

@@ -5,21 +5,40 @@ import { TIPOS, VIAS } from "../../../shared/etapas";
 import { useEu } from "../main";
 
 export interface DadosProc {
-  requisitante: string; objeto: string; tipo: string; via: string;
+  requisitante: string; areas_adicionais: string[]; objeto: string; tipo: string; via: string;
   valor: string; classe: string; ano: string; pca_item_id: string; normas: string; obs: string;
 }
-export const vazio = (): DadosProc => ({ requisitante: "", objeto: "", tipo: "bens", via: "licitacao", valor: "", classe: "", ano: String(new Date().getFullYear()), pca_item_id: "", normas: "", obs: "" });
+export const vazio = (): DadosProc => ({ requisitante: "", areas_adicionais: [], objeto: "", tipo: "bens", via: "licitacao", valor: "", classe: "", ano: String(new Date().getFullYear()), pca_item_id: "", normas: "", obs: "" });
 export function paraApi(d: DadosProc) {
   const v = numBR(d.valor);
   if (Number.isNaN(v)) throw new Error("Valor estimado inválido. Use, por exemplo, 114.969,14.");
-  return { requisitante: d.requisitante, objeto: d.objeto, tipo: d.tipo, via: d.via, valor_estimado: v, classe: d.classe, ano: Number(d.ano), pca_item_id: d.pca_item_id ? Number(d.pca_item_id) : null, normas: d.normas, obs: d.obs };
+  return { requisitante: d.requisitante, areas_adicionais: d.areas_adicionais.map((a) => a.trim()).filter(Boolean), objeto: d.objeto, tipo: d.tipo, via: d.via, valor_estimado: v, classe: d.classe, ano: Number(d.ano), pca_item_id: d.pca_item_id ? Number(d.pca_item_id) : null, normas: d.normas, obs: d.obs };
 }
 
 export function CamposProcesso({ d, set, pca }: { d: DadosProc; set: (d: DadosProc) => void; pca: any[] }) {
-  const c = (k: keyof DadosProc) => ({ id: "p-" + k, value: d[k], onChange: (e: any) => set({ ...d, [k]: e.target.value }) });
+  const c = (k: Exclude<keyof DadosProc, "areas_adicionais">) => ({ id: "p-" + k, value: d[k], onChange: (e: any) => set({ ...d, [k]: e.target.value }) });
   return (
     <div className="form">
-      <label>Área requisitante<input {...c("requisitante")} /></label>
+      <div className="stack" style={{ gap: 8 }}>
+        <label>Área requisitante<input {...c("requisitante")} maxLength={200} /></label>
+        {d.areas_adicionais.map((area, indice) => (
+          <div className="stack" style={{ gap: 4 }} key={indice}>
+            <label>Área requisitante {indice + 2}
+              <input value={area} maxLength={200} onChange={(ev) => set({
+                ...d, areas_adicionais: d.areas_adicionais.map((nome, i) => i === indice ? ev.target.value : nome),
+              })} />
+            </label>
+            <button className="lnk" type="button" onClick={() => set({
+              ...d, areas_adicionais: d.areas_adicionais.filter((_, i) => i !== indice),
+            })}>Remover área {indice + 2}</button>
+          </div>
+        ))}
+        {d.areas_adicionais.length < 30 && <div>
+          <button className="btn sm" type="button" onClick={() => set({ ...d, areas_adicionais: [...d.areas_adicionais, ""] })}>
+            Adicionar área requisitante
+          </button>
+        </div>}
+      </div>
       <label>Exercício<input {...c("ano")} inputMode="numeric" /></label>
       <label>Tipo de objeto<select {...c("tipo")}>{Object.entries(TIPOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
       <label>Forma de contratação<select {...c("via")}>{Object.entries(VIAS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>

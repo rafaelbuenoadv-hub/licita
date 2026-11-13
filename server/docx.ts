@@ -1,5 +1,5 @@
 import {
-  AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType,
+  AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType,
 } from "docx";
 
 // Converte a marcação das minutas em .docx:
@@ -37,7 +37,20 @@ function tabela(linhas: string[][]) {
   });
 }
 
-export async function minutaParaDocx(texto: string, titulo: string) {
+type ImagemTimbrado = { dados: Buffer; proporcao: number };
+type Timbrado = { cabecalho: ImagemTimbrado; rodape: ImagemTimbrado };
+
+function imagemTimbrado(imagem: ImagemTimbrado, largura: number) {
+  return new Paragraph({
+    alignment: AlignmentType.CENTER,
+    children: [new ImageRun({
+      type: "png", data: imagem.dados,
+      transformation: { width: largura, height: Math.round(largura / imagem.proporcao) },
+    })],
+  });
+}
+
+export async function minutaParaDocx(texto: string, titulo: string, timbrado?: Timbrado) {
   const filhos: (Paragraph | Table)[] = [];
   let tab: string[][] = [];
   let assinatura = false;
@@ -67,11 +80,17 @@ export async function minutaParaDocx(texto: string, titulo: string) {
     assinatura = false;
   }
   fechaTabela();
+  if (!filhos.length) filhos.push(new Paragraph({ children: [] }));
   const doc = new Document({
     title: titulo,
     creator: "Licita",
     styles: { default: { document: { run: { font: FONTE, size: 24 } } } },
-    sections: [{ properties: { page: { margin: { top: 1418, bottom: 1134, left: 1701, right: 1134 } } }, children: filhos }],
+    sections: [{
+      properties: { page: { margin: { top: timbrado ? 2250 : 1418, bottom: 1134, left: 1701, right: 1134, header: 520, footer: 460 } } },
+      headers: timbrado ? { default: new Header({ children: [imagemTimbrado(timbrado.cabecalho, 565)] }) } : undefined,
+      footers: timbrado ? { default: new Footer({ children: [imagemTimbrado(timbrado.rodape, 565)] }) } : undefined,
+      children: filhos,
+    }],
   });
   return Packer.toBuffer(doc);
 }
