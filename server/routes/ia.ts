@@ -8,6 +8,7 @@ import { FORMATO_MINUTA, MODELO, gerarEstruturado, gerarTexto, iaDisponivel, tra
 import { extrairTexto } from "../extrair.js";
 import { checksDo, minutaVigente, processoDo, salvarMinuta, upload, type Processo } from "./processos.js";
 import { ETAPAS, TIPOS, VIAS, etapaPorId, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../shared/etapas.js";
+import { fundamentosMinuta } from "../fundamentos-minuta.js";
 import { normasOficiais } from "../normas-oficiais.js";
 
 const LIMITE_DOC = 150_000; // caracteres por documento enviados à IA
@@ -63,6 +64,8 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
     l.push("Normas oficiais de referência. Cite somente as pertinentes ao objeto e à etapa. Confirme o texto oficial antes de indicar artigos específicos.");
     for (const n of oficiais) l.push(`- ${n.tipo} ${n.esfera} nº ${n.numero}/${n.ano} — ${n.assunto} Fonte: ${n.fonte}`);
   }
+  const areasDoProcesso = new Set([...areas, ...solicitacoes.map((s) => s.secretaria)].map((a) => a.trim().toLowerCase()).filter(Boolean));
+  l.push("", fundamentosMinuta({ etapa: e.id, via: p.via, objeto: p.objeto, areas: areasDoProcesso.size, orgao }));
   if (solicitacoes.length) {
     l.push("", "SOLICITAÇÕES DE OUTRAS SECRETARIAS NO MESMO PROCESSO");
     for (const s of solicitacoes) {
