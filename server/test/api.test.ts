@@ -262,7 +262,7 @@ test("preenche portaria de nomeação pelo cadastro, sem usar ato de fiscal ou a
   assert.equal((await admin.get("/api/admin/secretarios")).dados.lista.find((s: { id: number }) => s.id === saude.id).portaria, "009/2025");
   const { dados: { id } } = await admin.post("/api/processos", {
     objeto: "Contratação de teste com portarias", tipo: "bens", via: "licitacao",
-    ano: 2028, requisitante: "Secretaria Municipal de Saúde", areas_adicionais: ["Educação"],
+    ano: 2028, requisitante: "SEMUSA", areas_adicionais: ["Secretaria de Educação (SEDUC)", "Obras"],
   });
   const rota = `/api/processos/${id}/minutas/dfd`;
   const texto = [
@@ -277,6 +277,20 @@ test("preenche portaria de nomeação pelo cadastro, sem usar ato de fiscal ou a
   assert.match(atual, /Educação — Portaria nº 008\/2025/);
   assert.ok(atual.includes("[[portaria de designação]]"));
   assert.ok(atual.includes("[[portaria de nomeação]]"));
+  const minuta = (await admin.get(rota)).dados;
+  assert.equal(minuta.titulares_dfd.total, 3);
+  assert.deepEqual(minuta.titulares_dfd.areas_sem_cadastro, []);
+  assert.deepEqual(minuta.titulares_dfd.areas_sem_portaria, ["Obras, Viação e Serviços Urbanos"]);
+  assert.equal((await admin.post(`${rota}/titulares`, { versao: 0 })).status, 409);
+  assert.equal((await admin.post(`${rota}/titulares`, { versao: minuta.vigente.versao })).status, 200);
+  const atualizado = (await admin.get(rota)).dados;
+  assert.match(atualizado.vigente.texto, /Saúde — Amabily da Silva Laverde\. Portaria de nomeação nº 009\/2025/);
+  assert.match(atualizado.vigente.texto, /Educação — Denise da Silva Lima\. Portaria de nomeação nº 008\/2025/);
+  assert.match(atualizado.vigente.texto, /Antônio Vincenzi.*PREENCHER: portaria de nomeação/);
+  assert.ok(atualizado.vigente.texto.startsWith(atual));
+  assert.equal(atualizado.titulares_dfd.pode_inserir, false);
+  assert.deepEqual((await admin.post(`${rota}/titulares`, { versao: atualizado.vigente.versao })).dados,
+    { versao: atualizado.vigente.versao, nova: false });
   assert.equal((await admin.put(`/api/admin/secretarios/${saude.id}`, { ...saude, nome: "Novo titular de teste" })).status, 200);
   assert.equal((await admin.get("/api/admin/secretarios")).dados.lista.find((s: { id: number }) => s.id === saude.id).portaria, "");
 });
