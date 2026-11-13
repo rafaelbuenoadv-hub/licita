@@ -5,11 +5,13 @@ import { Folha } from "../comp/Folha";
 import { ETAPAS, TIPOS, VIAS, feita, feitos, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../../shared/etapas";
 import { tem, useEu } from "../main";
 import { CamposProcesso, paraApi, type DadosProc } from "./NovoProcesso";
+import { Solicitacoes } from "./Solicitacoes";
 
 const ACOES: Record<string, string> = {
   "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação", "processo.numerado": "gerou o nº do processo e do procedimento",
   "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA",
   "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
+  "solicitacao.incluida": "adicionou solicitação de secretaria",
   "ia.sugestoes": "pediu sugestões à IA", "contrato.criado": "registrou contrato",
 };
 
@@ -67,7 +69,7 @@ export function ProcessoPg() {
       </div>
 
       <Anexos p={p} recarregar={carregar} podeIncluir={tem(eu, "requisitante", "contratacao", "juridico")} />
-      <Historico id={p.id} versao={p.checagens.length + (p.minutas?.length ?? 0) + (p.orcamentos?.length ?? 0)} />
+      <Historico id={p.id} versao={p.checagens.length + (p.minutas?.length ?? 0) + (p.orcamentos?.length ?? 0) + p.solicitacoes.length} />
     </>
   );
 }
@@ -179,6 +181,7 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
             </li>);
         })}</ul>
       </div>
+      {e.id === "dfd" && <Solicitacoes processo={p} recarregar={recarregar} />}
       {(e.id === "dfd" || e.id === "precos") && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} />}
       {e.id === "precos" && p.via === "dispensa" && <Fracionamento id={p.id} />}
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { q, q1, auditar } from "../db.js";
 import { exigeLogin, exigePapel, hashSenha, senhaValida } from "../auth.js";
 import { ETAPAS, PAPEIS, type Papel } from "../../shared/etapas.js";
+import { normasOficiais } from "../normas-municipais.js";
 
 const papelEnum = z.enum(Object.keys(PAPEIS) as [Papel, ...Papel[]]);
 
@@ -12,7 +13,10 @@ export function rotasAdmin() {
 
   // Dados do órgão: qualquer usuário lê; admin altera.
   r.get("/orgao", exigeLogin, async (req, res) => {
-    res.json(await q1("select id, nome, cnpj, municipio, uf, normas from orgaos where id = $1", [req.usuario!.orgao_id]));
+    const orgao = await q1<{ nome: string; cnpj: string | null }>(
+      "select id, nome, cnpj, municipio, uf, normas from orgaos where id = $1", [req.usuario!.orgao_id],
+    );
+    res.json({ ...orgao, normas_oficiais: await normasOficiais(orgao) });
   });
   r.put("/admin/orgao", exigePapel("admin"), async (req, res) => {
     const d = z.object({ nome: z.string().min(2), cnpj: z.string().optional(), municipio: z.string().optional(), uf: z.string().max(2).optional(), normas: z.string().max(20000) }).parse(req.body);

@@ -2,7 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { exigePapel } from "../auth.js";
 import { auditar, q, q1, tx } from "../db.js";
-import { podeImportarIbaiti, secretariosIbaiti } from "../secretarios-ibaiti.js";
+import { secretariosIbaiti } from "../secretarios-ibaiti.js";
+import { ehMunicipioIbaiti } from "../municipio-ibaiti.js";
 
 const dadosSecretario = z.object({
   secretaria: z.string().trim().min(2).max(180),
@@ -21,7 +22,7 @@ export function rotasSecretarios() {
     const orgao = req.usuario!.orgao_id;
     const lista = await q(`select ${campos} from secretarios where orgao_id=$1 order by secretaria`, [orgao]);
     const identidade = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [orgao]);
-    res.json({ lista, pode_importar_ibaiti: !!identidade && podeImportarIbaiti(identidade) });
+    res.json({ lista, pode_importar_ibaiti: !!identidade && ehMunicipioIbaiti(identidade) });
   });
 
   r.post("/admin/secretarios", async (req, res) => {
@@ -69,7 +70,7 @@ export function rotasSecretarios() {
       const identidade = await c.query<{ nome: string; cnpj: string | null }>(
         "select nome, cnpj from orgaos where id=$1 for share", [orgao_id],
       );
-      if (!identidade.rows[0] || !podeImportarIbaiti(identidade.rows[0])) return null;
+      if (!identidade.rows[0] || !ehMunicipioIbaiti(identidade.rows[0])) return null;
       const resultado = await c.query(
         `insert into secretarios (orgao_id, codigo_portal, secretaria, nome, email, telefone, fonte)
          select $1, codigo, secretaria, nome, email, telefone, fonte

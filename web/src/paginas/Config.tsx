@@ -63,6 +63,23 @@ function Orgao() {
           <label className="wide">Regulamentos locais que a IA deve citar<textarea {...c("normas")} style={{ minHeight: 140 }}
             placeholder={"Um por linha, com o que regulamenta. Ex.:\nDecreto Municipal nº 2.533/2024 – fase preparatória e pesquisa de preços\nDecreto Municipal nº 2.549/2024 – dispensa eletrônica"} /></label>
         </div>
+        {o.normas_oficiais?.length > 0 && (
+          <div className="stack">
+            <h3>Normas municipais de referência</h3>
+            <div className="tw">
+              <table className="t">
+                <thead><tr><th>Norma</th><th>Assunto</th><th>Fonte oficial</th></tr></thead>
+                <tbody>{o.normas_oficiais.map((n: { tipo: string; numero: number; ano: number; assunto: string; fonte: string }) => (
+                  <tr key={`${n.tipo}-${n.numero}-${n.ano}`}>
+                    <td>{n.tipo} nº {n.numero}/{n.ano}</td>
+                    <td>{n.assunto}</td>
+                    <td><a href={n.fonte} target="_blank" rel="noreferrer" aria-label={`Consultar ${n.tipo} nº ${n.numero}/${n.ano}`}>Consultar</a></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
         <Msg m={m} /><div><button className="btn pri">Salvar</button></div>
       </form>
     </details>
