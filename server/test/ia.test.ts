@@ -58,7 +58,7 @@ before(async () => {
   };
   await mod.db.pool.query("drop schema public cascade; create schema public;");
   await mod.migrate.migrar();
-  const o = await mod.db.q1("insert into orgaos (nome) values ('Município Teste') returning id");
+  const o = await mod.db.q1("insert into orgaos (nome) values ('Município de Ibaiti') returning id");
   await mod.db.q1("insert into usuarios (orgao_id, nome, email, senha_hash, papeis) values ($1,'Req','req@t.gov.br',$2,'{requisitante,contratacao}')", [o.id, await mod.auth.hashSenha(SENHA)]);
   server = mod.app.criarApp().listen(0);
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -108,7 +108,7 @@ test("extrair dados de um memorando usa saída estruturada e respaldo", async ()
 });
 
 test("redigir minuta transmite o texto e salva nova versão", async () => {
-  const c = await api("POST", "/api/processos", { objeto: "Construção de gavetário", tipo: "obra", via: "dispensa", ano: 2026 });
+  const c = await api("POST", "/api/processos", { objeto: "Construção de gavetário", tipo: "obra", via: "dispensa", ano: 2026, requisitante: "Obras", areas_adicionais: ["Administração"] });
   proc = ((await c.json()) as any).id;
   textoStream = "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA\nProcesso nº [[PREENCHER: número]]\n## 1. Área requisitante\nSecretaria de Obras.";
   const r = await api("POST", `/api/processos/${proc}/ia/redigir`, { etapa: "dfd" });
@@ -119,7 +119,12 @@ test("redigir minuta transmite o texto e salva nova versão", async () => {
   assert.equal(linhas.filter((l) => l.d).map((l) => l.d).join(""), textoStream);
   const enviado = pedidos.at(-1)!.body;
   assert.equal(enviado.stream, true);
-  assert.match(enviado.messages[0].content, /MODELO DO DOCUMENTO/);
+  const contexto = enviado.messages[0].content;
+  assert.match(contexto, /MODELO DO DOCUMENTO/);
+  assert.match(contexto, /Lei Federal nº 14\.133\/2021/);
+  assert.match(contexto, /Decreto Municipal nº 2\.532\/2024, arts\. 2º e 3º/);
+  assert.match(contexto, /Acórdão nº 2490\/2026/);
+  assert.match(contexto, /Acórdão nº 2060\/2026/);
   const m: any = await (await api("GET", `/api/processos/${proc}/minutas/dfd`)).json();
   assert.equal(m.vigente.origem, "ia");
 });
@@ -130,6 +135,7 @@ test("sugestões só valem para campos existentes; índices inválidos são desc
   const j: any = await r.json();
   assert.equal(r.status, 200, JSON.stringify(j));
   assert.equal(j.sugestoes.length, 1);
+  assert.match(pedidos.at(-1)!.body.messages[0].content, /JURISPRUDÊNCIA DO TCE-PR/);
   assert.equal(j.versao, 1);
 });
 
