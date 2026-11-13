@@ -280,23 +280,38 @@ export function rotasProcessos() {
   });
 
   // Orçamentos da solicitação: guarda o arquivo original; o texto é lido quando possível, para a IA consultar.
-  r.post("/processos/:id/orcamentos", exigePapel("requisitante", "contratacao"), upload.single("arquivo"), async (req, res) => {
+  r.post("/processos/:id/orcamentos", exigePapel("requisitante", "contratacao"), upload.array("arquivo", 20), async (req, res) => {
     const p = await processoDo(req);
     if (p.situacao === "cancelado") throw new ErroHttp(409, "Processo cancelado.");
-    if (!req.file) throw new ErroHttp(400, "Envie o arquivo do orçamento.");
-    const nome = nomeEnviado(req.file);
-    if (!tipoOrcamento(nome)) throw new ErroHttp(415, "Formato não aceito. Envie .pdf, .docx, .xlsx, .xls, .jpg, .png, .txt ou .csv.");
-    const d = z.object({
-      fornecedor: z.string().trim().min(2).max(200),
-      valor: z.preprocess((v) => (v === "" || v == null ? null : Number(v)), z.number().nonnegative().nullable()),
-    }).parse(req.body);
-    // A leitura do texto é um extra: planilha, imagem ou PDF que não puder ser lido fica só com o arquivo.
-    const texto = /\.(docx|pdf|txt|csv)$/i.test(nome) ? await extrairTexto(nome, req.file.buffer).catch(() => "") : "";
-    const o = await q1("insert into orcamentos (processo_id, fornecedor, valor, nome, arquivo, texto, usuario_id) values ($1,$2,$3,$4,$5,$6,$7) returning id",
-      [p.id, d.fornecedor, d.valor, nome, req.file.buffer, texto, req.usuario!.id]);
+    const arquivos = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (!arquivos.length) throw new ErroHttp(400, "Envie ao menos um arquivo de orçamento.");
+    // Confere todos antes de gravar: ou entram todos, ou nenhum.
+    for (const f of arquivos) {
+      if (!tipoOrcamento(nomeEnviado(f))) throw new ErroHttp(415, `"${nomeEnviado(f)}": formato não aceito. Envie .pdf, .docx, .xlsx, .xls, .jpg, .png, .txt ou .csv.`);
+    }
+    const ids: number[] = [];
+    for (const f of arquivos) {
+      const nome = nomeEnviado(f);
+      // O orçamento é identificado pelo nome do arquivo, sem a extensão.
+      const fornecedor = (nome.replace(/\.[^.]+$/, "").trim() || nome).slice(0, 200);
+      // A leitura do texto é um extra: planilha, imagem ou PDF que não puder ser lido fica só com o arquivo.
+      const texto = /\.(docx|pdf|txt|csv)$/i.test(nome) ? await extrairTexto(nome, f.buffer).catch(() => "") : "";
+      const o = await q1("insert into orcamentos (processo_id, fornecedor, nome, arquivo, texto, usuario_id) values ($1,$2,$3,$4,$5,$6) returning id",
+        [p.id, fornecedor, nome, f.buffer, texto, req.usuario!.id]);
+      ids.push(o.id);
+      await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.incluido", detalhe: { nome } });
+    }
     await q("update processos set atualizado_em = now() where id = $1", [p.id]);
-    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.incluido", detalhe: { fornecedor: d.fornecedor, valor: d.valor, nome } });
-    res.status(201).json({ id: o.id, lido: texto !== "" });
+    res.status(201).json({ ids });
+  });
+  // Valor do orçamento: informado depois, na linha de cada arquivo.
+  r.put("/processos/:id/orcamentos/:oid", exigePapel("requisitante", "contratacao"), async (req, res) => {
+    const p = await processoDo(req);
+    const { valor } = z.object({ valor: z.number().nonnegative().nullable() }).parse(req.body);
+    const o = await q1("update orcamentos set valor=$1 where id=$2 and processo_id=$3 returning nome", [valor, Number(req.params.oid), p.id]);
+    if (!o) throw new ErroHttp(404, "Orçamento não encontrado.");
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.valor", detalhe: { nome: o.nome, valor } });
+    res.json({ ok: true });
   });
   r.get("/processos/:id/orcamentos/:oid/arquivo", async (req, res) => {
     const p = await processoDo(req);

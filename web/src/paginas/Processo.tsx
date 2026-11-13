@@ -9,7 +9,7 @@ import { CamposProcesso, paraApi, type DadosProc } from "./NovoProcesso";
 const ACOES: Record<string, string> = {
   "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação", "processo.numerado": "gerou o nº do processo e do procedimento",
   "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA",
-  "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "anexo.removido": "removeu documento",
+  "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
   "ia.sugestoes": "pediu sugestões à IA", "contrato.criado": "registrou contrato",
 };
 
@@ -197,23 +197,18 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
 function Orcamentos({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void }) {
   const { eu } = useEu();
   const pode = tem(eu, "requisitante", "contratacao") && p.situacao !== "cancelado";
-  const [f, setF] = useState({ fornecedor: "", valor: "" });
-  const [arq, setArq] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const lista: any[] = p.orcamentos ?? [];
   const comValor = lista.filter((o) => o.valor != null);
-  const enviar = async (ev: FormEvent) => {
-    ev.preventDefault();
-    const v = numBR(f.valor);
-    if (Number.isNaN(v)) return setAviso({ t: "Valor do orçamento inválido. Use, por exemplo, 12.500,00.", tipo: "bad" });
-    if (!arq) return setAviso({ t: "Escolha o arquivo do orçamento.", tipo: "bad" });
+  const enviar = async (arqs: File[]) => {
+    if (!arqs.length) return;
     setBusy(true);
     try {
       const fd = new FormData();
-      fd.append("fornecedor", f.fornecedor); fd.append("valor", v == null ? "" : String(v)); fd.append("arquivo", arq);
+      for (const a of arqs) fd.append("arquivo", a);
       await api.post(`/processos/${p.id}/orcamentos`, fd);
-      setF({ fornecedor: "", valor: "" }); setArq(null);
-      await recarregar(); setAviso({ t: `Orçamento de ${f.fornecedor} anexado.`, tipo: "ok" });
+      await recarregar();
+      setAviso({ t: arqs.length === 1 ? `Orçamento "${arqs[0].name}" anexado.` : `${arqs.length} orçamentos anexados.`, tipo: "ok" });
     } catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
     finally { setBusy(false); }
   };
@@ -221,25 +216,36 @@ function Orcamentos({ p, recarregar, setAviso }: { p: any; recarregar: () => Pro
     try { await api.del(`/processos/${p.id}/orcamentos/${o.id}`); await recarregar(); }
     catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
   };
+  const gravarValor = async (o: any, txt: string) => {
+    const v = numBR(txt);
+    if (Number.isNaN(v)) return setAviso({ t: "Valor do orçamento inválido. Use, por exemplo, 12.500,00.", tipo: "bad" });
+    if (v === o.valor) return;
+    try { await api.put(`/processos/${p.id}/orcamentos/${o.id}`, { valor: v }); await recarregar(); }
+    catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
+  };
   return (
     <div className="sec"><span className="lbl">Orçamentos</span>
-      <p className="small muted">Anexe aqui os orçamentos recebidos dos fornecedores (PDF, Word, planilha ou foto). Eles ficam guardados no processo e a IA consulta os que têm texto legível.</p>
+      <p className="small muted">Anexe aqui os orçamentos recebidos dos fornecedores (PDF, Word, planilha ou foto). Você pode escolher vários arquivos de uma vez; cada um fica identificado pelo nome do arquivo. A IA consulta os que têm texto legível.</p>
       {lista.length === 0 ? <p className="muted">Nenhum orçamento anexado.</p> :
         <div className="tw"><table className="t">
-          <thead><tr><th>Fornecedor</th><th className="r">Valor</th><th>Arquivo</th><th /></tr></thead>
+          <thead><tr><th>Orçamento</th><th className="r">Valor (R$)</th><th /></tr></thead>
           <tbody>{lista.map((o) => (
-            <tr key={o.id}><td>{o.fornecedor}</td><td className="r">{brl(o.valor)}</td>
+            <tr key={o.id}>
               <td><a href={`/api/processos/${p.id}/orcamentos/${o.id}/arquivo`} download>{o.nome}</a>
                 <div className="small muted">{o.usuario ?? "—"} · {dataHora(o.criado_em)}</div></td>
+              <td className="r" style={{ width: 150 }}>{pode
+                ? <input key={`${o.id}-${o.valor}`} aria-label={`Valor do orçamento ${o.nome}`} defaultValue={fmtNum(o.valor)} placeholder="informar" inputMode="decimal" style={{ textAlign: "right" }}
+                    onBlur={(e) => gravarValor(o, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                : brl(o.valor)}</td>
               <td className="r">{pode && <button className="lnk" onClick={() => remover(o)}>Remover</button>}</td></tr>))}</tbody>
         </table></div>}
       {comValor.length > 1 && <p className="small muted">{comValor.length} orçamentos com valor · menor: {brl(Math.min(...comValor.map((o) => o.valor)))} · média: {brl(comValor.reduce((s, o) => s + o.valor, 0) / comValor.length)}</p>}
-      {pode && <form className="form" onSubmit={enviar}>
-        <label>Fornecedor<input id="o-fornecedor" value={f.fornecedor} onChange={(e) => setF({ ...f, fornecedor: e.target.value })} required minLength={2} maxLength={200} /></label>
-        <label>Valor do orçamento (R$)<input id="o-valor" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} inputMode="decimal" placeholder="0,00" /></label>
-        <label>Arquivo<input id="o-arquivo" type="file" accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv" onChange={(e) => setArq(e.target.files?.[0] ?? null)} key={lista.length} /></label>
-        <div style={{ alignSelf: "end" }}><button className="btn pri" disabled={busy}>{busy ? "Enviando…" : "Anexar orçamento"}</button></div>
-      </form>}
+      {pode && <div className="tools">
+        <label className="btn pri" htmlFor="o-arquivos">{busy ? "Enviando…" : "Anexar orçamentos"}</label>
+        <input id="o-arquivos" type="file" multiple hidden disabled={busy} accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv"
+          onChange={(e) => { enviar([...(e.target.files ?? [])]); e.target.value = ""; }} />
+        <span className="small muted">Até 20 arquivos por vez, 20 MB cada. O valor de cada orçamento é informado depois, na lista.</span>
+      </div>}
     </div>
   );
 }

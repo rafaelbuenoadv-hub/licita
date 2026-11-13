@@ -262,39 +262,45 @@ test("migração dá protocolo a processos antigos sem repetir", async () => {
   assert.equal((await lic.post("/api/processos", { objeto: "Novo no órgão C", tipo: "bens", via: "dispensa", ano: 2025 })).dados.protocolo, "2025/0003");
 });
 
-test("orçamentos da solicitação: anexa, baixa o arquivo original e remove", async () => {
+test("orçamentos da solicitação: vários de uma vez, nome do arquivo, valor depois, download e remoção", async () => {
   const req = await new Cliente().entrar("req@a.gov.br");
   const jur = await new Cliente().entrar("jur@a.gov.br");
   const b = await new Cliente().entrar("admin@b.gov.br");
-  const form = (nome: string, conteudo: string | Buffer, campos: Record<string, string>) => {
+  const form = (...arqs: [string, string | Buffer][]) => {
     const fd = new FormData();
-    for (const [k, v] of Object.entries(campos)) fd.append(k, v);
-    fd.append("arquivo", new Blob([conteudo]), nome);
+    for (const [nome, conteudo] of arqs) fd.append("arquivo", new Blob([conteudo]), nome);
     return fd;
   };
   const url = `/api/processos/${procId}/orcamentos`;
-  const r1 = await req.req("POST", url, form("orçamento construtora.txt", "Proposta: R$ 110.000,00", { fornecedor: "Construtora X", valor: "110000" }));
-  assert.equal(r1.status, 201, JSON.stringify(r1.dados));
-  assert.equal(r1.dados.lido, true);
-  // Foto do orçamento: guarda o arquivo mesmo sem texto; valor é opcional.
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
-  const r2 = await req.req("POST", url, form("foto.png", png, { fornecedor: "Empreiteira Y", valor: "" }));
-  assert.equal(r2.status, 201, JSON.stringify(r2.dados));
-  assert.equal(r2.dados.lido, false);
-  assert.equal((await req.req("POST", url, form("virus.exe", "x", { fornecedor: "Z", valor: "1" }))).status, 415);
-  assert.equal((await req.req("POST", url, form("a.txt", "x", { fornecedor: "", valor: "1" }))).status, 400);
-  assert.equal((await jur.req("POST", url, form("a.txt", "x", { fornecedor: "Outra", valor: "1" }))).status, 403);
-  assert.equal((await b.req("POST", url, form("a.txt", "x", { fornecedor: "Outra", valor: "1" }))).status, 404);
+  // Dois arquivos na mesma remessa; a foto fica guardada mesmo sem texto legível.
+  const r = await req.req("POST", url, form(["orçamento construtora.txt", "Proposta: R$ 110.000,00"], ["foto.png", png]));
+  assert.equal(r.status, 201, JSON.stringify(r.dados));
+  assert.equal(r.dados.ids.length, 2);
+  const [id1, id2] = r.dados.ids;
+  // Um arquivo recusado barra a remessa inteira.
+  assert.equal((await req.req("POST", url, form(["ok.txt", "x"], ["virus.exe", "x"]))).status, 415);
+  assert.equal((await req.req("POST", url, new FormData())).status, 400);
+  assert.equal((await jur.req("POST", url, form(["a.txt", "x"]))).status, 403);
+  assert.equal((await b.req("POST", url, form(["a.txt", "x"]))).status, 404);
 
-  const det = await jur.get(`/api/processos/${procId}`);
-  assert.deepEqual(det.dados.orcamentos.map((o: any) => [o.fornecedor, o.valor, o.nome, o.lido]), [["Construtora X", 110000, "orçamento construtora.txt", true], ["Empreiteira Y", null, "foto.png", false]]);
-  const arq = await jur.get(`${url}/${r2.dados.id}/arquivo`);
+  const linhas = async () => (await jur.get(`/api/processos/${procId}`)).dados.orcamentos.map((o: any) => [o.fornecedor, o.valor, o.nome, o.lido]);
+  assert.deepEqual(await linhas(), [["orçamento construtora", null, "orçamento construtora.txt", true], ["foto", null, "foto.png", false]]);
+  // Valor informado depois, por quem pode anexar.
+  assert.equal((await jur.put(`${url}/${id1}`, { valor: 110000 })).status, 403);
+  assert.equal((await b.put(`${url}/${id1}`, { valor: 110000 })).status, 404);
+  assert.equal((await req.put(`${url}/${id1}`, { valor: -1 })).status, 400);
+  assert.equal((await req.put(`${url}/${id1}`, { valor: 110000 })).status, 200);
+  assert.deepEqual((await linhas())[0], ["orçamento construtora", 110000, "orçamento construtora.txt", true]);
+  assert.equal((await req.put(`${url}/${id1}`, { valor: null })).status, 200);
+
+  const arq = await jur.get(`${url}/${id2}/arquivo`);
   assert.equal(arq.status, 200);
   assert.equal(arq.tipo, "image/png");
   assert.deepEqual(arq.dados, png);
-  assert.equal((await b.get(`${url}/${r2.dados.id}/arquivo`)).status, 404);
-  assert.equal((await jur.req("DELETE", `${url}/${r2.dados.id}`)).status, 403);
-  assert.equal((await req.req("DELETE", `${url}/${r2.dados.id}`)).status, 200);
+  assert.equal((await b.get(`${url}/${id2}/arquivo`)).status, 404);
+  assert.equal((await jur.req("DELETE", `${url}/${id2}`)).status, 403);
+  assert.equal((await req.req("DELETE", `${url}/${id2}`)).status, 200);
   assert.equal((await req.get(`/api/processos/${procId}`)).dados.orcamentos.length, 1);
 });
 
