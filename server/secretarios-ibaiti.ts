@@ -17,10 +17,3 @@ export const secretariosIbaiti = [
   { codigo: "saude", secretaria: "Saúde", nome: "Amabily da Silva Laverde", email: "semusa@ibaiti.pr.gov.br", telefone: "(43) 3546-7481 / 7480" },
   { codigo: "trabalho-emprego", secretaria: "Trabalho e Emprego", nome: "Alexandre Sousa Nunes", email: "emprego@ibaiti.pr.gov.br", telefone: "(43) 3546-1000" },
 ].map((s) => ({ ...s, fonte: s.fonte ?? portal }));
-
-export function podeImportarIbaiti(orgao: { nome: string; cnpj: string | null }) {
-  const cnpj = orgao.cnpj?.replace(/\D/g, "");
-  if (cnpj) return cnpj === "77008068000141";
-  const nome = orgao.nome.normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase();
-  return /^(?:(?:municipio|prefeitura(?: municipal)?) de )?ibaiti(?:\s*[-/]\s*pr)?$/.test(nome);
-}

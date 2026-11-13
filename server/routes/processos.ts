@@ -1,4 +1,4 @@
-import { Router, type Request } from "express";
+import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
 import { q, q1, tx, auditar } from "../db.js";
@@ -76,6 +76,14 @@ const TIPOS_ORC: Record<string, string> = {
 };
 const tipoOrcamento = (nome: string): string | undefined => TIPOS_ORC[nome.toLowerCase().split(".").pop() ?? ""];
 
+function enviarArquivo(res: Response, nome: string, arquivo: Buffer) {
+  const ascii = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7e]|["\\]/g, "_");
+  res.setHeader("Content-Type", tipoOrcamento(nome) ?? "application/octet-stream");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(nome)}`);
+  res.send(arquivo);
+}
+
 /** A numeração é liberada quando só falta a última etapa (autorização e publicação) ou tudo já foi concluído. */
 export const numeracaoLiberada = (p: Processo, c: Checks) => atual(p, c) >= ETAPAS.length - 1 || concluido(p, c);
 
@@ -144,9 +152,13 @@ export function rotasProcessos() {
     const orcamentos = await q(
       `select o.id, o.fornecedor, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, u.nome as usuario
          from orcamentos o left join usuarios u on u.id = o.usuario_id where o.processo_id = $1 order by o.id`, [p.id]);
+    const solicitacoes = await q(
+      "select id, secretaria, referencia, descricao, nome_arquivo from solicitacoes_processo where processo_id=$1 order by id", [p.id],
+    );
+    const secretarias = await q<{ secretaria: string }>("select secretaria from secretarios where orgao_id=$1 order by secretaria", [p.orgao_id]);
     const c: Checks = Object.fromEntries(checagens.map((x) => [x.item, true]));
     res.json({
-      ...p, checagens, minutas, anexos, orcamentos, etapa_atual: atual(p, c), concluido: concluido(p, c),
+      ...p, checagens, minutas, anexos, orcamentos, solicitacoes, secretarias: secretarias.map((s) => s.secretaria), etapa_atual: atual(p, c), concluido: concluido(p, c),
       numeracao: { liberada: numeracaoLiberada(p, c), sugestao: await sugestaoNumeracao(p) },
       pode: { editar: temPapel(req.usuario!, "requisitante", "contratacao"), numerar: temPapel(req.usuario!, "contratacao", "autoridade"), etapas: ETAPAS.filter((e) => podeMarcar(req.usuario!.papeis, e)).map((e) => e.id) },
     });
@@ -164,6 +176,54 @@ export function rotasProcessos() {
     await q("delete from checagens where processo_id=$1 and not (item = any($2))", [p.id, validos]);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "processo.alterado" });
     res.json({ ok: true });
+  });
+
+  r.post("/processos/:id/solicitacoes", exigePapel("requisitante", "contratacao"), upload.single("arquivo"), async (req, res) => {
+    const p = await processoDo(req);
+    const d = z.object({
+      chave_envio: z.uuid(),
+      secretaria: z.string().trim().min(2).max(200),
+      referencia: z.string().trim().max(120).default(""),
+      descricao: z.string().trim().min(1).max(10000),
+    }).parse(req.body);
+    const nome = req.file ? nomeEnviado(req.file) : null;
+    if (nome && !/\.(pdf|docx|txt|md|csv)$/i.test(nome)) {
+      throw new ErroHttp(415, "Envie uma solicitação em PDF, Word ou texto.");
+    }
+    const arquivo = req.file?.buffer ?? null;
+    const texto = nome && arquivo && !/\.pdf$/i.test(nome)
+      ? await extrairTexto(nome, arquivo).catch(() => "")
+      : "";
+    const resultado = await tx(async (c) => {
+      const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and orgao_id=$2 for update", [p.id, p.orgao_id]);
+      if (!processo) throw new ErroHttp(404, "Processo não encontrado.");
+      const { rows: [existente] } = await c.query(
+        "select id from solicitacoes_processo where processo_id=$1 and chave_envio=$2", [p.id, d.chave_envio],
+      );
+      if (existente) return { id: existente.id, nova: false };
+      if (processo.situacao !== "preparacao") {
+        throw new ErroHttp(409, "A solicitação só pode ser adicionada enquanto o processo estiver em preparação.");
+      }
+      const { rows: [nova] } = await c.query(
+        `insert into solicitacoes_processo (processo_id, chave_envio, secretaria, referencia, descricao, nome_arquivo, arquivo, texto_arquivo, usuario_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
+        [p.id, d.chave_envio, d.secretaria, d.referencia, d.descricao, nome, arquivo, texto, req.usuario!.id],
+      );
+      await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
+      await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.incluida", detalhe: { id: nova.id, secretaria: d.secretaria } }, c);
+      return { id: nova.id, nova: true };
+    });
+    res.status(resultado.nova ? 201 : 200).json({ id: resultado.id });
+  });
+
+  r.get("/processos/:id/solicitacoes/:sid/arquivo", async (req, res) => {
+    const p = await processoDo(req);
+    const id = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
+    const s = await q1<{ nome_arquivo: string; arquivo: Buffer }>(
+      "select nome_arquivo, arquivo from solicitacoes_processo where id=$1 and processo_id=$2 and arquivo is not null", [id, p.id],
+    );
+    if (!s) throw new ErroHttp(404, "Arquivo da solicitação não encontrado.");
+    enviarArquivo(res, s.nome_arquivo, s.arquivo);
   });
 
   // Numeração final: o nº do processo e o do procedimento só são gravados quando o processo chega à última etapa.
@@ -317,12 +377,7 @@ export function rotasProcessos() {
     const p = await processoDo(req);
     const o = await q1<{ nome: string; arquivo: Buffer }>("select nome, arquivo from orcamentos where id=$1 and processo_id=$2", [Number(req.params.oid), p.id]);
     if (!o) throw new ErroHttp(404, "Orçamento não encontrado.");
-    const ascii = o.nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7e]|["\\]/g, "_");
-    // Sempre como download e com tipo definido pela extensão: o arquivo veio de fora e não deve abrir como página.
-    res.setHeader("Content-Type", tipoOrcamento(o.nome) ?? "application/octet-stream");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(o.nome)}`);
-    res.send(o.arquivo);
+    enviarArquivo(res, o.nome, o.arquivo);
   });
   r.delete("/processos/:id/orcamentos/:oid", exigePapel("requisitante", "contratacao"), async (req, res) => {
     const p = await processoDo(req);

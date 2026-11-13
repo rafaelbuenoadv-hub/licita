@@ -11,6 +11,35 @@ create table if not exists orgaos (
   criado_em timestamptz not null default now()
 );
 
+create table if not exists normas_municipais (
+  cnpj text not null,
+  tipo text not null check (tipo in ('Decreto', 'Lei')),
+  numero int not null,
+  ano int not null,
+  assunto text not null,
+  fonte text not null,
+  primary key (cnpj, tipo, numero, ano)
+);
+
+insert into normas_municipais (cnpj, tipo, numero, ano, assunto, fonte) values
+  ('77008068000141', 'Decreto', 2532, 2024, 'Aplicação da Lei Federal nº 14.133/2021 às contratações diretas municipais.',
+    'https://ibaiti.pr.gov.br/legislacao/detalhe/348/-decreto-n-2532-2024-aplicabilidade-lei-1433-2021-contratacoes-diretas/'),
+  ('77008068000141', 'Decreto', 2533, 2024, 'Aplicação geral da Lei Federal nº 14.133/2021 às contratações municipais.',
+    'https://www.ibaiti.pr.gov.br/legislacao/detalhe/347/-decreto-n-2533-2024-aplicabilidade-da-lei-14133-2021-contratacoes-gerais/'),
+  ('77008068000141', 'Decreto', 2548, 2024, 'Regulamentação das licitações nas modalidades pregão e concorrência.',
+    'https://ibaiti.pr.gov.br/legislacao/detalhe/20500/pdecreto-n-2548-2024-regulamenta-modalidade-licitacao-pregao-e-concorrencia-publicap/'),
+  ('77008068000141', 'Decreto', 2549, 2024, 'Regulamentação da dispensa de licitação no Município.',
+    'https://ibaiti.pr.gov.br/legislacao/detalhe/20501/pdecreto-n-2549-2024-regulamenta-nbspdispensa-licitacaop/'),
+  ('77008068000141', 'Decreto', 2476, 2023, 'Retenção do Imposto de Renda nos pagamentos municipais a fornecedores e prestadores.',
+    'https://www.ibaiti.pr.gov.br/public/admin/globalarq/legislacao/arquivo/909c4ea2881a241af0eab8c3539e673e.pdf'),
+  ('77008068000141', 'Lei', 373, 2004, 'Processo administrativo no âmbito da Administração Pública Municipal de Ibaiti.',
+    'https://ibaiti.pr.gov.br/legislacao/detalhe/17151/lei-n-373-2004-regulamento-o-processo-administrativo-no-ambito-da-administracao-publica-municipal-de-ibaiti/'),
+  ('77008068000141', 'Lei', 892, 2018, 'Organização do Sistema Único de Assistência Social (SUAS) de Ibaiti.',
+    'https://camaraibaiti.pr.gov.br/uploads/legislacao/33474/LoQVJpqynUC2e3A2IoS3RScUiTHD4Tzg.pdf'),
+  ('77008068000141', 'Lei', 1316, 2026, 'Tratamento favorecido nas contratações municipais para ME, EPP, MEI, agricultores familiares, produtores rurais pessoas físicas e cooperativas de consumo.',
+    'https://www.ibaiti.pr.gov.br/public/admin/globalarq/diario-eletronico/diario/ax2TAAcsR223ZA3w.pdf')
+on conflict (cnpj, tipo, numero, ano) do nothing;
+
 create table if not exists secretarios (
   id serial primary key,
   orgao_id int not null references orgaos(id) on delete cascade,
@@ -86,6 +115,22 @@ create table if not exists processos (
   atualizado_em timestamptz not null default now()
 );
 create index if not exists processos_orgao on processos(orgao_id, ano);
+
+create table if not exists solicitacoes_processo (
+  id serial primary key,
+  processo_id int not null references processos(id) on delete cascade,
+  chave_envio uuid not null,
+  secretaria text not null,
+  referencia text not null default '',
+  descricao text not null,
+  nome_arquivo text,
+  arquivo bytea,
+  texto_arquivo text not null default '',
+  usuario_id int references usuarios(id),
+  criado_em timestamptz not null default now(),
+  unique (processo_id, chave_envio)
+);
+create index if not exists solicitacoes_processo_processo on solicitacoes_processo(processo_id, id);
 
 -- Protocolo: identificador único do processo desde a abertura, no formato ANO/0001, sequencial por órgão e ano.
 -- O nº do processo administrativo e o do procedimento (colunas numero e procedimento) só são gravados ao final.

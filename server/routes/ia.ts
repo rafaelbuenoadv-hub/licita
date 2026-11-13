@@ -7,6 +7,7 @@ import { FORMATO_MINUTA, MODELO, gerarEstruturado, gerarTexto, iaDisponivel, tra
 import { extrairTexto } from "../extrair.js";
 import { checksDo, minutaVigente, processoDo, salvarMinuta, upload, type Processo } from "./processos.js";
 import { ETAPAS, TIPOS, VIAS, etapaPorId, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../shared/etapas.js";
+import { normasOficiais } from "../normas-municipais.js";
 
 const LIMITE_DOC = 150_000; // caracteres por documento enviados à IA
 
@@ -20,7 +21,13 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   const e = etapaPorId(etapaId);
   if (!e) throw new ErroHttp(404, "Etapa inexistente.");
   const c = await checksDo(p.id);
-  const orgao = await q1("select nome, municipio, uf, normas from orgaos where id=$1", [p.orgao_id]);
+  const orgao = await q1<{ nome: string; cnpj: string | null; municipio: string | null; uf: string | null; normas: string }>(
+    "select nome, cnpj, municipio, uf, normas from orgaos where id=$1", [p.orgao_id],
+  );
+  const oficiais = await normasOficiais(orgao);
+  const solicitacoes = await q<{ secretaria: string; referencia: string; descricao: string; texto_arquivo: string }>(
+    "select secretaria, referencia, descricao, texto_arquivo from solicitacoes_processo where processo_id=$1 order by id", [p.id],
+  );
   const modelo = (await q1("select texto from modelos where orgao_id=$1 and etapa=$2", [p.orgao_id, e.id]))?.texto ?? e.modelo;
   const minutas = await q(
     `select distinct on (etapa) etapa, texto from minutas where processo_id=$1 order by etapa, versao desc`, [p.id]);
@@ -35,6 +42,17 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   l.push(`Tipo de objeto: ${TIPOS[p.tipo]}`, `Forma de contratação: ${VIAS[p.via]}`, `Valor estimado: ${moeda(p.valor_estimado)}`);
   l.push(`Exercício: ${p.ano}`, `Natureza/ramo (para fracionamento): ${p.classe || "não informada"}`);
   l.push(`Regulamentos locais do órgão: ${orgao?.normas || "não informados"}`, `Regulamentos citados neste processo: ${p.normas || "nenhum"}`);
+  if (oficiais.length) {
+    l.push("Normas municipais de referência. Cite somente as pertinentes ao objeto e à etapa. Confirme o texto oficial antes de indicar artigos específicos.");
+    for (const n of oficiais) l.push(`- ${n.tipo} Municipal nº ${n.numero}/${n.ano} — ${n.assunto} Fonte: ${n.fonte}`);
+  }
+  if (solicitacoes.length) {
+    l.push("", "SOLICITAÇÕES DE OUTRAS SECRETARIAS NO MESMO PROCESSO");
+    for (const s of solicitacoes) {
+      l.push(`- ${s.secretaria}${s.referencia ? ` (${s.referencia})` : ""}: ${s.descricao}`);
+      if (s.texto_arquivo) l.push(corta(s.texto_arquivo));
+    }
+  }
   l.push(`Observações: ${p.obs || "nenhuma"}`, "", "ANDAMENTO");
   ETAPAS.forEach((x, i) => {
     const its = itensDe(x, p);

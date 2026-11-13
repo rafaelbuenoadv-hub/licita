@@ -1,6 +1,7 @@
 // Testes de ponta a ponta da API. Exigem um Postgres vazio em DATABASE_URL (ex.: banco licita_test).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { pool, q1 } from "../db.js";
@@ -152,6 +153,60 @@ test("outro órgão não enxerga o processo", async () => {
   const b = await new Cliente().entrar("admin@b.gov.br");
   assert.equal((await b.get(`/api/processos/${procId}`)).status, 404);
   assert.equal((await b.get("/api/processos")).dados.length, 0);
+});
+
+test("normas oficiais de Ibaiti são carregadas sem alterar os regulamentos locais", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const outro = await new Cliente().entrar("admin@a.gov.br");
+  const original = (await admin.get("/api/orgao")).dados;
+  assert.equal((await admin.put("/api/admin/orgao", { ...original, municipio: "Ibaiti", uf: "PR", normas: "Regulamento existente." })).status, 200);
+  await migrar();
+  await migrar();
+  const { normas, normas_oficiais: oficiais } = (await admin.get("/api/orgao")).dados;
+  assert.equal(normas, "Regulamento existente.");
+  assert.deepEqual(oficiais.map((n: { tipo: string; numero: number; ano: number }) => `${n.tipo} ${n.numero}/${n.ano}`), [
+    "Decreto 2476/2023", "Decreto 2532/2024", "Decreto 2533/2024", "Decreto 2548/2024", "Decreto 2549/2024",
+    "Lei 373/2004", "Lei 892/2018", "Lei 1316/2026",
+  ]);
+  assert.deepEqual((await outro.get("/api/orgao")).dados.normas_oficiais, []);
+});
+
+test("solicitações de outras secretarias usam o mesmo processo e preservam o anexo", async () => {
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const jur = await new Cliente().entrar("jur@a.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+  const p = `/api/processos/${procId}`;
+  const original = (await req.get(p)).dados;
+  const texto = "Materiais para manutenção das unidades de saúde.";
+  const dados = new FormData();
+  dados.set("chave_envio", randomUUID());
+  dados.set("secretaria", "Saúde");
+  dados.set("referencia", "Memorando 42/2026");
+  dados.set("descricao", texto);
+  dados.set("arquivo", new Blob([texto]), "solicitação-saúde.txt");
+  assert.equal((await jur.post(`${p}/solicitacoes`, dados)).status, 403);
+  assert.equal((await outro.post(`${p}/solicitacoes`, dados)).status, 404);
+  const criada = await req.post(`${p}/solicitacoes`, dados);
+  assert.equal(criada.status, 201);
+  const repetida = await req.post(`${p}/solicitacoes`, dados);
+  assert.equal(repetida.status, 200);
+  assert.deepEqual(repetida.dados, criada.dados);
+  const educacao = { chave_envio: randomUUID(), secretaria: "Educação", descricao: "Materiais para manutenção de escolas." };
+  assert.equal((await req.post(`${p}/solicitacoes`, educacao)).status, 201);
+  const detalhe = (await req.get(p)).dados;
+  assert.equal(detalhe.protocolo, original.protocolo);
+  assert.equal(detalhe.requisitante, original.requisitante);
+  assert.deepEqual(detalhe.solicitacoes.map((s: { secretaria: string }) => s.secretaria), ["Saúde", "Educação"]);
+  assert.equal(detalhe.solicitacoes[0].referencia, "Memorando 42/2026");
+  const arquivo = `${p}/solicitacoes/${criada.dados.id}/arquivo`;
+  assert.equal((await req.get(arquivo)).dados.toString(), texto);
+  assert.equal((await outro.get(arquivo)).status, 404);
+  assert.equal((await q1("select texto_arquivo from solicitacoes_processo where id=$1", [criada.dados.id]))!.texto_arquivo, texto);
+  const novo = await req.post("/api/processos", { objeto: "Processo isolado para teste", tipo: "bens", via: "licitacao", ano: 2028 });
+  assert.equal((await req.get(`/api/processos/${novo.dados.id}/solicitacoes/${criada.dados.id}/arquivo`)).status, 404);
+  const admin = await new Cliente().entrar("admin@a.gov.br");
+  assert.equal((await admin.post(`/api/processos/${novo.dados.id}/situacao`, { situacao: "cancelado" })).status, 200);
+  assert.equal((await req.post(`/api/processos/${novo.dados.id}/solicitacoes`, educacao)).status, 409);
 });
 
 test("minuta versionada, campos pendentes e exportação .docx", async () => {
