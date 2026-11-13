@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, brl, fmtNum, numBR } from "../api";
 import { PAPEIS, type Papel } from "../../../shared/etapas";
 import { tem, useEu } from "../main";
+import { Secretarios } from "./Secretarios";
 
 export function Config() {
   const { eu, ia } = useEu();
@@ -13,6 +14,7 @@ export function Config() {
       <TrocarSenha />
       {admin && <Orgao />}
       {admin && <Usuarios />}
+      {admin && <Secretarios />}
       <Modelos podeEditar={tem(eu, "admin", "contratacao")} />
       <Limites podeEditar={admin} />
     </>
