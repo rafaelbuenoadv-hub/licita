@@ -117,7 +117,7 @@ test("cadastro de secretários importa dados oficiais apenas para Ibaiti e prese
   const editado = { ...planejamento, nome: "Novo titular de teste", secretaria: "Planejamento e Orçamento Municipal" };
   assert.equal((await admin.put(`${caminho}/${planejamento.id}`, editado)).status, 200);
   assert.deepEqual((await admin.post(`${caminho}/importar-ibaiti`)).dados, { inseridos: 0 });
-  assert.deepEqual((await admin.get(caminho)).dados.lista.find((s: { id: number }) => s.id === planejamento.id), editado);
+  assert.deepEqual((await admin.get(caminho)).dados.lista.find((s: { id: number }) => s.id === planejamento.id), { ...editado, portaria: "", fonte_portaria: "" });
   assert.deepEqual((await outro.get(caminho)).dados, { lista: [], pode_importar_ibaiti: false });
 });
 
@@ -249,6 +249,36 @@ test("PCA integral de Ibaiti é acessível e o item 39 é vinculado na abertura"
   assert.equal((await admin.get(`/api/processos/${sem.dados.id}`)).dados.pca_item_id, null);
   assert.equal((await admin.put(`/api/processos/${criado.dados.id}`, { ...dados, ano: 2027, pca_item_id: item.id })).status, 400);
   assert.equal((await outro.post("/api/processos", { ...dados, pca_item_id: item.id })).status, 400);
+});
+
+test("preenche portaria de nomeação pelo cadastro, sem usar ato de fiscal ou adivinhar o titular", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const { lista } = (await admin.get("/api/admin/secretarios")).dados;
+  const saude = lista.find((s: { secretaria: string }) => s.secretaria === "Saúde");
+  assert.equal(saude.portaria, "009/2025");
+  assert.match(saude.fonte_portaria, /^https:/);
+  await q1("update secretarios set portaria=null, fonte_portaria='' where id=$1", [saude.id]);
+  await migrar();
+  assert.equal((await admin.get("/api/admin/secretarios")).dados.lista.find((s: { id: number }) => s.id === saude.id).portaria, "009/2025");
+  const { dados: { id } } = await admin.post("/api/processos", {
+    objeto: "Contratação de teste com portarias", tipo: "bens", via: "licitacao",
+    ano: 2028, requisitante: "Secretaria Municipal de Saúde", areas_adicionais: ["Educação"],
+  });
+  const rota = `/api/processos/${id}/minutas/dfd`;
+  const texto = [
+    "Portaria nº [[portaria de nomeação — Saúde]]",
+    "Educação — Portaria nº [[número]]",
+    "Fiscal — Portaria nº [[portaria de designação]]",
+    "Portaria nº [[portaria de nomeação]]",
+  ].join("\n");
+  assert.equal((await admin.post(rota, { texto })).status, 200);
+  const atual = (await admin.get(rota)).dados.vigente.texto;
+  assert.match(atual, /Portaria nº 009\/2025/);
+  assert.match(atual, /Educação — Portaria nº 008\/2025/);
+  assert.ok(atual.includes("[[portaria de designação]]"));
+  assert.ok(atual.includes("[[portaria de nomeação]]"));
+  assert.equal((await admin.put(`/api/admin/secretarios/${saude.id}`, { ...saude, nome: "Novo titular de teste" })).status, 200);
+  assert.equal((await admin.get("/api/admin/secretarios")).dados.lista.find((s: { id: number }) => s.id === saude.id).portaria, "");
 });
 
 test("minuta versionada, campos pendentes e exportação .docx", async () => {

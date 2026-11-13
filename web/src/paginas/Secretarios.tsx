@@ -8,6 +8,8 @@ interface Secretario {
   email: string;
   telefone: string;
   fonte: string;
+  portaria: string;
+  fonte_portaria: string;
 }
 
 interface CadastroSecretarios {
@@ -16,12 +18,14 @@ interface CadastroSecretarios {
 }
 
 const caminho = "/admin/secretarios";
-const novo = { id: 0, secretaria: "", nome: "", email: "", telefone: "", fonte: "" };
+const novo = { id: 0, secretaria: "", nome: "", email: "", telefone: "", fonte: "", portaria: "", fonte_portaria: "" };
 const campos = [
   { chave: "secretaria", rotulo: "Secretaria", limite: 180, obrigatorio: true },
   { chave: "nome", rotulo: "Nome do titular", limite: 180, obrigatorio: true },
   { chave: "email", rotulo: "E-mail institucional", limite: 254, tipo: "email" },
   { chave: "telefone", rotulo: "Telefone institucional", limite: 80, tipo: "tel" },
+  { chave: "portaria", rotulo: "Portaria de nomeação (número/ano)", limite: 14 },
+  { chave: "fonte_portaria", rotulo: "Link oficial da portaria", limite: 1200, tipo: "url" },
   { chave: "fonte", rotulo: "Link da fonte oficial", limite: 1200, tipo: "url" },
 ] as const;
 
@@ -83,7 +87,7 @@ export function Secretarios() {
             {cadastro.lista.length > 0 ? (
               <div className="tw">
                 <table className="t">
-                  <thead><tr><th>Secretaria</th><th>Titular</th><th>Contato institucional</th><th>Fonte</th><th>Ações</th></tr></thead>
+                  <thead><tr><th>Secretaria</th><th>Titular</th><th>Contato institucional</th><th>Portaria de nomeação</th><th>Fonte</th><th>Ações</th></tr></thead>
                   <tbody>{cadastro.lista.map((s) => (
                     <tr key={s.id}>
                       <td>{s.secretaria}</td>
@@ -93,6 +97,7 @@ export function Secretarios() {
                         {s.telefone && <div>{s.telefone}</div>}
                         {!s.email && !s.telefone && "—"}
                       </td>
+                      <td>{s.portaria && s.fonte_portaria ? <a href={s.fonte_portaria} target="_blank" rel="noreferrer">{s.portaria}</a> : s.portaria || "—"}</td>
                       <td>{s.fonte ? <a href={s.fonte} target="_blank" rel="noreferrer" aria-label={`Fonte oficial de ${s.secretaria}`}>Consultar</a> : "—"}</td>
                       <td><button className="lnk" disabled={ocupado} onClick={() => { setForm(s); setAviso(null); }}
                         aria-label={`Editar titular de ${s.secretaria}`}>Editar</button></td>

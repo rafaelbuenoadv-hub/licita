@@ -288,7 +288,10 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
 
   const carregar = useCallback(async () => {
     const r = await api.get(`/processos/${p.id}/minutas/${e.id}`);
-    setM(r); setRascunho(r.vigente?.texto ?? ""); setVendo(null); setVals({}); setSug({});
+    const cadastro = r.sugestoes_cadastro as { i: number; valor: string; fonte: string }[];
+    setM(r); setRascunho(r.vigente?.texto ?? ""); setVendo(null);
+    setVals(Object.fromEntries(cadastro.map((x) => [x.i, x.valor])));
+    setSug(Object.fromEntries(cadastro.map((x) => [x.i, { ...x, cadastro: true }])));
   }, [p.id, e.id]);
   useEffect(() => { carregar(); return () => ctl.current?.abort(); }, [carregar]);
   if (!m) return <div className="sec"><p className="muted">Carregando minuta…</p></div>;
@@ -316,9 +319,9 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
     try {
       const r = await api.post(`/processos/${p.id}/ia/sugerir`, { etapa: e.id });
       if (r.versao !== m.vigente.versao) { await carregar(); throw new Error("A minuta mudou enquanto a IA trabalhava. Peça as sugestões de novo."); }
-      const s: Record<string, any> = {}, v = { ...vals };
+      const s: Record<string, any> = { ...sug }, v = { ...vals };
       let n = 0;
-      for (const x of r.sugestoes) { s[x.i] = x; if (x.valor) { n++; if (!v[x.i]?.trim()) v[x.i] = x.valor; } }
+      for (const x of r.sugestoes) { if (s[x.i]?.cadastro) continue; s[x.i] = x; if (x.valor) { n++; if (!v[x.i]?.trim()) v[x.i] = x.valor; } }
       setSug(s); setVals(v);
       setAviso({ t: `A IA sugeriu ${n} de ${pend.length} campos. Confira cada sugestão e clique em "Aplicar na minuta".`, tipo: "ok" });
     } catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
@@ -374,11 +377,11 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
 
       {!vendo && busy !== "redigir" && modo === "ver" && (pend.length > 0 ? (
         <div className="pend">
-          <div className="row"><div><span className="lbl">Preencher com IA</span><h3>{pend.length} {pend.length > 1 ? "campos pendentes" : "campo pendente"}</h3></div>
+          <div className="row"><div><h3>{pend.length} {pend.length > 1 ? "campos pendentes" : "campo pendente"}</h3></div>
             <div className="tools">
               <button className="btn sm" disabled={!editavel || !ia.disponivel || busy !== ""} onClick={sugerir}>{busy === "sugerir" ? "Procurando nas peças…" : "Sugerir com IA"}</button>
               <button className="btn sm pri" disabled={!editavel || busy !== ""} onClick={aplicar}>Aplicar na minuta</button></div></div>
-          <p className="small muted">A IA procura os valores nas outras peças e nos documentos anexados ao processo. O que não constar fica vazio, com o setor que deve informar.</p>
+          <p className="small muted">Confira os dados do cadastro e as sugestões das peças do processo antes de aplicar.</p>
           {pend.map((x) => {
             const s = sug[x.i];
             const [a, b] = x.trecho.split("▮");
@@ -386,7 +389,7 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
               <div className="pf" key={x.i}>
                 <label htmlFor={"pend-" + x.i}>{a}<mark>{x.rotulo}</mark>{b}</label>
                 <input id={"pend-" + x.i} value={vals[x.i] ?? ""} onChange={(ev) => setVals({ ...vals, [x.i]: ev.target.value })} placeholder="Texto que substitui o campo" disabled={!editavel} autoComplete="off" />
-                {s && (s.valor ? <span className="b sg">Sugestão da IA · {s.fonte || "dados do processo"}</span> : <span className="b falta">Não consta nos documentos · {s.falta || "informar"}</span>)}
+                {s && (s.valor ? <span className="b sg">{s.cadastro ? s.fonte : `Sugestão da IA · ${s.fonte || "dados do processo"}`}</span> : <span className="b falta">Não consta nos documentos · {s.falta || "informar"}</span>)}
               </div>);
           })}
         </div>) : texto ? <p className="small" style={{ color: "var(--accent)" }}>Nenhum campo pendente nesta minuta.</p> : null)}
