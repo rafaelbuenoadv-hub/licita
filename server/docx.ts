@@ -1,5 +1,5 @@
 import {
-  AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, PageOrientation, Paragraph, Table, TableCell, TableRow, TextRun, WidthType,
+  AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, PageOrientation, Paragraph, Table, TableCell, TableLayoutType, TableRow, TextRun, WidthType,
 } from "docx";
 import { quantidadeColunasCotacoes } from "../shared/solicitacao.js";
 
@@ -23,11 +23,16 @@ function runs(t: string, extra: { bold?: boolean } = {}): TextRun[] {
   return out;
 }
 
-function tabela(linhas: string[][]) {
+function tabela(linhas: string[][], larguraUtil: number) {
   const cols = Math.max(...linhas.map((l) => l.length));
   const borda = { style: BorderStyle.SINGLE, size: 4, color: "000000" };
+  const comCotacoes = linhas[0][0] === "Item" && linhas[0][1] === "Descrição" && /^Cotação 1 /.test(linhas[0][4] ?? "");
+  const pesos = Array.from({ length: cols }, (_, i) => [6, 29, 6, 6][i] ?? 12);
+  const soma = pesos.reduce((total, peso) => total + peso, 0);
+  const columnWidths = comCotacoes ? pesos.map((peso) => Math.floor(larguraUtil * peso / soma)) : undefined;
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
+    ...(columnWidths && { columnWidths, layout: TableLayoutType.FIXED }),
     borders: { top: borda, bottom: borda, left: borda, right: borda, insideHorizontal: borda, insideVertical: borda },
     rows: linhas.map((l, i) => new TableRow({
       tableHeader: i === 0,
@@ -58,11 +63,12 @@ export async function minutaParaDocx(texto: string, titulo: string, timbrado?: T
     width: 11906,
     height: Math.min(31600, Math.max(16838, 9100 + colunasCotacoes * 1400)),
   } : undefined;
+  const larguraUtil = (tamanhoPagina?.height ?? 11906) - 1701 - 1134;
   const filhos: (Paragraph | Table)[] = [];
   let tab: string[][] = [];
   let assinatura = false;
   const fechaTabela = () => {
-    if (tab.length) { filhos.push(tabela(tab)); filhos.push(new Paragraph({ children: [] })); tab = []; }
+    if (tab.length) { filhos.push(tabela(tab, larguraUtil)); filhos.push(new Paragraph({ children: [] })); tab = []; }
   };
   for (const bruta of texto.split("\n")) {
     const s = bruta.trim();

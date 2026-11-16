@@ -88,7 +88,8 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
     const espaco = 4;
     const quadroComCotacoes = colunas > 6 && linhas[0][0] === "Item" && linhas[0][1] === "Descrição";
     const pesos = Array.from({ length: colunas }, (_, c) => {
-      const minimo = quadroComCotacoes && c >= 4 ? 15 : 6;
+      const minimos = [6, 144, 10, 6];
+      const minimo = quadroComCotacoes ? minimos[c] ?? (c === colunas - 1 ? 29 : 15) : 6;
       const maximo = linhas.reduce((max, linha) => Math.max(max, linha[c]?.replace(/\*\*/g, "").length ?? 0), 0);
       return Math.sqrt(Math.max(minimo, Math.min(150, maximo)));
     });
