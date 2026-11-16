@@ -83,34 +83,30 @@ const LIMITE_COLUNAS_COTACOES = 3;
 const CABECALHO_ANTERIOR = "| Item | Descrição | Un. | Qtd. | Valor unitário | Valor total |";
 const CABECALHO_COTACOES = "| Item | Descrição | Un. | Qtd. | Valor unitário estimado | Valor total |";
 
-function colunasDeCotacao(itens: ItemSolicitacao[]) {
+function cotacoesPorFornecedor(itens: ItemSolicitacao[]) {
   const fornecedores = new Map<string, string>();
-  const cotacoes = itens.map((item) => (item.cotacoes ?? []).flatMap((cotacao) => {
-    if (cotacao.valor_unitario == null) return [];
-    const nome = celula(cotacao.fornecedor) || "Fornecedor a identificar";
-    const chave = normalizarCotacao(cotacao.fornecedor);
-    if (!fornecedores.has(chave)) fornecedores.set(chave, nome);
-    const preco = real(cotacao.valor_unitario) + (cotacao.orcamento_id == null ? " (anexo pendente)" : "");
-    return [{ chave, nome, preco }];
-  }));
-  if (fornecedores.size <= LIMITE_COLUNAS_COTACOES) {
-    const colunas = [...fornecedores];
-    return {
-      titulos: colunas.map(([, nome]) => nome),
-      linhas: cotacoes.map((lista) => [colunas.map(([chave]) => lista.find((c) => c.chave === chave)?.preco ?? "—")]),
-    };
-  }
-  const largura = Math.min(LIMITE_COLUNAS_COTACOES, Math.max(...cotacoes.map((lista) => lista.length)));
-  return {
-    titulos: Array.from({ length: largura }, (_, i) => `Cotação ${i + 1}`),
-    linhas: cotacoes.map((lista) => {
-      const grupos: string[][] = [];
-      for (let inicio = 0; inicio < lista.length; inicio += largura) {
-        grupos.push(lista.slice(inicio, inicio + largura).map((c) => `${c.nome} — ${c.preco}`));
-      }
-      return grupos;
-    }),
-  };
+  const cotacoes = itens.map((item) => {
+    const precos = new Map<string, string>();
+    for (const cotacao of item.cotacoes ?? []) {
+      if (cotacao.valor_unitario == null) continue;
+      const chave = normalizarCotacao(cotacao.fornecedor);
+      const nome = celula(cotacao.fornecedor) || "Fornecedor a identificar";
+      if (!fornecedores.has(chave)) fornecedores.set(chave, nome);
+      const pendencia = cotacao.orcamento_id == null ? " (anexo pendente)" : "";
+      precos.set(chave, real(cotacao.valor_unitario) + pendencia);
+    }
+    return precos;
+  });
+  return { fornecedores: [...fornecedores], cotacoes };
+}
+
+function linhaDeItem(item: ItemSolicitacao, indice: number, repetir: boolean) {
+  const identificacao = `| ${indice + 1} | ${celula(item.descricao)} |`;
+  if (repetir) return `${identificacao} | | | |`;
+  const subtotal = totalDoItem(item);
+  const qtd = item.quantidade == null ? "—" : numero(item.quantidade);
+  const unitario = item.valor_unitario == null ? "—" : real(item.valor_unitario);
+  return `${identificacao} ${celula(item.unidade) || "—"} | ${qtd} | ${unitario} | ${subtotal == null ? "—" : real(subtotal)} |`;
 }
 
 /** Quadro de itens no formato das minutas (linhas com barras verticais). */
@@ -119,25 +115,32 @@ export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = f
   const total = totalDosItens(itens);
   const temCotacoes = itens.some((i) => i.cotacoes !== undefined);
   const parcial = temCotacoes && itens.some((i) => totalDoItem(i) == null);
-  const precos = incluirPrecosCotados ? colunasDeCotacao(itens) : undefined;
-  const titulos = precos?.titulos ?? [];
   const cabecalho = temCotacoes ? CABECALHO_COTACOES : CABECALHO_ANTERIOR;
-  const acrescentar = (linha: string, colunas: string[] = [], vazio = "—") =>
-    linha + titulos.map((_, i) => {
-      const valor = colunas[i] ?? vazio;
-      return valor ? ` ${valor} |` : " |";
-    }).join("");
-  return [
-    acrescentar(cabecalho, titulos),
-    `|${"---|".repeat(6 + titulos.length)}`,
-    ...itens.flatMap((item, k) => {
-      const subtotal = totalDoItem(item);
-      const linha = `| ${k + 1} | ${celula(item.descricao)} | ${celula(item.unidade) || "—"} | ${item.quantidade == null ? "—" : numero(item.quantidade)} | ${item.valor_unitario == null ? "—" : real(item.valor_unitario)} | ${subtotal == null ? "—" : real(subtotal)} |`;
-      const [primeira, ...continuacao] = precos?.linhas[k] ?? [];
-      return [acrescentar(linha, primeira), ...continuacao.map((colunas) => acrescentar("| | | | | | |", colunas, ""))];
-    }),
-    ...(total == null ? [] : [acrescentar(`| | ${parcial ? "Subtotal dos itens com valor" : "Total estimado"} | | | | ${real(total)} |`, [], "")]),
-  ].join("\n");
+  const precos = incluirPrecosCotados ? cotacoesPorFornecedor(itens) : null;
+  const fornecedores = precos?.fornecedores ?? [];
+  const largura = Math.min(LIMITE_COLUNAS_COTACOES, fornecedores.length);
+  const acrescentar = (linha: string, colunas: string[] = []) =>
+    linha + Array.from({ length: largura }, (_, i) => colunas[i] ? ` ${colunas[i]} |` : " |").join("");
+
+  const linhas: string[] = [];
+  const mostrados = new Set<number>();
+  // Grupos no mesmo quadro mantêm as colunas legíveis nos arquivos impressos.
+  for (let inicio = 0; inicio < Math.max(1, fornecedores.length); inicio += Math.max(1, largura)) {
+    const grupo = fornecedores.slice(inicio, inicio + largura);
+    const titulos = grupo.map(([, nome]) => inicio ? `**${nome}**` : nome);
+    const titulo = inicio ? cabecalho.replace(/[^|]+(?=\|)/g, (celula) => ` **${celula.trim()}** `) : cabecalho;
+    linhas.push(acrescentar(titulo, titulos));
+    if (!inicio) linhas.push(`|${"---|".repeat(6 + largura)}`);
+    for (const [k, item] of itens.entries()) {
+      const cotacoes = precos?.cotacoes[k];
+      const valores = grupo.map(([chave]) => cotacoes?.get(chave));
+      if (!valores.some(Boolean) && (inicio || cotacoes?.size)) continue;
+      linhas.push(acrescentar(linhaDeItem(item, k, mostrados.has(k)), valores.map((v) => v ?? "—")));
+      mostrados.add(k);
+    }
+  }
+  if (total != null) linhas.push(acrescentar(`| | ${parcial ? "Subtotal dos itens com valor" : "Total estimado"} | | | | ${real(total)} |`));
+  return linhas.join("\n");
 }
 const TITULO_ITENS = "## Itens solicitados";
 const CAMPO_ITENS = /\[\[\s*(?:preencher:\s*)?itens(?: solicitados)?\s*\]\]/i;

@@ -21,7 +21,8 @@ export function Folha({ texto, vazio }: { texto: string; vazio?: string }) {
   const fecha = () => {
     if (!tab.length) return;
     const [cab, ...corpo] = tab;
-    el.push(<div className="tw" key={"t" + n++}><table><thead><tr>{cab.map((c, i) => <th key={i}>{inline(c, "h" + i)}</th>)}</tr></thead>
+    const quadroItens = cab[0] === "Item" && cab[1] === "Descrição";
+    el.push(<div className="tw" key={"t" + n++}><table className={quadroItens ? "quadro-itens" : undefined}><thead><tr>{cab.map((c, i) => <th key={i}>{inline(c, "h" + i)}</th>)}</tr></thead>
       <tbody>{corpo.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{inline(c, `c${i}-${j}`)}</td>)}</tr>)}</tbody></table></div>);
     tab = [];
   };
