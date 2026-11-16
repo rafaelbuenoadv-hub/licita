@@ -284,3 +284,38 @@ test("comparação de orçamentos aponta soma divergente, validade vencida, dado
   assert.ok(textos.some((t: string) => /c\.pdf: o orçamento não traz CNPJ/.test(t)));
   assert.ok(textos.some((t: string) => /Há 2 orçamentos do mesmo fornecedor \(A Ltda\)/.test(t)));
 });
+
+test("agente de contratação: recebe o campo, o formulário e o processo da tela, e devolve a sugestão", async () => {
+  const novo = await api("POST", "/api/processos", { objeto: "Aquisição de cadeiras escolares", tipo: "bens", via: "dispensa", ano: 2026, requisitante: "Educação" });
+  const { id } = (await novo.json()) as { id: number };
+  textoStream = "Descreva o que a escola precisa, sem marca.\n\nSUGESTÃO PARA O CAMPO:\nSubstituir cadeiras quebradas das escolas municipais.";
+  const corpo = {
+    campo: { rotulo: "Justificativa", valor: "", opcoes: [], linhas: true, limite: 8000 },
+    pagina: { titulo: "Aquisição de cadeiras escolares", caminho: `/processos/${id}` },
+    formulario: [{ rotulo: "Secretaria", valor: "Educação" }],
+    processo_id: id,
+    mensagens: [{ role: "user", content: "Como devo preencher este campo?" }],
+  };
+  const r = await api("POST", "/api/ia/agente", corpo);
+  assert.equal(r.status, 200);
+  const linhas = (await r.text()).trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(linhas.filter((l) => l.d).map((l) => l.d).join(""), textoStream);
+  assert.equal(linhas.at(-1).fim, true);
+  const enviado = pedidos.at(-1)!.body;
+  const instrucao = enviado.messages[0].content as string;
+  assert.match(instrucao, /agente de contratação do órgão \(Lei nº 14\.133\/2021, art\. 8º\)/);
+  assert.match(instrucao, /"rotulo":"Justificativa"/);
+  assert.match(instrucao, /"objeto":"Aquisição de cadeiras escolares"/);
+  assert.match(instrucao, /O campo aceita texto longo\. Limite de 8000 caracteres\./);
+  assert.equal(enviado.messages.at(-1).content, "Como devo preencher este campo?");
+
+  // Campo de escolha: a instrução limita a sugestão às opções. Processo de outro órgão não entra no contexto.
+  const r2 = await api("POST", "/api/ia/agente", { ...corpo, processo_id: 999999, campo: { rotulo: "Forma de contratação", valor: "", opcoes: ["Dispensa por valor", "Inexigibilidade"], linhas: false, limite: null } });
+  assert.equal(r2.status, 200); await r2.text();
+  const i2 = pedidos.at(-1)!.body.messages[0].content as string;
+  assert.match(i2, /a sugestão deve ser exatamente uma das opções listadas/);
+  assert.match(i2, /PROCESSO ABERTO: nenhum/);
+  // Conversa fora de ordem e campo sem rótulo são recusados.
+  assert.equal((await api("POST", "/api/ia/agente", { ...corpo, mensagens: [{ role: "assistant", content: "x" }] })).status, 400);
+  assert.equal((await api("POST", "/api/ia/agente", { ...corpo, campo: { ...corpo.campo, rotulo: " " } })).status, 400);
+});

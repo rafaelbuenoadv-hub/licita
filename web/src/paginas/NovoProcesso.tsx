@@ -4,7 +4,6 @@ import { api, fmtNum, numBR } from "../api";
 import { TIPOS, VIAS } from "../../../shared/etapas";
 import { consultarPca, type ItemConsultaPca } from "../../../shared/consulta-pca";
 import { useEu } from "../main";
-import { AjudaCampo } from "./AjudaCampo";
 
 export interface DadosProc {
   requisitante: string; areas_adicionais: string[]; objeto: string; tipo: string; via: string;
@@ -88,12 +87,6 @@ export function CamposProcesso({ d, set, plano, novo = false, podeEditar = true 
   const c = (k: Exclude<keyof DadosProc, "areas_adicionais">) => ({ id: "p-" + k, "data-campo-ajuda": k, value: d[k], onChange: (e: any) => set({ ...d, [k]: e.target.value, ...(k === "ano" ? { pca_item_id: novo ? "auto" : "" } : {}) }) });
   return (
     <div className="form">
-      {podeEditar && <AjudaCampo disponivel={ia.disponivel} contexto={{
-        objeto: d.objeto, tipo: d.tipo, via: d.via, ano: d.ano, valor: d.valor, classe: d.classe,
-        requisitantes: [d.requisitante, ...d.areas_adicionais].filter(Boolean),
-        normas: d.normas, obs: d.obs,
-        pca: vinculo ? { descricao: vinculo.descricao, item: vinculo.ordem_oficial } : null,
-      }} />}
       <div className="stack" style={{ gap: 8 }}>
         <label>Área requisitante<input {...c("requisitante")} maxLength={200} list="secretarias-orgao" /></label>
         <Secretarias />

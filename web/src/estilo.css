@@ -142,6 +142,17 @@ table.t tr.com-leitura td{border-bottom:0;padding-bottom:2px} .lido{margin:0} .l
 .itens-sol{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;min-width:0;display:flex;flex-direction:column;gap:8px}
 .itens-sol legend{font-size:13px;color:var(--muted);padding:0 4px} .itens-sol table.t td{padding:5px 6px;vertical-align:middle} .itens-sol table.t{min-width:760px} .itens-sol table.t th:nth-child(2){min-width:260px}
 
+/* agente de contratação */
+.agente-icone{position:fixed;right:18px;bottom:18px;z-index:30;display:inline-flex;align-items:center;gap:8px;padding:11px 16px 11px 13px;border-radius:99px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:600;cursor:grab;box-shadow:0 8px 22px -10px #000a}
+.agente-icone:active{cursor:grabbing} .agente-icone.ativo{background:var(--surface);color:var(--accent)}
+.agente-dica{position:fixed;right:18px;bottom:74px;z-index:30;padding:8px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--accent);font-size:13.5px;box-shadow:0 8px 22px -12px #000a}
+.agente-procurando main :is(input:not([type=checkbox]):not([type=file]):not([type=password]),textarea,select){outline:2px dashed var(--accent);outline-offset:2px}
+.agente-procurando.agente-procurando main :is(input,textarea,select){cursor:help}
+.agente-sugestao{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0}
+.agente-sugestao p{max-height:28vh;overflow:auto}
+@media (max-width:720px){ .agente-nome{display:none} .agente-icone{padding:12px} }
+@media print{ .agente-icone,.agente-dica{display:none} }
+
 /* mensagens */
 .lateral a .conta{margin-left:8px;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--accent);color:var(--accent-ink)}
 .caixa{display:grid;grid-template-columns:minmax(260px,380px) minmax(0,1fr);gap:16px;align-items:start}
