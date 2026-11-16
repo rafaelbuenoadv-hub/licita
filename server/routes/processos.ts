@@ -9,6 +9,7 @@ import { ErroHttp } from "../erros.js";
 import { minutaParaDocx } from "../docx.js";
 import { lerTimbrado, timbradosDoOrgao } from "../timbrados.js";
 import { extrairTexto } from "../extrair.js";
+import { conferirEtapa, proximaEtapa, rascunhoEtp } from "../conferencia.js";
 import {
   ETAPAS, aplicarPendencias, atual, concluido, etapaDoItem, etapaPorId, itensDe, liberada, podeMarcar,
   type Checks, type Tipo, type Via,
@@ -279,6 +280,23 @@ export function rotasProcessos() {
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: marcado ? "item.marcado" : "item.desmarcado", detalhe: { item, etapa: e.id } });
     const c = await checksDo(p.id);
     res.json({ etapa_atual: atual(p, c), concluido: concluido(p, c) });
+  });
+
+  // Concluir e avançar: confere a etapa; se nada trava, prepara a peça seguinte com o que já foi informado.
+  r.post("/processos/:id/etapas/:etapa/concluir", async (req, res) => {
+    const p = await processoDo(req);
+    const checks = await checksDo(p.id);
+    const e = exigeEtapaEditavel(req, p, checks, String(req.params.etapa));
+    const lista = await conferirEtapa(p, e, checks);
+    const prox = proximaEtapa(e);
+    if (lista.some((x) => x.bloqueia)) return res.json({ concluida: false, pendencias: lista, proxima: null });
+    let rascunho = false;
+    if (e.id === "dfd" && prox?.id === "etp" && podeMarcar(req.usuario!.papeis, prox) && !(await minutaVigente(p.id, "etp"))) {
+      const r1 = await salvarMinuta(p.id, "etp", preencherPortarias(await rascunhoEtp(p), await secretariosDoProcesso(p)), "aproveitado", req.usuario!.id);
+      rascunho = r1.nova;
+    }
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "etapa.concluida", detalhe: { etapa: e.id, rascunho_seguinte: rascunho } });
+    res.json({ concluida: true, pendencias: lista, proxima: prox ? { id: prox.id, nome: prox.nome, rascunho } : null });
   });
 
   // Minutas

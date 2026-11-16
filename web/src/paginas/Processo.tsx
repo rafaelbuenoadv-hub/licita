@@ -8,7 +8,7 @@ import { CamposProcesso, paraApi, type DadosProc, type PlanoConsulta } from "./N
 import { Solicitacoes } from "./Solicitacoes";
 
 const ACOES: Record<string, string> = {
-  "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação", "processo.numerado": "gerou o nº do processo e do procedimento",
+  "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação", "processo.numerado": "gerou o nº do processo e do procedimento", "etapa.concluida": "conferiu e concluiu a etapa",
   "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA",
   "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
   "minuta.titulares": "incluiu os titulares no DFD",
@@ -129,7 +129,7 @@ function Dados({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<
   };
   const pode = tem(eu, "requisitante", "contratacao");
   return (
-    <details className="panel box">
+    <details className="panel box" id="dados-processo">
       <summary>Dados do processo</summary>
       <form className="pad stack" onSubmit={salvar}>
         <fieldset disabled={!pode} style={{ border: 0, padding: 0, margin: 0 }}><CamposProcesso d={d} set={setD} plano={plano} podeEditar={pode} /></fieldset>
@@ -161,6 +161,31 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
     finally { setSalvando(null); }
   };
   const prox = ETAPAS[ix + 1];
+  const [conf, setConf] = useState<{ codigo: string; texto: string; onde: string; alvo?: string; bloqueia: boolean }[] | null>(null);
+  const [conferindo, setConferindo] = useState(false);
+  const concluir = async () => {
+    setConferindo(true);
+    try {
+      const r = await api.post(`/processos/${p.id}/etapas/${e.id}/concluir`);
+      await recarregar();
+      if (!r.concluida) { setConf(r.pendencias); return; }
+      setConf(null);
+      const avisos = (r.pendencias as { texto: string }[]).map((x) => x.texto).join(" ");
+      setAviso({ t: `${e.nome}: etapa conferida e concluída.${r.proxima?.rascunho ? ` A minuta de "${r.proxima.nome}" foi aberta com objeto, justificativa, quantidades e área requisitante aproveitados.` : ""}${avisos ? ` Atenção: ${avisos}` : ""}`, tipo: avisos ? "" : "ok" });
+      if (r.proxima) irPara(r.proxima.id);
+    } catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
+    finally { setConferindo(false); }
+  };
+  const irAte = (x: { onde: string; alvo?: string }) => {
+    const mostra = (el: HTMLElement | null) => { el?.scrollIntoView({ behavior: "smooth", block: "center" }); el?.focus({ preventScroll: true }); };
+    if (x.onde === "conferencia") mostra(document.getElementById("c-" + x.alvo));
+    else if (x.onde === "minuta") document.getElementById("minuta-etapa")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    else if (x.onde === "dados") {
+      const d = document.getElementById("dados-processo") as HTMLDetailsElement | null;
+      if (d) d.open = true;
+      setTimeout(() => mostra(document.getElementById("p-" + x.alvo)), 60);
+    }
+  };
   return (
     <section className="panel" style={{ minWidth: 0 }}>
       <div className="sec">
@@ -189,10 +214,22 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>
         <ul className="aten">{e.atencao.map((a: string) => <li key={a}>{a}</li>)}</ul></div>
       {e.modelo && <Minuta p={p} e={e} editavel={lib && atua && p.situacao !== "cancelado"} setAviso={setAviso} />}
+      {conf && conf.length > 0 && <div className="sec" role="status" aria-live="polite"><span className="lbl">Pendências da etapa</span>
+        <p className="small muted">{conf.filter((x) => x.bloqueia).length} {conf.filter((x) => x.bloqueia).length === 1 ? "ajuste impede" : "ajustes impedem"} a conclusão. Resolva e clique de novo em "Concluir e avançar".</p>
+        <ul className="pends">{conf.map((x, i) => (
+          <li key={i} className={x.bloqueia ? "" : "aviso"}>
+            <span>{x.bloqueia ? "" : "Aviso: "}{x.texto}</span>
+            {x.onde === "config" ? <Link className="btn sm" to="/config">Abrir Configurações</Link>
+              : <button className="btn sm" onClick={() => irAte(x)}>{x.onde === "conferencia" ? "Ir ao item" : x.onde === "minuta" ? "Ir à minuta" : "Ir ao campo"}</button>}
+          </li>))}</ul>
+      </div>}
       <div className="sec row">
         {ix > 0 ? <button className="btn" onClick={() => irPara(ETAPAS[ix - 1].id)}>← {ETAPAS[ix - 1].nome}</button> : <span />}
-        {prox ? <button className="btn pri" disabled={!ok} onClick={() => irPara(prox.id)}>{ok ? "" : `Faltam ${its.length - nf} · `}{prox.nome} →</button>
-          : <span className={"pill " + (ok ? "ok" : "")}>{ok ? "Fase preparatória concluída" : "Última etapa"}</span>}
+        <div className="tools">
+          {lib && atua && p.situacao !== "cancelado" && <button className="btn pri" disabled={conferindo} onClick={concluir}>{conferindo ? "Conferindo…" : prox ? "Concluir e avançar" : "Conferir e concluir"}</button>}
+          {prox ? <button className="btn" disabled={!ok} onClick={() => irPara(prox.id)}>{ok ? "" : `Faltam ${its.length - nf} · `}{prox.nome} →</button>
+            : <span className={"pill " + (ok ? "ok" : "")}>{ok ? "Fase preparatória concluída" : "Última etapa"}</span>}
+        </div>
       </div>
     </section>
   );
@@ -353,9 +390,9 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
 
   const exibido = busy === "redigir" ? gerando : vendo ? vendo.texto : texto;
   return (
-    <div className="sec">
+    <div className="sec" id="minuta-etapa">
       <div className="row"><span className="lbl">Minuta · {e.doc}</span>
-        {m.vigente && <span className="small muted">Versão {m.vigente.versao} · {m.vigente.origem === "ia" ? "redigida pela IA" : m.vigente.origem === "pendencias" ? "campos preenchidos" : "edição manual"} · {m.vigente.autor ?? "—"} · {dataHora(m.vigente.criado_em)}</span>}</div>
+        {m.vigente && <span className="small muted">Versão {m.vigente.versao} · {m.vigente.origem === "ia" ? "redigida pela IA" : m.vigente.origem === "pendencias" ? "campos preenchidos" : m.vigente.origem === "aproveitado" ? "rascunho com dados aproveitados da etapa anterior" : "edição manual"} · {m.vigente.autor ?? "—"} · {dataHora(m.vigente.criado_em)}</span>}</div>
       <div className="tools">
         {busy === "redigir" ? <><span className="small muted">Redigindo no layout do órgão…</span><button className="btn" onClick={() => ctl.current?.abort()}>Parar</button></>
           : confirma ? <><button className="btn pri" onClick={redigir}>Confirmar: gerar nova versão</button><button className="btn" onClick={() => setConfirma(false)}>Cancelar</button></>

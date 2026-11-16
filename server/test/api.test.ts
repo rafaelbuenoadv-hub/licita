@@ -608,3 +608,57 @@ test("minutas: nome do secretário e portaria entram sozinhos em qualquer peça,
   assert.equal(v.vigente.texto, "A: [[nome do secretário]]\nB: Luiz Carlos Bernardi Gelinski\nC: Denise da Silva Lima");
   assert.deepEqual(v.sugestoes_cadastro, []);
 });
+
+test("concluir e avançar: confere a solicitação, aponta o que falta e abre o ETP com os dados aproveitados", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+  const { dados: { id, protocolo } } = await admin.post("/api/processos", { objeto: "Aquisição de 30 cadeiras escolares", tipo: "bens", via: "licitacao", ano: 2028, requisitante: "Almoxarifado", pca_item_id: null });
+  const rota = `/api/processos/${id}/etapas/dfd/concluir`;
+  assert.equal((await outro.post(rota)).status, 404);
+  assert.equal((await admin.post(`/api/processos/${id}/etapas/etp/concluir`)).status, 409);
+  let r = await admin.post(rota);
+  assert.equal(r.status, 200, JSON.stringify(r.dados));
+  assert.equal(r.dados.concluida, false);
+  const cods = () => r.dados.pendencias.map((x: any) => x.codigo);
+  assert.deepEqual([...new Set(cods())], ["valor", "secretario", "pca", "minuta", "item"]);
+  assert.equal(r.dados.pendencias.find((x: any) => x.codigo === "pca").bloqueia, false);
+  assert.deepEqual(r.dados.pendencias.find((x: any) => x.codigo === "valor"), { codigo: "valor", texto: "Informe o valor estimado preliminar nos dados do processo.", onde: "dados", alvo: "valor", bloqueia: true });
+  assert.equal((await admin.get(`/api/processos/${id}/minutas/etp`)).dados.vigente, null);
+
+  // Corrige os dados; a secretaria sem portaria passa a ser a pendência.
+  const dados = { objeto: "Aquisição de 30 cadeiras escolares", tipo: "bens", via: "licitacao", ano: 2028, requisitante: "Obras", valor_estimado: 9000, pca_item_id: null };
+  assert.equal((await admin.put(`/api/processos/${id}`, dados)).status, 200);
+  r = await admin.post(rota);
+  assert.match(r.dados.pendencias.find((x: any) => x.codigo === "portaria").texto, /Antônio Vincenzi \(Obras, Viação e Serviços Urbanos\)/);
+  assert.equal((await admin.put(`/api/processos/${id}`, { ...dados, requisitante: "SEDUC" })).status, 200);
+
+  // Minuta com campo pendente trava; completa, só resta a conferência.
+  const dfd = (extra: string) => ["# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA", "## 2. Objeto", "Cadeiras escolares.", "## 3. Justificativa da necessidade", "As cadeiras atuais estão quebradas, conforme laudo anexo.", "## 4. Quantidade e valor estimado", "30 unidades, a R$ 300,00 cada.", extra, "", "@ Denise da Silva Lima"].join("\n");
+  assert.equal((await admin.post(`/api/processos/${id}/minutas/dfd`, { texto: dfd("Prazo: [[prazo de entrega]]") })).status, 200);
+  r = await admin.post(rota);
+  assert.match(r.dados.pendencias.find((x: any) => x.codigo === "campos").texto, /1 campo pendente/);
+  assert.equal((await admin.post(`/api/processos/${id}/minutas/dfd`, { texto: dfd("## 5. Prazo\n30 dias.") })).status, 200);
+  r = await admin.post(rota);
+  assert.deepEqual([...new Set(cods())], ["pca", "item"]);
+  for (const i of itensDe(ETAPAS[0], { tipo: "bens", via: "licitacao" })) await admin.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
+
+  // Tudo certo: conclui, mantém o aviso do PCA e abre o ETP já preenchido.
+  r = await admin.post(rota);
+  assert.equal(r.dados.concluida, true);
+  assert.deepEqual(r.dados.proxima, { id: "etp", nome: "Estudo Técnico Preliminar", rascunho: true });
+  assert.deepEqual(cods(), ["pca"]);
+  const etp = (await admin.get(`/api/processos/${id}/minutas/etp`)).dados.vigente;
+  assert.equal(etp.origem, "aproveitado");
+  assert.ok(etp.texto.includes(`Protocolo ${protocolo}`));
+  assert.match(etp.texto, /## 1\. Informações básicas\nObjeto: Aquisição de 30 cadeiras escolares/);
+  assert.match(etp.texto, /## 2\. Descrição da necessidade\nAs cadeiras atuais estão quebradas, conforme laudo anexo\./);
+  assert.match(etp.texto, /## 3\. Área requisitante\nSEDUC\nEducação — Denise da Silva Lima\. Portaria de nomeação nº 008\/2025\./);
+  assert.match(etp.texto, /## 6\. Estimativa das quantidades\n30 unidades, a R\$ 300,00 cada\./);
+  assert.match(etp.texto, /## 7\. Estimativa do valor\nValor estimado preliminar informado na solicitação: R\$\s9\.000,00/);
+  assert.match(etp.texto, /\[\[PREENCHER: requisitos da contratação/);
+  // Repetir não sobrescreve o que já existe no ETP.
+  assert.equal((await admin.post(`/api/processos/${id}/minutas/etp`, { texto: "# ETP revisado pelo servidor" })).status, 200);
+  r = await admin.post(rota);
+  assert.equal(r.dados.proxima.rascunho, false);
+  assert.equal((await admin.get(`/api/processos/${id}/minutas/etp`)).dados.vigente.texto, "# ETP revisado pelo servidor");
+});

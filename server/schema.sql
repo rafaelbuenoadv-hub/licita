@@ -330,11 +330,14 @@ create table if not exists minutas (
   etapa text not null,
   versao int not null,
   texto text not null,
-  origem text not null default 'manual' check (origem in ('manual','ia','importado','pendencias')),
+  origem text not null default 'manual' check (origem in ('manual','ia','importado','pendencias','aproveitado')),
   usuario_id int references usuarios(id),
   criado_em timestamptz not null default now(),
   unique (processo_id, etapa, versao)
 );
+-- 'aproveitado': rascunho que o sistema monta com dados de peças anteriores, ao concluir uma etapa.
+alter table minutas drop constraint if exists minutas_origem_check;
+alter table minutas add constraint minutas_origem_check check (origem in ('manual','ia','importado','pendencias','aproveitado'));
 
 -- Modelo de documento de cada etapa, personalizado por órgão.
 create table if not exists modelos (
