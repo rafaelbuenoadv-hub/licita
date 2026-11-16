@@ -79,18 +79,39 @@ export function totalDosItens(itens: ItemSolicitacao[]) {
   const t = itens.map(totalDoItem).filter((x): x is number => x != null);
   return t.length ? Math.round(t.reduce((a, b) => a + b, 0) * 100) / 100 : null;
 }
-function precosCotados(item: ItemSolicitacao) {
-  return (item.cotacoes ?? []).flatMap((cotacao) => {
-    if (cotacao.valor_unitario == null) return [];
-    const fornecedor = celula(cotacao.fornecedor) || "Fornecedor a identificar";
-    const comprovante = cotacao.orcamento_id == null ? "anexo pendente" : "anexo vinculado";
-    return [`${fornecedor} — ${real(cotacao.valor_unitario)} (${comprovante})`];
-  }).join(" • ");
-}
-
+const LIMITE_COLUNAS_COTACOES = 3;
 const CABECALHO_ANTERIOR = "| Item | Descrição | Un. | Qtd. | Valor unitário | Valor total |";
 const CABECALHO_COTACOES = "| Item | Descrição | Un. | Qtd. | Valor unitário estimado | Valor total |";
-const CABECALHO_ORCAMENTOS = `${CABECALHO_COTACOES} Cotações por fornecedor |`;
+
+function colunasDeCotacao(itens: ItemSolicitacao[]) {
+  const fornecedores = new Map<string, string>();
+  const cotacoes = itens.map((item) => (item.cotacoes ?? []).flatMap((cotacao) => {
+    if (cotacao.valor_unitario == null) return [];
+    const nome = celula(cotacao.fornecedor) || "Fornecedor a identificar";
+    const chave = normalizarCotacao(cotacao.fornecedor);
+    if (!fornecedores.has(chave)) fornecedores.set(chave, nome);
+    const preco = real(cotacao.valor_unitario) + (cotacao.orcamento_id == null ? " (anexo pendente)" : "");
+    return [{ chave, nome, preco }];
+  }));
+  if (fornecedores.size <= LIMITE_COLUNAS_COTACOES) {
+    const colunas = [...fornecedores];
+    return {
+      titulos: colunas.map(([, nome]) => nome),
+      linhas: cotacoes.map((lista) => [colunas.map(([chave]) => lista.find((c) => c.chave === chave)?.preco ?? "—")]),
+    };
+  }
+  const largura = Math.min(LIMITE_COLUNAS_COTACOES, Math.max(...cotacoes.map((lista) => lista.length)));
+  return {
+    titulos: Array.from({ length: largura }, (_, i) => `Cotação ${i + 1}`),
+    linhas: cotacoes.map((lista) => {
+      const grupos: string[][] = [];
+      for (let inicio = 0; inicio < lista.length; inicio += largura) {
+        grupos.push(lista.slice(inicio, inicio + largura).map((c) => `${c.nome} — ${c.preco}`));
+      }
+      return grupos;
+    }),
+  };
+}
 
 /** Quadro de itens no formato das minutas (linhas com barras verticais). */
 export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = false) {
@@ -98,17 +119,24 @@ export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = f
   const total = totalDosItens(itens);
   const temCotacoes = itens.some((i) => i.cotacoes !== undefined);
   const parcial = temCotacoes && itens.some((i) => totalDoItem(i) == null);
-  const precos = incluirPrecosCotados ? itens.map(precosCotados) : [];
-  const temPrecos = precos.some(Boolean);
+  const precos = incluirPrecosCotados ? colunasDeCotacao(itens) : undefined;
+  const titulos = precos?.titulos ?? [];
+  const cabecalho = temCotacoes ? CABECALHO_COTACOES : CABECALHO_ANTERIOR;
+  const acrescentar = (linha: string, colunas: string[] = [], vazio = "—") =>
+    linha + titulos.map((_, i) => {
+      const valor = colunas[i] ?? vazio;
+      return valor ? ` ${valor} |` : " |";
+    }).join("");
   return [
-    temPrecos ? CABECALHO_ORCAMENTOS : temCotacoes ? CABECALHO_COTACOES : CABECALHO_ANTERIOR,
-    temPrecos ? "|---|---|---|---|---|---|---|" : "|---|---|---|---|---|---|",
-    ...itens.map((i, k) => {
-      const subtotal = totalDoItem(i);
-      const linha = `| ${k + 1} | ${celula(i.descricao)} | ${celula(i.unidade) || "—"} | ${i.quantidade == null ? "—" : numero(i.quantidade)} | ${i.valor_unitario == null ? "—" : real(i.valor_unitario)} | ${subtotal == null ? "—" : real(subtotal)} |`;
-      return temPrecos ? `${linha} ${precos[k] || "—"} |` : linha;
+    acrescentar(cabecalho, titulos),
+    `|${"---|".repeat(6 + titulos.length)}`,
+    ...itens.flatMap((item, k) => {
+      const subtotal = totalDoItem(item);
+      const linha = `| ${k + 1} | ${celula(item.descricao)} | ${celula(item.unidade) || "—"} | ${item.quantidade == null ? "—" : numero(item.quantidade)} | ${item.valor_unitario == null ? "—" : real(item.valor_unitario)} | ${subtotal == null ? "—" : real(subtotal)} |`;
+      const [primeira, ...continuacao] = precos?.linhas[k] ?? [];
+      return [acrescentar(linha, primeira), ...continuacao.map((colunas) => acrescentar("| | | | | | |", colunas, ""))];
     }),
-    ...(total == null ? [] : [`| | ${parcial ? "Subtotal dos itens com valor" : "Total estimado"} | | | | ${real(total)} |${temPrecos ? " |" : ""}`]),
+    ...(total == null ? [] : [acrescentar(`| | ${parcial ? "Subtotal dos itens com valor" : "Total estimado"} | | | | ${real(total)} |`, [], "")]),
   ].join("\n");
 }
 const TITULO_ITENS = "## Itens solicitados";
@@ -125,7 +153,10 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[], incluirPre
   if (!texto.trim()) return texto;
   const quadro = quadroDeItens(itens, incluirPrecosCotados);
   const linhas = texto.split("\n");
-  const indice = linhas.findIndex((l) => [CABECALHO_ANTERIOR, CABECALHO_COTACOES, CABECALHO_ORCAMENTOS].includes(l.trim()));
+  const indice = linhas.findIndex((linha) => {
+    const texto = linha.trim();
+    return texto === CABECALHO_ANTERIOR || texto === CABECALHO_COTACOES || texto.startsWith(CABECALHO_COTACOES + " ");
+  });
   if (indice >= 0) {
     let fim = indice + 1;
     while (fim < linhas.length && linhas[fim].trimStart().startsWith("|")) fim++;
