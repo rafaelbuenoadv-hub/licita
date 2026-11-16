@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { PDFDocument } from "pdf-lib";
 import { buscarPncp } from "../routes/pncp.js";
 import { destinosDoOrcamento } from "../../shared/importar-orcamento.js";
-import { valorDasCotacoes } from "../../shared/solicitacao.js";
+import { documentoDaSolicitacao, valorDasCotacoes } from "../../shared/solicitacao.js";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -12,6 +12,7 @@ import { pool, q1 } from "../db.js";
 import { migrar } from "../migrate.js";
 import { hashSenha } from "../auth.js";
 import { criarApp } from "../app.js";
+import { extrairTexto } from "../extrair.js";
 import { ETAPAS, itensDe } from "../../shared/etapas.js";
 
 let base = "";
@@ -990,7 +991,7 @@ test("leitura de proposta separa os itens novos e evita lançar duas linhas no m
   assert.equal(valorDasCotacoes(fontes, "menor"), 100);
 });
 
-test("preços digitados antes do anexo ficam salvos e entram no cálculo após o vínculo", async () => {
+test("preços lançados aparecem na solicitação e entram na estimativa após o vínculo", async () => {
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const criado = await lic.post("/api/processos", { objeto: "Aquisição de materiais de expediente", tipo: "bens", via: "licitacao", ano: 2095 });
   assert.equal(criado.status, 201);
@@ -1008,6 +1009,19 @@ test("preços digitados antes do anexo ficam salvos e entram no cálculo após o
   const antes = (await lic.get(processo)).dados.solicitacoes[0];
   assert.deepEqual(antes.itens[0].cotacoes, cotacoes);
   assert.equal(antes.itens[0].valor_unitario, null);
+  const rota = `${caminho}/${salva.dados.id}`;
+  const previa = documentoDaSolicitacao("# SOLICITAÇÃO\nRelação: [[Itens]]", antes.itens);
+  assert.match(previa, /^# SOLICITAÇÃO\nRelação:\n\n\| Item \| Descrição/);
+  assert.match(previa, /Papelaria A \| R\$\s12,50 \| Anexo pendente/);
+  assert.match(previa, /Papelaria B \| R\$\s18,00 \| Anexo pendente/);
+  assert.doesNotMatch(previa, /Total estimado|\[\[Itens\]\]/);
+
+  const wordAntes = await lic.get(`${rota}/docx`);
+  assert.equal(wordAntes.status, 200);
+  const textoAntes = await extrairTexto("solicitacao.docx", wordAntes.dados);
+  assert.match(textoAntes, /Papelaria A \| R\$\s12,50 \| Anexo pendente/);
+  assert.doesNotMatch(textoAntes, /Total estimado/);
+
 
   const form = new FormData();
   form.set("arquivo", new Blob(["Proposta A para resmas de papel"]), "proposta-a.txt");
@@ -1022,6 +1036,20 @@ test("preços digitados antes do anexo ficam salvos e entram no cálculo após o
   assert.equal(depois.itens[0].valor_unitario, 12.5);
   assert.equal(depois.itens[0].cotacoes[1].valor_unitario, 18);
   assert.match(depois.descricao, /Total estimado .*R\$\s50,00/);
+  // Uma solicitação antiga com texto anterior ao quadro também mostra o orçamento salvo.
+  await pool.query("update solicitacoes_processo set descricao=$1 where id=$2", ["# SOLICITAÇÃO\nCotação no anexo.\n\n@ Titular", salva.dados.id]);
+  const wordDepois = await lic.get(`${rota}/docx`);
+  assert.equal(wordDepois.status, 200);
+  const textoDepois = await extrairTexto("solicitacao.docx", wordDepois.dados);
+  assert.match(textoDepois, /Resma de papel .*R\$\s12,50 .*R\$\s50,00/);
+  assert.match(textoDepois, /Papelaria A \| R\$\s12,50 \| Anexo vinculado/);
+  assert.match(textoDepois, /Papelaria B \| R\$\s18,00 \| Anexo pendente/);
+  assert.match(textoDepois, /Orçamentos por item[\s\S]+Titular/);
+  const pdf = await lic.get(`${rota}/pdf`);
+  assert.equal(pdf.status, 200);
+  assert.equal(pdf.tipo, "application/pdf");
+  assert.equal((await PDFDocument.load(pdf.dados)).getPageCount(), 1);
+
 });
 
 test("o orçamento recupera o fornecedor do documento e permite identificá-lo manualmente", async () => {

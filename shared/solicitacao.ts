@@ -72,6 +72,7 @@ export const TIPOS_ANEXOS_SOLICITACAO = ".pdf,.docx,.xlsx,.txt,.md,.csv,.jpg,.jp
 
 const real = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const numero = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 4 });
+const celula = (texto: string) => texto.replace(/\s*\n\s*/g, " ").replace(/\|/g, "/").trim();
 export const totalDoItem = (i: ItemSolicitacao) => (i.quantidade != null && i.valor_unitario != null ? Math.round(i.quantidade * i.valor_unitario * 100) / 100 : null);
 /** Soma dos itens que têm quantidade e valor; null quando nenhum tem. */
 export function totalDosItens(itens: ItemSolicitacao[]) {
@@ -81,20 +82,27 @@ export function totalDosItens(itens: ItemSolicitacao[]) {
 /** Quadro de itens no formato das minutas (linhas com barras verticais). */
 export function quadroDeItens(itens: ItemSolicitacao[]) {
   if (!itens.length) return "";
-  const cel = (t: string) => t.replace(/\s*\n\s*/g, " ").replace(/\|/g, "/").trim();
   const total = totalDosItens(itens);
   const temCotacoes = itens.some((i) => i.cotacoes !== undefined);
   const parcial = temCotacoes && itens.some((i) => totalDoItem(i) == null);
   return [
     temCotacoes ? CABECALHO_COTACOES : CABECALHO_ANTERIOR,
     "|---|---|---|---|---|---|",
-    ...itens.map((i, k) => `| ${k + 1} | ${cel(i.descricao)} | ${cel(i.unidade) || "—"} | ${i.quantidade == null ? "—" : numero(i.quantidade)} | ${i.valor_unitario == null ? "—" : real(i.valor_unitario)} | ${totalDoItem(i) == null ? "—" : real(totalDoItem(i)!)} |`),
+    ...itens.map((i, k) => `| ${k + 1} | ${celula(i.descricao)} | ${celula(i.unidade) || "—"} | ${i.quantidade == null ? "—" : numero(i.quantidade)} | ${i.valor_unitario == null ? "—" : real(i.valor_unitario)} | ${totalDoItem(i) == null ? "—" : real(totalDoItem(i)!)} |`),
     ...(total == null ? [] : [`| | ${parcial ? "Subtotal dos itens com valor" : "Total estimado"} | | | | ${real(total)} |`]),
   ].join("\n");
 }
 const CABECALHO_ANTERIOR = "| Item | Descrição | Un. | Qtd. | Valor unitário | Valor total |";
 const CABECALHO_COTACOES = "| Item | Descrição | Un. | Qtd. | Valor unitário estimado | Valor total |";
 const TITULO_ITENS = "## Itens solicitados";
+const CAMPO_ITENS = /\[\[\s*(?:preencher:\s*)?itens(?: solicitados)?\s*\]\]/i;
+
+function antesDaAssinatura(texto: string, trecho: string) {
+  const assinatura = texto.search(/^\s*@ /m);
+  const antes = assinatura < 0 ? texto.trimEnd() : texto.slice(0, assinatura).trimEnd();
+  const depois = assinatura < 0 ? "" : texto.slice(assinatura).trimStart();
+  return [antes, trecho, depois].filter(Boolean).join("\n\n");
+}
 /** Garante o quadro de itens no texto mesmo quando o modelo do órgão não tem o campo [[Itens]]: entra antes das assinaturas. */
 export function inserirItens(texto: string, itens: ItemSolicitacao[]) {
   if (!texto.trim()) return texto;
@@ -106,16 +114,39 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[]) {
     linhas.splice(indice, fim - indice, quadroDeItens(itens) || "[[Itens]]");
     return linhas.join("\n");
   }
-  if (!itens.length || /\[\[\s*(?:preencher:\s*)?itens(?: solicitados)?\s*\]\]/i.test(texto)) return texto;
+  if (!itens.length) return texto;
+  const campo = linhas.findIndex((l) => CAMPO_ITENS.test(l));
+  if (campo >= 0) {
+    const [antes, depois] = linhas[campo].split(CAMPO_ITENS, 2);
+    const prefixo = antes.trim();
+    const quadro = quadroDeItens(itens);
+    const comQuadro = /^#{1,2}$/.test(prefixo) && !depois.trim()
+      ? `${TITULO_ITENS}\n${quadro}`
+      : [prefixo, quadro, depois.trim()].filter(Boolean).join("\n\n");
+    linhas.splice(campo, 1, comQuadro);
+    return linhas.join("\n");
+  }
   const titulo = linhas.findIndex((l) => l.trim() === TITULO_ITENS);
   if (titulo >= 0) {
     linhas.splice(titulo + 1, 0, quadroDeItens(itens), "");
     return linhas.join("\n");
   }
-  const assinatura = texto.search(/^\s*@ /m);
-  const antes = assinatura < 0 ? texto.trimEnd() : texto.slice(0, assinatura).trimEnd();
-  const depois = assinatura < 0 ? "" : texto.slice(assinatura).trimStart();
-  return [antes, `${TITULO_ITENS}\n${quadroDeItens(itens)}`, depois].filter(Boolean).join("\n\n");
+  return antesDaAssinatura(texto, `${TITULO_ITENS}\n${quadroDeItens(itens)}`);
+}
+
+/** Acrescenta as cotações registradas a partir dos itens, para a prévia e a exportação. */
+export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[]) {
+  if (!texto.trim() || !itens.length) return texto;
+  const corpo = inserirItens(texto, itens);
+  const precos = itens.flatMap((item, indice) => (item.cotacoes ?? []).flatMap((cotacao) => {
+    if (cotacao.valor_unitario == null) return [];
+    const fonte = celula(cotacao.fornecedor) || "A identificar";
+    const comprovante = cotacao.orcamento_id == null ? "Anexo pendente" : "Anexo vinculado";
+    return [`| ${indice + 1} | ${fonte} | ${real(cotacao.valor_unitario)} | ${comprovante} |`];
+  }));
+  if (!precos.length) return corpo;
+  const quadro = ["## Orçamentos por item", "| Item | Fornecedor ou fonte | Preço unitário cotado | Comprovante |", "|---|---|---|---|", ...precos].join("\n");
+  return antesDaAssinatura(corpo, quadro);
 }
 
 export function camposDaSolicitacao(texto: string, dados: {

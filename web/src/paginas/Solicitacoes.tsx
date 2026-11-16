@@ -3,7 +3,7 @@ import { api, brl } from "../api";
 import { useEu } from "../main";
 import { Folha } from "../comp/Folha";
 import { aplicarPendencias, pendencias } from "../../../shared/etapas";
-import { camposDaSolicitacao, FONTES_COTACAO, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { camposDaSolicitacao, documentoDaSolicitacao, FONTES_COTACAO, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
 
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
@@ -328,7 +328,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
           </div>}
           {descricao.trim() && <div className="stack">
             <h4>Prévia da solicitação</h4>
-            <Folha texto={previa} />
+            <Folha texto={documentoDaSolicitacao(previa, itens)} />
           </div>}
           {faltantes.length > 0 && <div className="pend">
             <div className="row"><h4>Campos pendentes</h4>
@@ -367,7 +367,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                 <td>{s.referencia && <strong>{s.referencia}</strong>}
                   {s.objeto && <div>{s.objeto}</div>}
                   {s.itens?.length > 0 && <div className="small muted">{s.itens.length} {s.itens.length === 1 ? "item" : "itens"}{totalDosItens(s.itens) != null ? ` · ${s.itens.some((i) => totalDoItem(i) == null) ? "subtotal dos itens com valor" : "total estimado"} ${brl(totalDosItens(s.itens))}` : ""}</div>}
-                  {s.descricao && <details><summary>Ver solicitação</summary><Folha texto={s.descricao} /></details>}
+                  {s.descricao && <details><summary>Ver solicitação</summary><Folha texto={documentoDaSolicitacao(s.descricao, s.itens)} /></details>}
                   {s.itens.some((item) => item.cotacoes?.length) && <details><summary>Cotações por item</summary>
                     <ul>{s.itens.filter((item) => item.cotacoes?.length).map((item, i) => <li key={i}>{item.descricao}
                       <ul>{item.cotacoes?.map((c, j) => <li key={c.orcamento_id != null ? `orcamento-${c.orcamento_id}` : `manual-${j}`}>
