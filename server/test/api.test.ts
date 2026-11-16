@@ -998,3 +998,36 @@ test("preços digitados antes do anexo ficam salvos e entram no cálculo após o
   assert.equal(depois.itens[0].cotacoes[1].valor_unitario, 18);
   assert.match(depois.descricao, /Total estimado .*R\$\s50,00/);
 });
+
+test("o orçamento recupera o fornecedor do documento e permite identificá-lo manualmente", async () => {
+  const { nomeFornecedorOrcamento } = await import("../../shared/orcamentos.js");
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+  const novo = await lic.post("/api/processos", { objeto: "Aquisição de papel", tipo: "bens", via: "licitacao", ano: 2097 });
+  const processo = `/api/processos/${novo.dados.id}`;
+  const enviar = async (nome: string, texto: string) => {
+    const form = new FormData();
+    form.append("arquivo", new Blob([texto]), nome);
+    const r = await lic.post(`${processo}/orcamentos?origem=solicitacao`, form);
+    assert.equal(r.status, 201, JSON.stringify(r.dados));
+    return r.dados;
+  };
+  const identificado = await enviar("proposta-01.txt", "Comprador: Município de Teste\nFornecedor: Papelaria Boa - CNPJ: 123");
+  assert.equal(identificado.orcamentos[0].fornecedor, "Papelaria Boa");
+  const avulso = await enviar("proposta-02.txt", "Cliente: Município de Teste\nTotal: R$ 25,00");
+  assert.equal(avulso.orcamentos[0].fornecedor, "");
+  const rota = `${processo}/orcamentos/${avulso.ids[0]}`;
+  assert.equal((await outro.put(rota, { fornecedor: "Outro órgão" })).status, 404);
+  assert.equal((await lic.put(rota, { fornecedor: "Papelaria Nova" })).dados.fornecedor, "Papelaria Nova");
+  assert.equal((await lic.put(rota, { valor: 25 })).dados.fornecedor, "Papelaria Nova");
+  const dados = (await lic.get(processo)).dados.orcamentos;
+  assert.deepEqual(dados.map(nomeFornecedorOrcamento), ["Papelaria Boa", "Papelaria Nova"]);
+
+  const cotado = await enviar("proposta-03.txt", "Total: R$ 15,00");
+  const s = await lic.post(`${processo}/solicitacoes`, { chave_envio: randomUUID(), secretaria: "Educação", descricao: "# PEDIDO",
+    itens: [{ descricao: "Papel", quantidade: 1, cotacoes: [{ orcamento_id: cotado.ids[0], fornecedor: "Papelaria Escolar", valor_unitario: 15 }] }],
+  });
+  assert.equal(s.status, 201, JSON.stringify(s.dados));
+  const r = (await lic.get(processo)).dados.orcamentos.find((o: { id: number }) => o.id === cotado.ids[0]);
+  assert.equal(nomeFornecedorOrcamento(r), "Papelaria Escolar");
+});

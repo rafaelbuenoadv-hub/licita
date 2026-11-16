@@ -145,6 +145,13 @@ table.t tr.com-leitura td{border-bottom:0;padding-bottom:2px} .lido{margin:0} .l
 .cotacao-item h4{margin:0}
 .cotacao-item summary{cursor:pointer;margin:6px 0}
 .cotacao-fornecedor{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px}
+.cotacao-linha{display:grid;gap:8px}
+.cotacao-grade{display:grid;grid-template-columns:minmax(0,1fr) minmax(95px,140px) minmax(120px,170px);gap:10px;align-items:start}
+.cotacao-grade label,.cotacao-anexo{min-width:0}
+.cotacao-anexo{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding-top:17px}
+.cotacao-anexo a{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cotacao-item .cotacao-detalhes summary{font-size:13px;margin:0 0 4px}
+@media(max-width:680px){.cotacao-grade{grid-template-columns:minmax(0,1fr) minmax(90px,130px)}.cotacao-anexo{grid-column:1/-1;padding-top:0}}
 .cotacao-fornecedor input:not([type=file]),.cotacao-fornecedor select{background:var(--surface)}
 .cotacao-soma{border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px 20px;align-items:flex-end;flex-wrap:wrap}
 .cotacao-soma select{min-width:126px}

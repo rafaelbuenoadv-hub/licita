@@ -5,7 +5,7 @@ import { Folha } from "../comp/Folha";
 import { aplicarPendencias, pendencias } from "../../../shared/etapas";
 import { camposDaSolicitacao, FONTES_COTACAO, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
 
-import type { OrcamentoLido } from "../../../shared/orcamentos";
+import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
 
 interface Solicitacao {
@@ -122,7 +122,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setReferencia(s.referencia);
     setObjeto(s.objeto);
     setJustificativa(s.justificativa);
-    setLinhas(linhasDosItens(s.itens));
+    setLinhas(linhasDosItens(s.itens, processo.orcamentos));
     setArquivo(null);
     trocarTexto(s.descricao);
     setModo("manual");
@@ -294,7 +294,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                   {s.itens.some((item) => item.cotacoes?.length) && <details><summary>Cotações por item</summary>
                     <ul>{s.itens.filter((item) => item.cotacoes?.length).map((item, i) => <li key={i}>{item.descricao}
                       <ul>{item.cotacoes?.map((c, j) => <li key={c.orcamento_id != null ? `orcamento-${c.orcamento_id}` : `manual-${j}`}>
-                        {c.orcamento_id != null ? <a href={`/api/processos/${processo.id}/orcamentos/${c.orcamento_id}/arquivo`}>{c.fornecedor || "Orçamento anexado"}</a>
+                        {c.orcamento_id != null ? <a href={`/api/processos/${processo.id}/orcamentos/${c.orcamento_id}/arquivo`}>{limparNomeFornecedor(c.fornecedor) || nomeFornecedorOrcamento(processo.orcamentos.find((o) => o.id === c.orcamento_id)) || "Fornecedor a identificar"}</a>
                           : <>{c.fornecedor} · Anexo pendente</>} · {brl(c.valor_unitario)}
                         {c.fonte && c.fonte !== "fornecedor" && <> · {FONTES_COTACAO[c.fonte]}</>}
                         {c.link && <> · <a href={c.link} target="_blank" rel="noreferrer">Abrir fonte</a></>}

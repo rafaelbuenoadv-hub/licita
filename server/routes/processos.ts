@@ -1,3 +1,4 @@
+import { fornecedorNoTexto, limparNomeFornecedor, nomeDoArquivoSemExtensao, nomeFornecedorOrcamento, type OrcamentoLido } from "../../shared/orcamentos.js";
 import { LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao } from "../../shared/solicitacao.js";
 import { modeloSolicitacao, preencherSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesCadastro } from "../portarias.js";
@@ -167,11 +168,29 @@ function calcularItens(itens: ItemSolicitacao[]) {
 }
 
 async function conferirOrcamentos(c: PoolClient, processo: number, itens: ItemSolicitacao[]) {
-  const ids = [...new Set(itens.flatMap((item) => (item.cotacoes ?? [])
-    .flatMap(({ orcamento_id }) => orcamento_id == null ? [] : [orcamento_id])))];
-  if (!ids.length) return;
-  const encontrados = await c.query("select id from orcamentos where processo_id=$1 and id=any($2::int[])", [processo, ids]);
-  if (encontrados.rowCount !== ids.length) throw new ErroHttp(400, "Selecione orçamentos anexados a este processo.");
+  const vinculados = new Map<number, Set<string>>();
+  for (const item of itens) {
+    for (const cotacao of item.cotacoes ?? []) {
+      const id = cotacao.orcamento_id;
+      if (id == null) continue;
+      const nomes = vinculados.get(id) ?? new Set<string>();
+      const fornecedor = limparNomeFornecedor(cotacao.fornecedor);
+      if (fornecedor) nomes.add(fornecedor);
+      vinculados.set(id, nomes);
+    }
+  }
+  if (!vinculados.size) return;
+  const encontrados = await c.query<OrcamentoLido>(
+    "select id,nome,fornecedor,fornecedor_manual,dados from orcamentos where processo_id=$1 and id=any($2::int[]) order by id for update",
+    [processo, [...vinculados.keys()]],
+  );
+  if (encontrados.rowCount !== vinculados.size) throw new ErroHttp(400, "Selecione orçamentos anexados a este processo.");
+  for (const orcamento of encontrados.rows) {
+    const nomes = vinculados.get(orcamento.id)!;
+    if (nomes.size === 1 && !nomeFornecedorOrcamento(orcamento)) {
+      await c.query("update orcamentos set fornecedor_manual=$1 where id=$2", [[...nomes][0], orcamento.id]);
+    }
+  }
 }
 
 export function rotasProcessos() {
@@ -224,7 +243,7 @@ export function rotasProcessos() {
       `select distinct on (etapa) etapa, versao, origem, criado_em from minutas where processo_id = $1 order by etapa, versao desc`, [p.id]);
     const anexos = await q("select id, nome, length(texto) as caracteres, criado_em from anexos where processo_id = $1 order by id", [p.id]);
     const orcamentos = await q(
-      `select o.id, o.fornecedor, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, o.dados, o.lido_em, u.nome as usuario
+      `select o.id, coalesce(o.fornecedor_manual, o.fornecedor) as fornecedor, o.fornecedor_manual, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, o.dados, o.lido_em, u.nome as usuario
          from orcamentos o left join usuarios u on u.id = o.usuario_id where o.processo_id = $1 order by o.id`, [p.id]);
     const solicitacoes = await q(
       "select id, secretaria, referencia, descricao, nome_arquivo, objeto, justificativa, itens from solicitacoes_processo where processo_id=$1 order by id", [p.id],
@@ -532,31 +551,42 @@ export function rotasProcessos() {
       if (!tipoOrcamento(nomeEnviado(f))) throw new ErroHttp(415, `"${nomeEnviado(f)}": formato não aceito. Envie .pdf, .docx, .xlsx, .xls, .jpg, .png, .txt ou .csv.`);
     }
     const ids: number[] = [];
+    const orcamentos: { id: number; nome: string; fornecedor: string; dados: null }[] = [];
     const daSolicitacao = req.query.origem === "solicitacao";
     if (daSolicitacao && p.situacao !== "preparacao") throw new ErroHttp(409, "O processo deve estar em preparação para anexar a cotação.");
     for (const f of arquivos) {
       const nome = nomeEnviado(f);
-      // O orçamento é identificado pelo nome do arquivo, sem a extensão.
-      const fornecedor = (nome.replace(/\.[^.]+$/, "").trim() || nome).slice(0, 200);
       // A leitura do texto é um extra: planilha, imagem ou PDF que não puder ser lido fica só com o arquivo.
       const podeExtrair = /\.(docx|xlsx|txt|csv)$/i.test(nome) || (!daSolicitacao && /\.pdf$/i.test(nome));
       const texto = podeExtrair ? await extrairTexto(nome, f.buffer).catch(() => "") : "";
+      const identificado = fornecedorNoTexto(texto);
+      const fornecedor = identificado || nomeDoArquivoSemExtensao(nome);
       const o = await q1("insert into orcamentos (processo_id, fornecedor, nome, arquivo, texto, usuario_id) values ($1,$2,$3,$4,$5,$6) returning id",
         [p.id, fornecedor, nome, f.buffer, texto, req.usuario!.id]);
       ids.push(o.id);
+      orcamentos.push({ id: o.id, nome, fornecedor: identificado, dados: null });
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.incluido", detalhe: { nome } });
     }
     await q("update processos set atualizado_em = now() where id = $1", [p.id]);
-    res.status(201).json({ ids });
+    res.status(201).json({ ids, orcamentos });
   });
-  // Valor do orçamento: informado depois, na linha de cada arquivo.
+  // Valor e fornecedor informados na linha do orçamento.
   r.put("/processos/:id/orcamentos/:oid", exigePapel("requisitante", "contratacao"), async (req, res) => {
     const p = await processoDo(req);
-    const { valor } = z.object({ valor: z.number().nonnegative().nullable() }).parse(req.body);
-    const o = await q1("update orcamentos set valor=$1 where id=$2 and processo_id=$3 returning nome", [valor, Number(req.params.oid), p.id]);
+    const { valor, fornecedor } = z.object({
+      valor: z.number().nonnegative().nullable().optional(),
+      fornecedor: z.string().trim().max(200).transform(limparNomeFornecedor).optional(),
+    }).refine((d) => d.valor !== undefined || d.fornecedor !== undefined, "Informe o valor ou o fornecedor.").parse(req.body);
+    const oid = idOrcamento.parse(Number(req.params.oid));
+    const o = await q1(`update orcamentos
+      set valor=case when $1 then $2 else valor end,
+          fornecedor_manual=case when $3 then nullif($4,'') else fornecedor_manual end
+      where id=$5 and processo_id=$6 returning id,nome,fornecedor_manual,fornecedor,dados`,
+    [valor !== undefined, valor ?? null, fornecedor !== undefined, fornecedor ?? "", oid, p.id]);
     if (!o) throw new ErroHttp(404, "Orçamento não encontrado.");
-    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.valor", detalhe: { nome: o.nome, valor } });
-    res.json({ ok: true });
+    if (valor !== undefined) await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.valor", detalhe: { nome: o.nome, valor } });
+    if (fornecedor !== undefined) await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.fornecedor", detalhe: { nome: o.nome, fornecedor } });
+    res.json({ ok: true, fornecedor: nomeFornecedorOrcamento(o) });
   });
   r.get("/processos/:id/orcamentos/:oid/arquivo", async (req, res) => {
     const p = await processoDo(req);
