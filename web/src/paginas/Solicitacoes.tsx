@@ -3,7 +3,7 @@ import { api, brl } from "../api";
 import { useEu } from "../main";
 import { Folha } from "../comp/Folha";
 import { aplicarPendencias, pendencias } from "../../../shared/etapas";
-import { camposDaSolicitacao, FONTES_COTACAO, inserirItens, LIMITE_SOLICITACAO, MAX_ANEXOS_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { camposDaSolicitacao, FONTES_COTACAO, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
 
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
@@ -62,6 +62,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [linhas, setLinhas] = useState<LinhaItem[]>([linhaVazia()]);
   const [arquivo, setArquivo] = useState<File | null>(null);
   const [apoios, setApoios] = useState<File[]>([]);
+  const [progresso, setProgresso] = useState("");
   const [cotando, setCotando] = useState(false);
   const [ocupado, setOcupado] = useState<"salvar" | "ia" | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; erro?: boolean } | null>(null);
@@ -122,6 +123,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
 
   const editar = (s: Solicitacao) => {
     setEdicao(s);
+    setChave(crypto.randomUUID());
     setSecretaria(s.secretaria);
     setReferencia(s.referencia);
     setObjeto(s.objeto);
@@ -145,15 +147,29 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     for (const a of selecionados) {
       if (!novos.some((b) => b.name === a.name && b.size === a.size && b.lastModified === a.lastModified)) novos.push(a);
     }
-    if (novos.length + (edicao?.apoios.length ?? 0) > MAX_ANEXOS_SOLICITACAO || novos.some((a) => !a.size || a.size > TAMANHO_ANEXO_SOLICITACAO)
-      || novos.reduce((total, a) => total + a.size, 0) > 40 * 1024 * 1024) {
-      setAviso({ erro: true, texto: `Selecione até ${MAX_ANEXOS_SOLICITACAO} documentos de apoio não vazios, de 20 MB cada e 40 MB no total.` });
+    if (novos.some((a) => !a.size || a.size > TAMANHO_ANEXO_SOLICITACAO)) {
+      setAviso({ erro: true, texto: "Selecione documentos de apoio não vazios, de até 20 MB cada." });
       return;
     }
     setApoios(novos);
     setAviso(null);
   };
 
+  const enviarApoios = async (dados: FormData) => {
+    const ids: number[] = [];
+    for (const [i, arquivo] of apoios.entries()) {
+      setProgresso(`Enviando anexo ${i + 1} de ${apoios.length}…`);
+      const envio = new FormData();
+      envio.set("chave", chave);
+      envio.append("apoios", arquivo);
+      const r = await api.post<{ ids: number[] }>(`${caminho}/apoios`, envio);
+      ids.push(...r.ids);
+    }
+    if (ids.length) {
+      dados.set("chave_apoios", chave);
+      dados.set("apoios_ids", JSON.stringify(ids));
+    }
+  };
   const montarDados = (texto: string) => {
     if (arquivo && arquivo.size > 20 * 1024 * 1024) throw new Error("Selecione um documento de até 20 MB.");
     const dados = new FormData();
@@ -164,7 +180,6 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     dados.set("justificativa", justificativa);
     dados.set("itens", JSON.stringify(lidas.itens));
     if (arquivo) dados.set("arquivo", arquivo);
-    for (const apoio of apoios) dados.append("apoios", apoio);
     return dados;
   };
 
@@ -177,14 +192,15 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       if (modo === "anexo" && !arquivo) throw new Error("Selecione o documento da solicitação.");
       if (lidas.erro) throw new Error(lidas.erro);
       const texto = aplicarPendencias(base, valores).texto;
+      const dados = montarDados(texto);
+      await enviarApoios(dados);
+      setProgresso("Salvando a solicitação…");
       if (edicao) {
-        const dados = montarDados(texto);
         dados.set("anterior", edicao.descricao);
         dados.set("itens_anteriores", JSON.stringify(edicao.itens));
         await api.put(`${caminho}/${edicao.id}`, dados);
       }
       else {
-        const dados = montarDados(texto);
         dados.set("chave_envio", chave);
         await api.post(caminho, dados);
       }
@@ -195,6 +211,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       setAviso({ texto: erro instanceof Error ? erro.message : "Não foi possível salvar a solicitação.", erro: true });
     } finally {
       setOcupado(null);
+      setProgresso("");
     }
   };
 
@@ -207,6 +224,8 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setAviso(null);
     try {
       const dados = montarDados(previa);
+      await enviarApoios(dados);
+      setProgresso("Lendo os documentos de apoio…");
       if (edicao) dados.set("solicitacao_id", String(edicao.id));
       const r = await api.post<{ descricao: string; objeto: string; justificativa: string; itens: ItemSolicitacao[]; avisos: string[] }>(`${caminho}/ia`, dados);
       trocarTexto(r.descricao);
@@ -221,6 +240,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       setAviso({ texto: erro instanceof Error ? erro.message : "Não foi possível gerar o rascunho.", erro: true });
     } finally {
       setOcupado(null);
+      setProgresso("");
     }
   };
 
@@ -260,10 +280,11 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                   selecionarApoios(Array.from(e.target.files ?? []));
                   e.target.value = "";
                 }} />
-                <button className="btn" type="button" disabled={!!ocupado || cotando || apoios.length + (edicao?.apoios.length ?? 0) >= MAX_ANEXOS_SOLICITACAO}
+                <button className="btn" type="button" disabled={!!ocupado || cotando}
                   onClick={() => seletorApoios.current?.click()}>Anexar documentos de apoio</button>
-                <span className="small muted">PDF, Word, Excel (.xlsx), foto ou texto. Até {MAX_ANEXOS_SOLICITACAO} arquivos.</span>
+                <span className="small muted">Selecione vários arquivos e volte a anexar quando precisar. Até 20 MB por arquivo.</span>
               </div>
+              {progresso && <p className="small muted" role="status">{progresso}</p>}
               {(apoios.length > 0 || !!edicao?.apoios.length) && <ul>
                 {edicao?.apoios.map((a) => <li key={a.id}><a href={`/api${caminho}/${edicao.id}/apoios/${a.id}`}>{a.nome}</a></li>)}
                 {apoios.map((a, i) => <li key={`${a.name}-${i}`}>{a.name}{" "}

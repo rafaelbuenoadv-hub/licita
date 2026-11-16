@@ -1,5 +1,5 @@
-import { anexosDaRequisicao, lerDocumentoParaSolicitacao, nomeAnexoEnviado, receberAnexosSolicitacao, validarVolumeApoios, type AnexoSolicitacao } from "../anexos-solicitacao.js";
-import { ASSINATURA_SOLICITACAO, LIMITE_SOLICITACAO, MAX_ANEXOS_SOLICITACAO, MODELO_SOLICITACAO } from "../../shared/solicitacao.js";
+import { anexosDaRequisicao, consolidarFontes, filtroApoiosPendentes, lerDocumentoParaSolicitacao, nomeAnexoEnviado, parametrosApoios, receberAnexosSolicitacao, referenciasApoios, type AnexoSolicitacao } from "../anexos-solicitacao.js";
+import { ASSINATURA_SOLICITACAO, LIMITE_SOLICITACAO, MODELO_SOLICITACAO } from "../../shared/solicitacao.js";
 import { compararOrcamentos, fornecedorNoTexto, limparNomeFornecedor, nomeFornecedorOrcamento, type DadosOrcamento } from "../../shared/orcamentos.js";
 import { modeloSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso } from "../portarias.js";
@@ -206,6 +206,7 @@ export function rotasIA() {
     if (p.situacao !== "preparacao") throw new ErroHttp(409, "A solicitação só pode ser elaborada enquanto o processo estiver em preparação.");
     const { principal, apoios } = anexosDaRequisicao(req);
     const dados = z.object({
+      ...referenciasApoios,
       solicitacao_id: z.coerce.number().int().positive().max(2147483647).optional(),
       secretaria: z.string().trim().min(2).max(200),
       referencia: z.string().trim().max(120).default(""),
@@ -214,8 +215,13 @@ export function rotasIA() {
       justificativa: z.string().trim().max(8000).default(""),
     }).parse(req.body);
     if (!iaDisponivel()) throw new ErroHttp(503, "A IA está indisponível no servidor. Você pode preencher ou anexar a solicitação.");
-    const documentos: AnexoSolicitacao[] = [...apoios];
+    const parametros = parametrosApoios(dados, p.id, req.usuario!.id);
+    const pendentes = dados.apoios_ids.length
+      ? await q<{ id: number; nome: string }>(`select id,nome from solicitacao_anexos_pendentes where ${filtroApoiosPendentes} order by id`, parametros)
+      : [];
+    if (pendentes.length !== dados.apoios_ids.length) throw new ErroHttp(409, "Reenvie os documentos de apoio antes de gerar a solicitação.");
     let original = principal ? { nome: nomeAnexoEnviado(principal), arquivo: principal.buffer, texto: "" } : null;
+    let salvos: { id: number; nome: string }[] = [];
     if (dados.solicitacao_id) {
       const s = await q1<{ secretaria: string; referencia: string; nome: string | null; arquivo: Buffer | null; texto: string }>(
         "select secretaria,referencia,nome_arquivo as nome,arquivo,texto_arquivo as texto from solicitacoes_processo where id=$1 and processo_id=$2",
@@ -224,21 +230,40 @@ export function rotasIA() {
       if (!s) throw new ErroHttp(404, "Solicitação não encontrada.");
       dados.secretaria = s.secretaria;
       dados.referencia = s.referencia;
-      documentos.unshift(...await q<AnexoSolicitacao>("select nome,arquivo,texto from solicitacao_anexos where solicitacao_id=$1 order by id", [dados.solicitacao_id]));
+      salvos = await q("select id,nome from solicitacao_anexos where solicitacao_id=$1 order by id", [dados.solicitacao_id]);
       if (!original && s.arquivo && s.nome) original = { nome: s.nome, arquivo: s.arquivo, texto: s.texto };
     }
-    if (documentos.length > MAX_ANEXOS_SOLICITACAO) throw new ErroHttp(400, "Reduza o número de documentos para gerar a solicitação.");
-    validarVolumeApoios(documentos);
-    if (original) documentos.unshift(original);
+    const documentos = [
+      ...(original ? [original] : []), ...salvos.map((a) => ({ ...a, origem: "salvo" as const })),
+      ...pendentes.map((a) => ({ ...a, origem: "pendente" as const })), ...apoios,
+    ];
     try {
-      const lidos = await Promise.allSettled(documentos.map(lerDocumentoParaSolicitacao));
-      const avisos = documentos.flatMap((d, i) => lidos[i].status === "rejected" ? [d.nome] : []);
-      if (documentos.length && avisos.length === documentos.length) {
-        const falha = lidos[0];
-        if (falha.status === "rejected" && traduzErroIA(falha.reason).status === 503) throw traduzErroIA(falha.reason);
-        throw new ErroHttp(422, `Não foi possível ler os documentos: ${avisos.join(", ")}. Confira os arquivos e gere novamente.`);
+      const avisos: string[] = [];
+      let fontes = "";
+      let erroIA: ErroHttp | undefined;
+      for (const ref of documentos) {
+        let texto: string;
+        try {
+          let doc: AnexoSolicitacao | undefined;
+          if (!("origem" in ref)) doc = ref;
+          else if (ref.origem === "salvo") doc = await q1(
+            "select nome,arquivo,texto from solicitacao_anexos where id=$1 and solicitacao_id=$2", [ref.id, dados.solicitacao_id]);
+          else doc = await q1(
+            "select nome,arquivo,texto from solicitacao_anexos_pendentes where id=$1 and processo_id=$2 and usuario_id=$3 and chave=$4",
+            [ref.id, p.id, req.usuario!.id, dados.chave_apoios]);
+          if (!doc) throw new ErroHttp(409, "Documento indisponível.");
+          texto = await lerDocumentoParaSolicitacao(doc);
+        } catch (e) {
+          const traduzido = traduzErroIA(e);
+          if (traduzido.status === 503) erroIA = traduzido;
+          avisos.push(ref.nome);
+          continue;
+        }
+        fontes = await consolidarFontes(fontes, `DOCUMENTO DE APOIO: ${ref.nome}\n${texto}`);
       }
-      const fontes = lidos.flatMap((l, i) => l.status === "fulfilled" ? [`DOCUMENTO DE APOIO: ${documentos[i].nome}\n${corta(l.value)}`] : []);
+      if (documentos.length && !fontes) {
+        throw erroIA ?? new ErroHttp(422, `Não foi possível ler os documentos: ${avisos.join(", ")}. Confira os arquivos e gere novamente.`);
+      }
       const modelo = await modeloSolicitacao(p.orgao_id);
       const esquema = z.object({
         descricao: z.string(),
@@ -258,7 +283,7 @@ MODELO DA SOLICITAÇÃO
 ${modelo}
 
 DOCUMENTOS DE APOIO
-${fontes.join("\n\n")}`, "medium");
+${fontes}`, "medium");
       const corpo = resposta.descricao.split("\n").filter((linha) => !/^\s*@\s/.test(linha)).join("\n").trim();
       const descricao = corpo ? `${corpo}\n\n${ASSINATURA_SOLICITACAO}` : "";
       if (!descricao || descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(502, "A IA gerou um texto fora do limite do campo. Tente novamente com informações mais específicas.");
