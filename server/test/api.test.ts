@@ -716,3 +716,29 @@ test("revisão avulsa preserva PDFs, versões e evidências dentro do órgão", 
   assert.equal((await lic.put(item, atendida)).status, 200);
   assert.equal((await jur.get(caminho)).dados.recomendacoes[0].evidencia, atendida.evidencia);
 });
+
+test("nova revisão recebe o primeiro PDF no próprio cadastro", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  const original = Uint8Array.from(await pdf.save());
+  const numero = "28/2024";
+  const abrirCom = (arquivo: BlobPart) => {
+    const form = new FormData();
+    form.set("numero", numero);
+    form.set("objeto", "Manutenção da rede de iluminação");
+    form.set("via", "licitacao");
+    form.set("tipo", "autos");
+    form.set("arquivo", new Blob([arquivo], { type: "application/pdf" }), "autos-revisao.pdf");
+    return lic.post("/api/revisoes", form);
+  };
+  assert.equal((await abrirCom("Arquivo inválido")).status, 415);
+  assert.equal((await lic.get("/api/revisoes")).dados.some((r: { numero: string }) => r.numero === numero), false);
+  const criada = await abrirCom(original);
+  assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  const detalhes = await lic.get(`/api/revisoes/${criada.dados.id}`);
+  assert.equal(detalhes.dados.processo_id, null);
+  assert.deepEqual(detalhes.dados.arquivos, [{ id: detalhes.dados.arquivos[0]?.id, tipo: "autos", nome: "autos-revisao.pdf", paginas: 1 }]);
+  const anexo = await lic.get(`/api/revisoes/${criada.dados.id}/arquivos/${detalhes.dados.arquivos[0].id}`);
+  assert.deepEqual(anexo.dados, Buffer.from(original));
+});
