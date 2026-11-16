@@ -1,6 +1,7 @@
 import {
-  AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType,
+  AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, PageOrientation, Paragraph, Table, TableCell, TableRow, TextRun, WidthType,
 } from "docx";
+import { quantidadeColunasCotacoes } from "../shared/solicitacao.js";
 
 // Converte a marcação das minutas em .docx:
 //   "# "  título centralizado      "## " seção em negrito
@@ -51,6 +52,12 @@ function imagemTimbrado(imagem: ImagemTimbrado, largura: number) {
 }
 
 export async function minutaParaDocx(texto: string, titulo: string, timbrado?: Timbrado) {
+  const colunasCotacoes = quantidadeColunasCotacoes(texto);
+  const tamanhoPagina = colunasCotacoes > 3 ? {
+    orientation: PageOrientation.LANDSCAPE,
+    width: 11906,
+    height: Math.min(31600, Math.max(16838, 9100 + colunasCotacoes * 1400)),
+  } : undefined;
   const filhos: (Paragraph | Table)[] = [];
   let tab: string[][] = [];
   let assinatura = false;
@@ -86,7 +93,7 @@ export async function minutaParaDocx(texto: string, titulo: string, timbrado?: T
     creator: "Licita",
     styles: { default: { document: { run: { font: FONTE, size: 24 } } } },
     sections: [{
-      properties: { page: { margin: { top: timbrado ? 2250 : 1418, bottom: 1134, left: 1701, right: 1134, header: 520, footer: 460 } } },
+      properties: { page: { size: tamanhoPagina, margin: { top: timbrado ? 2250 : 1418, bottom: 1134, left: 1701, right: 1134, header: 520, footer: 460 } } },
       headers: timbrado ? { default: new Header({ children: [imagemTimbrado(timbrado.cabecalho, 565)] }) } : undefined,
       footers: timbrado ? { default: new Footer({ children: [imagemTimbrado(timbrado.rodape, 565)] }) } : undefined,
       children: filhos,

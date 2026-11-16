@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { quantidadeColunasCotacoes } from "../shared/solicitacao.js";
 import type { Timbrado } from "./docx.js";
 
 type Trecho = { texto: string; negrito: boolean; pendente: boolean; largura: number };
@@ -7,7 +8,12 @@ const NORMAL = "Times-Roman";
 const NEGRITO = "Times-Bold";
 
 export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Timbrado) {
-  const doc = new PDFDocument({ size: "A4", margin: MARGEM, bufferPages: true, info: { Title: titulo, Creator: "Licita" } });
+  const colunasCotacoes = quantidadeColunasCotacoes(texto);
+  // Mantém uma única linha por item mesmo nos quadros com muitas cotações.
+  const size: [number, number] | "A4" = colunasCotacoes > 3
+    ? [Math.min(14_000, Math.max(842, 455 + colunasCotacoes * 70)), 595.28]
+    : "A4";
+  const doc = new PDFDocument({ size, margin: MARGEM, bufferPages: true, info: { Title: titulo, Creator: "Licita" } });
   const blocos: Buffer[] = [];
   const resultado = new Promise<Buffer>((resolve, reject) => {
     doc.on("data", (bloco: Buffer) => blocos.push(bloco));
