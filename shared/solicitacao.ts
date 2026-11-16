@@ -100,7 +100,7 @@ function cotacoesPorFornecedor(itens: ItemSolicitacao[]) {
 }
 
 export function quantidadeColunasCotacoes(texto: string) {
-  const cabecalho = texto.split("\n").find((linha) => linha.trim().startsWith(CABECALHO_COTACOES + " Cotação 1 |"));
+  const cabecalho = texto.split("\n").find((linha) => linha.trim().startsWith(CABECALHO_COTACOES + " Cotação 1 "));
   return cabecalho ? cabecalho.trim().split("|").length - 8 : 0;
 }
 
@@ -116,9 +116,8 @@ export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = f
   const acrescentar = (linha: string, colunas: string[] = []) =>
     linha + fornecedores.map((_, i) => colunas[i] ? ` ${colunas[i]} |` : " |").join("");
   return [
-    acrescentar(cabecalho, fornecedores.map((_, i) => `Cotação ${i + 1}`)),
+    acrescentar(cabecalho, fornecedores.map(([, nome], i) => `Cotação ${i + 1} — ${nome}`)),
     `|${"---|".repeat(6 + fornecedores.length)}`,
-    ...(fornecedores.length ? [acrescentar("| | | | | | |", fornecedores.map(([, nome]) => `**${nome}**`))] : []),
     ...itens.map((item, k) => {
       const subtotal = totalDoItem(item);
       const qtd = item.quantidade == null ? "—" : numero(item.quantidade);

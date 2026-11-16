@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { PDFDocument } from "pdf-lib";
 import { buscarPncp } from "../routes/pncp.js";
 import { destinosDoOrcamento } from "../../shared/importar-orcamento.js";
-import { documentoDaSolicitacao, valorDasCotacoes } from "../../shared/solicitacao.js";
+import { documentoDaSolicitacao, quantidadeColunasCotacoes, valorDasCotacoes } from "../../shared/solicitacao.js";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -1011,7 +1011,7 @@ test("preços lançados aparecem na solicitação e entram na estimativa após o
   assert.equal(antes.itens[0].valor_unitario, null);
   const rota = `${caminho}/${salva.dados.id}`;
   const previa = documentoDaSolicitacao("# SOLICITAÇÃO\nRelação: [[Itens]]", antes.itens);
-  assert.match(previa, /^# SOLICITAÇÃO\nRelação:\n\n\| Item \| Descrição .*Cotação 1 \| Cotação 2 \|/);
+  assert.match(previa, /^# SOLICITAÇÃO\nRelação:\n\n\| Item \| Descrição .*Cotação 1 — Papelaria A \| Cotação 2 — Papelaria B \|/);
   assert.match(previa, /Resma de papel .*R\$\s12,50 \(anexo pendente\) \| R\$\s18,00 \(anexo pendente\)/);
   assert.doesNotMatch(previa, /Total estimado|\[\[Itens\]\]|Orçamentos por item/);
   assert.equal(documentoDaSolicitacao(previa, antes.itens), previa);
@@ -1019,6 +1019,7 @@ test("preços lançados aparecem na solicitação e entram na estimativa após o
   const wordAntes = await lic.get(`${rota}/docx`);
   assert.equal(wordAntes.status, 200);
   const textoAntes = await extrairTexto("solicitacao.docx", wordAntes.dados);
+  assert.match(textoAntes, /Cotação 1 — Papelaria A \| Cotação 2 — Papelaria B/);
   assert.match(textoAntes, /Resma de papel .*R\$\s12,50 \(anexo pendente\) \| R\$\s18,00 \(anexo pendente\)/);
   assert.doesNotMatch(textoAntes, /Total estimado|Orçamentos por item/);
 
@@ -1061,18 +1062,17 @@ test("as cotações ficam lado a lado no quadro e os fornecedores comuns aparece
     ...item, descricao: "Resma", cotacoes: [cotacao("Loja Beta", 21), cotacao("LOJA ALFA", 11)],
   }, { ...item, descricao: "Caneta", cotacoes: [cotacao("Loja Beta", 22)] }]);
   const linhas = comum.split("\n");
-  assert.match(linhas[2], /\| Cotação 1 \| Cotação 2 \|$/);
-  assert.match(linhas[4], /\| \*\*Loja Alfa\*\* \| \*\*Loja Beta\*\* \|$/);
-  assert.match(linhas[5], /\| R\$\s10,00 \| R\$\s20,00 \|$/);
-  assert.match(linhas[6], /\| R\$\s11,00 \| R\$\s21,00 \|$/);
-  assert.match(linhas[7], /\| — \| R\$\s22,00 \|$/);
+  assert.match(linhas[2], /\| Cotação 1 — Loja Alfa \| Cotação 2 — Loja Beta \|$/);
+  assert.match(linhas[4], /\| R\$\s10,00 \| R\$\s20,00 \|$/);
+  assert.match(linhas[5], /\| R\$\s11,00 \| R\$\s21,00 \|$/);
+  assert.match(linhas[6], /\| — \| R\$\s22,00 \|$/);
   assert.equal(comum.match(/Loja Alfa/gi)?.length, 1);
   assert.equal(documentoDaSolicitacao(comum, [item]).match(/\| Item \|/g)?.length, 1);
   const muitos = documentoDaSolicitacao(texto, [{ ...item, cotacoes: [
     a, b, cotacao("Loja Gama", 30), cotacao("Loja Delta", 40), cotacao("Loja Épsilon", 50),
   ] }]);
-  assert.match(muitos, /\| Cotação 1 \| Cotação 2 \| Cotação 3 \| Cotação 4 \| Cotação 5 \|/);
-  assert.match(muitos, /\| \*\*Loja Delta\*\* \| \*\*Loja Épsilon\*\* \|/);
+  assert.match(muitos, /\| Cotação 1 — Loja Alfa \| Cotação 2 — Loja Beta \| Cotação 3 — Loja Gama \| Cotação 4 — Loja Delta \| Cotação 5 — Loja Épsilon \|/);
+  assert.equal(quantidadeColunasCotacoes(muitos), 5);
   assert.match(muitos, /\| 1 \| Material escolar .*R\$\s40,00 \| R\$\s50,00 \|/);
   assert.equal(muitos.match(/Material escolar/g)?.length, 1);
   assert.equal(muitos.match(/Loja Alfa/g)?.length, 1);
