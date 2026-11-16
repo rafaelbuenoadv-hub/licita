@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
-import { exigePapel } from "../auth.js";
+import { exigeLogin, exigePapel } from "../auth.js";
 import { auditar, q, q1, tx } from "../db.js";
 import { secretariosIbaitiComAtos } from "../secretarios-ibaiti.js";
 import { ehMunicipioIbaiti } from "../municipio-ibaiti.js";
+import { localizadorDeTitulares } from "../portarias.js";
 
 const link = z.string().trim().max(1200).pipe(z.union([z.url({ protocol: /^https?$/ }), z.literal("")]));
 
@@ -21,6 +22,19 @@ const campos = "id, secretaria, nome, email, telefone, fonte, coalesce(portaria,
 export function rotasSecretarios() {
   const r = Router();
   r.use("/admin/secretarios", exigePapel("admin"));
+
+  // Consulta para quem abre processo: secretarias cadastradas e o titular de cada área informada.
+  r.get("/secretarios", exigeLogin, async (req, res) => {
+    res.json(await q("select secretaria, nome, coalesce(portaria, '') as portaria, fonte_portaria from secretarios where orgao_id=$1 order by secretaria", [req.usuario!.orgao_id]));
+  });
+  r.post("/secretarios/titulares", exigeLogin, async (req, res) => {
+    const { areas } = z.object({ areas: z.array(z.string().trim().max(200)).max(40) }).parse(req.body);
+    const procurar = await localizadorDeTitulares(req.usuario!.orgao_id);
+    res.json(areas.map((area) => {
+      const s = area ? procurar(area) : undefined;
+      return { area, titular: s ? { secretaria: s.secretaria, nome: s.nome, portaria: s.portaria ?? "", fonte_portaria: s.fonte_portaria } : null };
+    }));
+  });
 
   r.get("/admin/secretarios", async (req, res) => {
     const orgao = req.usuario!.orgao_id;

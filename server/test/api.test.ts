@@ -550,3 +550,27 @@ test("mensagens entre usuários do mesmo órgão", async () => {
   assert.ok((await req.get("/api/mensagens?caixa=enviadas")).dados.find((m: any) => m.para_nome === "lic").lida_em);
   assert.equal((await jur.get("/api/mensagens/nao-lidas")).dados.total, 1);
 });
+
+test("abertura do processo: área requisitante traz o secretário e a portaria do cadastro", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+  assert.equal((await new Cliente().get("/api/secretarios")).status, 401);
+  assert.equal((await new Cliente().post("/api/secretarios/titulares", { areas: ["Saúde"] })).status, 401);
+  const lista = (await admin.get("/api/secretarios")).dados;
+  assert.ok(lista.some((s: any) => s.secretaria === "Educação" && s.nome === "Denise da Silva Lima" && s.portaria === "008/2025"));
+  const r = await admin.post("/api/secretarios/titulares", { areas: ["Educação", "SEDUC", "Secretaria Municipal de Educação", "Finanças", "Obras", "Setor inexistente", ""] });
+  assert.equal(r.status, 200, JSON.stringify(r.dados));
+  assert.deepEqual(r.dados.map((x: any) => [x.area, x.titular?.nome ?? null, x.titular?.portaria ?? null]), [
+    ["Educação", "Denise da Silva Lima", "008/2025"],
+    ["SEDUC", "Denise da Silva Lima", "008/2025"],
+    ["Secretaria Municipal de Educação", "Denise da Silva Lima", "008/2025"],
+    ["Finanças", "Luiz Carlos Bernardi Gelinski", "003/2025"],
+    ["Obras", "Antônio Vincenzi", ""],
+    ["Setor inexistente", null, null],
+    ["", null, null],
+  ]);
+  assert.match(r.dados[0].titular.fonte_portaria, /^https:/);
+  // Outro órgão não enxerga o cadastro de Ibaiti.
+  assert.ok(!(await outro.get("/api/secretarios")).dados.some((s: any) => s.nome === "Denise da Silva Lima"));
+  assert.equal((await outro.post("/api/secretarios/titulares", { areas: ["Educação"] })).dados[0].titular, null);
+});

@@ -17,6 +17,43 @@ export function paraApi(d: DadosProc) {
   return { requisitante: d.requisitante, areas_adicionais: d.areas_adicionais.map((a) => a.trim()).filter(Boolean), objeto: d.objeto, tipo: d.tipo, via: d.via, valor_estimado: v, classe: d.classe, ano: Number(d.ano), pca_item_id: d.pca_item_id && d.pca_item_id !== "auto" ? Number(d.pca_item_id) : null, pca_automatico: d.pca_item_id === "auto", normas: d.normas, obs: d.obs };
 }
 
+interface Titular { secretaria: string; nome: string; portaria: string; fonte_portaria: string }
+const titulares = new Map<string, Titular | null>();
+
+/** Secretarias do cadastro, como sugestão ao digitar a área requisitante. */
+function Secretarias() {
+  const [lista, setLista] = useState<Titular[]>([]);
+  useEffect(() => { api.get<Titular[]>("/secretarios").then(setLista).catch(() => {}); }, []);
+  return <datalist id="secretarias-orgao">{lista.map((s) => <option key={s.secretaria} value={s.secretaria}>{s.nome}</option>)}</datalist>;
+}
+
+/** Busca no cadastro o secretário e a portaria de nomeação da área informada e mostra os dois campos preenchidos. */
+function TitularArea({ area }: { area: string }) {
+  const chave = area.trim();
+  const [t, setT] = useState<Titular | null | undefined>(() => titulares.get(chave));
+  useEffect(() => {
+    if (!chave) return setT(undefined);
+    if (titulares.has(chave)) return setT(titulares.get(chave));
+    setT(undefined);
+    let ativo = true;
+    const espera = setTimeout(() => {
+      api.post<{ titular: Titular | null }[]>("/secretarios/titulares", { areas: [chave] })
+        .then((r) => { titulares.set(chave, r[0]?.titular ?? null); if (ativo) setT(r[0]?.titular ?? null); })
+        .catch(() => { if (ativo) setT(undefined); });
+    }, 350);
+    return () => { ativo = false; clearTimeout(espera); };
+  }, [chave]);
+  if (!chave || t === undefined) return null;
+  if (t === null) return <p className="small muted" role="status">Nenhum secretário cadastrado para esta área. O administrador cadastra em Configurações.</p>;
+  return (
+    <div className="titular" role="status">
+      <label>Secretário(a)<input readOnly value={t.nome} aria-label={`Secretário(a) de ${t.secretaria}`} /></label>
+      <label>Portaria de nomeação<input readOnly value={t.portaria ? `nº ${t.portaria}` : "não cadastrada"} aria-label={`Portaria de nomeação de ${t.nome}`} /></label>
+      <span className="small muted">Preenchido pelo cadastro de secretários ({t.secretaria}).{t.portaria && t.fonte_portaria && <> <a href={t.fonte_portaria} target="_blank" rel="noopener noreferrer">Ver portaria</a></>}</span>
+    </div>
+  );
+}
+
 export interface PlanoConsulta {
   ano: number;
   itens: ItemConsultaPca[];
@@ -58,14 +95,17 @@ export function CamposProcesso({ d, set, plano, novo = false, podeEditar = true 
         pca: vinculo ? { descricao: vinculo.descricao, item: vinculo.ordem_oficial } : null,
       }} />}
       <div className="stack" style={{ gap: 8 }}>
-        <label>Área requisitante<input {...c("requisitante")} maxLength={200} /></label>
+        <label>Área requisitante<input {...c("requisitante")} maxLength={200} list="secretarias-orgao" /></label>
+        <Secretarias />
+        <TitularArea area={d.requisitante} />
         {d.areas_adicionais.map((area, indice) => (
           <div className="stack" style={{ gap: 4 }} key={indice}>
             <label>Área requisitante {indice + 2}
-              <input data-campo-ajuda="requisitante" value={area} maxLength={200} onChange={(ev) => set({
+              <input data-campo-ajuda="requisitante" value={area} maxLength={200} list="secretarias-orgao" onChange={(ev) => set({
                 ...d, areas_adicionais: d.areas_adicionais.map((nome, i) => i === indice ? ev.target.value : nome),
               })} />
             </label>
+            <TitularArea area={area} />
             <button className="lnk" type="button" onClick={() => set({
               ...d, areas_adicionais: d.areas_adicionais.filter((_, i) => i !== indice),
             })}>Remover área {indice + 2}</button>

@@ -27,14 +27,14 @@ const aliasesIbaiti: Record<string, string[]> = {
   "trabalho e emprego": ["smte"],
 };
 
-export async function secretariosDoProcesso(p: { id: number; orgao_id: number; requisitante: string; areas_adicionais: string[] }) {
-  const [solicitacoes, cadastrados, orgao] = await Promise.all([
-    q<{ secretaria: string }>("select distinct secretaria from solicitacoes_processo where processo_id=$1", [p.id]),
-    q<Signatario>("select secretaria, nome, portaria, fonte_portaria from secretarios where orgao_id=$1 order by id", [p.orgao_id]),
-    q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [p.orgao_id]),
+/** Monta a busca do titular de uma área pelo nome ou sigla informados, conforme o cadastro do órgão. */
+export async function localizadorDeTitulares(orgao_id: number) {
+  const [cadastrados, orgao] = await Promise.all([
+    q<Signatario>("select secretaria, nome, portaria, fonte_portaria from secretarios where orgao_id=$1 order by id", [orgao_id]),
+    q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [orgao_id]),
   ]);
   const ibaiti = !!orgao && ehMunicipioIbaiti(orgao);
-  const procurar = (texto: string) => {
+  return (texto: string) => {
     const chave = area(texto);
     const exatos = cadastrados.filter((s) => area(s.secretaria) === chave);
     if (exatos.length === 1) return exatos[0];
@@ -48,6 +48,13 @@ export async function secretariosDoProcesso(p: { id: number; orgao_id: number; r
     });
     return candidatos.length === 1 ? candidatos[0] : undefined;
   };
+}
+
+export async function secretariosDoProcesso(p: { id: number; orgao_id: number; requisitante: string; areas_adicionais: string[] }) {
+  const [solicitacoes, procurar] = await Promise.all([
+    q<{ secretaria: string }>("select distinct secretaria from solicitacoes_processo where processo_id=$1", [p.id]),
+    localizadorDeTitulares(p.orgao_id),
+  ]);
 
   const areas = [p.requisitante, ...p.areas_adicionais, ...solicitacoes.map((s) => s.secretaria)]
     .map((a) => a.trim()).filter(Boolean).flatMap((a) => procurar(a) ? [a] : a.split(/[;\n]+/).map((x) => x.trim()).filter(Boolean));
