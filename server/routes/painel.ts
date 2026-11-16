@@ -13,7 +13,7 @@ export function rotasPainel() {
     const procs = await q(
       `select p.id, p.protocolo, p.numero, p.objeto, p.tipo, p.via, p.situacao, p.atualizado_em,
               coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
-         from processos p where p.orgao_id=$1 and p.situacao = 'preparacao' order by p.atualizado_em`, [orgao]);
+         from processos p where p.orgao_id=$1 and p.excluido_em is null and p.situacao = 'preparacao' order by p.atualizado_em`, [orgao]);
     const emPreparo = procs.map(({ itens, ...p }) => {
       const c: Checks = Object.fromEntries((itens as string[]).map((i) => [i, true]));
       const ix = atual(p, c);

@@ -350,3 +350,33 @@ test("a aba Solicitação usa o próprio modelo e o DFD aproveita o pedido regis
   const semMinutaAvulsa = await api("POST", `${caminho}/ia/redigir`, { etapa: "solicitacao" });
   assert.equal(semMinutaAvulsa.status, 404);
 });
+
+test("a IA combina anexos salvos e novos para sugerir os campos da solicitação", async () => {
+  const criada = await api("POST", "/api/processos", { objeto: "Iluminação de escolas", tipo: "bens", via: "licitacao", ano: 2026 });
+  assert.equal(criada.status, 201);
+  const rota = `/api/processos/${(await criada.json()).id}/solicitacoes`;
+  const salva = new FormData();
+  salva.set("chave_envio", crypto.randomUUID());
+  salva.set("secretaria", "Educação");
+  salva.set("descricao", "Reposição de iluminação");
+  salva.append("apoios", new Blob(["Motivo: lâmpadas apagadas nas salas da escola."]), "justificativa.txt");
+  const registrada = await api("POST", rota, salva);
+  assert.equal(registrada.status, 201);
+  const consulta = new FormData();
+  consulta.set("solicitacao_id", String((await registrada.json()).id));
+  consulta.set("secretaria", "Educação");
+  consulta.append("apoios", new Blob(["Levantamento: 12 luminárias, unidade." ]), "quantidades.txt");
+  consulta.append("apoios", new Blob(["Isto não é um PDF válido."]), "ilegivel.pdf");
+  respostaEstruturada = { descricao: "# SOLICITAÇÃO\n[[Itens]]", objeto_solicitacao: "Aquisição de luminárias",
+    justificativa: "Restabelecer a iluminação nas salas.", itens: [{ descricao: "Luminária", unidade: "un", quantidade: 12 }] };
+  const resultado = await api("POST", `${rota}/ia`, consulta);
+  assert.equal(resultado.status, 200);
+  const r = await resultado.json();
+  assert.equal(r.objeto, "Aquisição de luminárias");
+  assert.equal(r.justificativa, "Restabelecer a iluminação nas salas.");
+  assert.deepEqual(r.itens, [{ descricao: "Luminária", unidade: "un", quantidade: 12, valor_unitario: null, cotacoes: [] }]);
+  assert.deepEqual(r.avisos, ["ilegivel.pdf"]);
+  const contexto = pedidos.at(-1)!.body.messages[0].content;
+  assert.match(contexto, /justificativa.txt\nMotivo: lâmpadas apagadas/);
+  assert.match(contexto, /quantidades.txt\nLevantamento: 12 luminárias/);
+});

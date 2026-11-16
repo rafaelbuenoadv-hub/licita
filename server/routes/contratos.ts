@@ -81,7 +81,7 @@ export function rotasContratos() {
     const d = camposContrato.parse(req.body);
     if (d.fim < d.inicio) throw new ErroHttp(400, "O fim da vigência é anterior ao início.");
     if (d.processo_id) {
-      const p = await q1("select 1 from processos where id=$1 and orgao_id=$2", [d.processo_id, req.usuario!.orgao_id]);
+      const p = await q1("select 1 from processos where id=$1 and orgao_id=$2 and excluido_em is null", [d.processo_id, req.usuario!.orgao_id]);
       if (!p) throw new ErroHttp(400, "Processo não encontrado.");
     }
     const c = await tx(async (cx) => {
@@ -99,7 +99,7 @@ export function rotasContratos() {
   r.get("/contratos/:id", async (req, res) => {
     const c = await contratoDo(req);
     const extra = await completo(c.id);
-    const processo = c.processo_id ? await q1("select id, protocolo, numero, procedimento, objeto from processos where id=$1", [c.processo_id]) : null;
+    const processo = c.processo_id ? await q1("select id, protocolo, numero, procedimento, objeto, excluido_em is not null as excluido from processos where id=$1", [c.processo_id]) : null;
     res.json({ ...c, ...extra, processo, ...calcular(c, extra.aditivos, extra.medicoes) });
   });
 

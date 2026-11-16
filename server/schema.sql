@@ -293,6 +293,19 @@ alter table solicitacoes_processo add column if not exists objeto text not null 
 alter table solicitacoes_processo add column if not exists justificativa text not null default '';
 alter table solicitacoes_processo add column if not exists itens jsonb not null default '[]';
 
+create table if not exists solicitacao_anexos (
+  id serial primary key,
+  solicitacao_id int not null references solicitacoes_processo(id) on delete cascade,
+  nome text not null,
+  arquivo bytea not null,
+  texto text not null default '',
+  sha256 text not null,
+  unique (solicitacao_id, sha256)
+);
+
+alter table processos add column if not exists excluido_em timestamptz;
+
+
 -- Protocolo: identificador único do processo desde a abertura, no formato ANO/0001, sequencial por órgão e ano.
 -- O nº do processo administrativo e o do procedimento (colunas numero e procedimento) só são gravados ao final.
 alter table processos add column if not exists protocolo text not null default '';

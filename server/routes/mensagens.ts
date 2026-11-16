@@ -44,7 +44,7 @@ export function rotasMensagens() {
     if (para.includes(eu.id)) throw new ErroHttp(400, "Não é possível enviar mensagem para si mesmo.");
     const ok = await q("select id from usuarios where orgao_id=$1 and ativo and id = any($2)", [eu.orgao_id, para]);
     if (ok.length !== para.length) throw new ErroHttp(400, "Destinatário não encontrado.");
-    if (d.processo_id && !(await q1("select 1 from processos where id=$1 and orgao_id=$2", [d.processo_id, eu.orgao_id]))) throw new ErroHttp(400, "Processo não encontrado.");
+    if (d.processo_id && !(await q1("select 1 from processos where id=$1 and orgao_id=$2 and excluido_em is null", [d.processo_id, eu.orgao_id]))) throw new ErroHttp(400, "Processo não encontrado.");
     await tx(async (c) => {
       for (const id of para) {
         await c.query("insert into mensagens (orgao_id, de_id, para_id, processo_id, assunto, texto) values ($1,$2,$3,$4,$5,$6)", [eu.orgao_id, eu.id, id, d.processo_id, d.assunto, d.texto]);
