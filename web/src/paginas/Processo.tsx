@@ -12,7 +12,7 @@ const ACOES: Record<string, string> = {
   "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA",
   "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
   "minuta.titulares": "incluiu os titulares no DFD",
-  "solicitacao.incluida": "adicionou solicitação de secretaria",
+  "solicitacao.incluida": "adicionou solicitação de secretaria", "solicitacao.alterada": "editou solicitação de secretaria",
   "ia.sugestoes": "pediu sugestões à IA", "contrato.criado": "registrou contrato",
 };
 
@@ -71,7 +71,7 @@ export function ProcessoPg() {
       </div>
 
       <Anexos p={p} recarregar={carregar} podeIncluir={tem(eu, "requisitante", "contratacao", "juridico")} />
-      <Historico id={p.id} versao={p.checagens.length + (p.minutas?.length ?? 0) + (p.orcamentos?.length ?? 0) + p.solicitacoes.length} />
+      <Historico id={p.id} versao={p.checagens.length + (p.minutas?.length ?? 0) + (p.orcamentos?.length ?? 0) + p.solicitacoes.length} atualizado={p.atualizado_em} />
     </>
   );
 }
@@ -524,10 +524,10 @@ function Anexos({ p, recarregar, podeIncluir }: { p: any; recarregar: () => Prom
   );
 }
 
-function Historico({ id, versao }: { id: number; versao: number }) {
+function Historico({ id, versao, atualizado }: { id: number; versao: number; atualizado?: string }) {
   const [h, setH] = useState<any[] | null>(null);
   const [aberto, setAberto] = useState(false);
-  useEffect(() => { if (aberto) api.get(`/processos/${id}/historico`).then(setH); }, [aberto, id, versao]);
+  useEffect(() => { if (aberto) api.get(`/processos/${id}/historico`).then(setH); }, [aberto, id, versao, atualizado]);
   return (
     <details className="panel box" onToggle={(e) => setAberto((e.target as HTMLDetailsElement).open)}>
       <summary>Histórico do processo</summary>

@@ -1,3 +1,4 @@
+import { MODELO_SOLICITACAO } from "../../shared/solicitacao.js";
 import { Router } from "express";
 import { z } from "zod";
 import { q, q1, auditar } from "../db.js";
@@ -61,16 +62,17 @@ export function rotasAdmin() {
     res.json({ ok: true });
   });
 
+  const modelosDocumento = [...ETAPAS, MODELO_SOLICITACAO].filter((e) => e.modelo);
   // Modelos de documento por etapa (padrão do sistema ou personalizado pelo órgão)
   r.get("/modelos", exigeLogin, async (req, res) => {
     const proprios = await q("select etapa, texto, atualizado_em from modelos where orgao_id = $1", [req.usuario!.orgao_id]);
-    res.json(ETAPAS.filter((e) => e.modelo).map((e) => {
+    res.json(modelosDocumento.map((e) => {
       const p = proprios.find((x) => x.etapa === e.id);
       return { etapa: e.id, nome: e.nome, doc: e.doc, padrao: e.modelo, texto: p?.texto ?? e.modelo, personalizado: !!p, atualizado_em: p?.atualizado_em ?? null };
     }));
   });
   r.put("/admin/modelos/:etapa", exigePapel("admin", "contratacao"), async (req, res) => {
-    const e = ETAPAS.find((x) => x.id === req.params.etapa && x.modelo);
+    const e = modelosDocumento.find((x) => x.id === req.params.etapa);
     if (!e) return res.status(404).json({ erro: "Etapa sem modelo." });
     const { texto } = z.object({ texto: z.string().max(60000) }).parse(req.body);
     if (!texto.trim()) await q("delete from modelos where orgao_id=$1 and etapa=$2", [req.usuario!.orgao_id, e.id]);

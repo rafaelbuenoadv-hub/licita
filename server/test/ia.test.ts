@@ -203,10 +203,14 @@ test("IA redige a solicitação usando o PDF e aguarda o salvamento pelo usuári
   const antes = pedidos.length;
   const gerada = await api("POST", `${caminho}/ia`, dados);
   assert.equal(gerada.status, 200);
-  assert.deepEqual(await gerada.json(), respostaEstruturada);
+  const rascunho = (await gerada.json()).descricao;
+  assert.match(rascunho, /manutenção preventiva de 8 aparelhos/);
+  assert.match(rascunho, /\[\[Nome do secretário\]\]/);
+  assert.match(rascunho, /\[\[Portaria de nomeação\]\]/);
   assert.match(pedidos[antes].body.messages[0].content[0].source.data, /^JVBER/);
   assert.match(pedidos[antes + 1].body.messages[0].content, /Secretaria de Educação/);
   assert.match(pedidos[antes + 1].body.messages[0].content, /8 aparelhos/);
   assert.match(pedidos[antes + 1].body.messages[0].content, /Priorizar a escola municipal/);
+  assert.match(pedidos[antes + 1].body.messages[0].content, /MODELO DA SOLICITAÇÃO/);
   assert.deepEqual((await (await api("GET", `/api/processos/${id}`)).json()).solicitacoes, []);
 });
