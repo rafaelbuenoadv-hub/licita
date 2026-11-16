@@ -3,7 +3,7 @@ import { compararOrcamentos, nomeFornecedorOrcamento, type DadosOrcamento } from
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, brl, dataBR, dataHora, fluxo, fmtNum, numBR } from "../api";
 import { Folha } from "../comp/Folha";
-import { ETAPAS, TIPOS, VIAS, feita, feitos, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../../shared/etapas";
+import { ETAPAS, TIPOS, TRILHA_PROCESSO, VIAS, feita, feitos, itensDe, liberada, pendencias, podeMarcar, type Checks, type TrilhaProcesso } from "../../../shared/etapas";
 import { tem, useEu } from "../main";
 import { CamposProcesso, paraApi, type DadosProc, type PlanoConsulta } from "./NovoProcesso";
 import { Solicitacoes } from "./Solicitacoes";
@@ -23,10 +23,10 @@ export function ProcessoPg() {
   const [p, setP] = useState<any>(null);
   const [erro, setErro] = useState("");
   const [params, setParams] = useSearchParams();
-  const irPara = (aba: string) => {
+  const irPara = (aba: string, replace = false) => {
     const proxima = new URLSearchParams(params);
     proxima.set("aba", aba);
-    setParams(proxima, { preventScrollReset: true });
+    setParams(proxima, { preventScrollReset: true, replace });
   };
   const [aviso, setAviso] = useState<{ t: string; tipo?: string } | null>(null);
 
@@ -39,12 +39,16 @@ export function ProcessoPg() {
   if (erro) return <p className="note bad">{erro}</p>;
   if (!p) return <p className="muted">Carregando processo…</p>;
   const checks: Checks = Object.fromEntries(p.checagens.map((c: { item: string }) => [c.item, true]));
-  const aba = params.get("aba");
-  const etapaPedida = ETAPAS.findIndex((e) => e.id === aba);
-  const abriuDfd = p.minutas.some((m: { etapa: string }) => m.etapa === "dfd") || feitos(ETAPAS[0], p, checks) > 0;
-  const mostrarSolicitacao = aba === "solicitacao" || (etapaPedida < 0 && p.etapa_atual === 0 && !abriuDfd);
-  const ix = etapaPedida >= 0 ? etapaPedida : p.etapa_atual;
+  const trilha = p.trilha as TrilhaProcesso;
+  const pedida = params.get("aba");
+  const aberta = trilha.etapas.find((etapa) => etapa.id === pedida) ?? trilha.atual;
+  const mostrarSolicitacao = aberta.id === "solicitacao";
+  const ix = aberta.numero - 2;
   const e = ETAPAS[ix];
+  const recarregarSolicitacao = () => {
+    if (!params.has("aba")) irPara("solicitacao", true);
+    return carregar();
+  };
 
   return (
     <>
@@ -66,31 +70,34 @@ export function ProcessoPg() {
 
       <div className="mesa">
         <nav className="panel trilha" aria-label="Solicitação e etapas do processo">
-          <button type="button" className={`et${mostrarSolicitacao ? " sel" : ""}`}
-            aria-current={mostrarSolicitacao ? "page" : undefined} onClick={() => irPara("solicitacao")}>
-            <span className="n">1</span><span className="tx"><span className="nm">Solicitação</span><br /><span className="st">Pedidos, itens e orçamentos</span></span>
-          </button>
-          {ETAPAS.map((x, i) => {
-            const f = feita(x, p, checks), l = liberada(i, p, checks);
-            const c = f ? "ok" : i === p.etapa_atual ? "cur" : l ? "" : "lock";
-            const selecionada = !mostrarSolicitacao && i === ix;
+          {trilha.etapas.map((etapa) => {
+            const selecionada = etapa.id === aberta.id;
+            const estilo = { atual: "cur", concluida: "ok", disponivel: "", bloqueada: "lock" }[etapa.estado];
+            const formal = ETAPAS[etapa.numero - 2];
+            const status = etapa.id === "solicitacao"
+              ? p.solicitacoes.length
+                ? `${p.solicitacoes.length} ${p.solicitacoes.length === 1 ? "pedido registrado" : "pedidos registrados"}`
+                : "Pedidos, itens e orçamentos"
+              : { atual: formal ? `${feitos(formal, p, checks)} de ${itensDe(formal, p).length} itens` : "Em andamento",
+                concluida: "Concluída", disponivel: "Disponível", bloqueada: "Bloqueada" }[etapa.estado];
             return (
-              <button key={x.id} type="button" className={`et ${c}${selecionada ? " sel" : ""}`} onClick={() => irPara(x.id)} title={x.nome} aria-current={selecionada ? "step" : undefined}>
-                <span className="n">{i + 2}</span>
-                <span className="tx"><span className="nm">{x.nome}</span><br /><span className="st">{f ? "Concluída" : l ? `${feitos(x, p, checks)} de ${itensDe(x, p).length} itens` : "Bloqueada"}</span></span>
+              <button key={etapa.id} type="button" className={`et ${estilo}${selecionada ? " sel" : ""}`}
+                onClick={() => irPara(etapa.id)} title={`${etapa.numero}. ${etapa.nome}`} aria-current={selecionada ? "step" : undefined}>
+                <span className="n">{etapa.numero}</span>
+                <span className="tx"><span className="nm">{etapa.nome}</span><br /><span className="st">{status}</span></span>
               </button>);
           })}
         </nav>
         {mostrarSolicitacao ? (
           <section className="panel" style={{ minWidth: 0 }} aria-labelledby="aba-solicitacao">
             <div className="sec row">
-              <div><span className="lbl">Etapa 1 de {ETAPAS.length + 1}</span><h2 id="aba-solicitacao">Solicitação</h2></div>
+              <div><span className="lbl">Etapa {aberta.numero} de {TRILHA_PROCESSO.length}</span><h2 id="aba-solicitacao">Solicitação</h2></div>
               <button className="btn" type="button" onClick={() => irPara("dfd")}>Abrir DFD →</button>
             </div>
-            <Solicitacoes key={p.id} processo={p} recarregar={carregar} />
+            <Solicitacoes key={p.id} processo={p} recarregar={recarregarSolicitacao} />
           </section>
-        ) : <Etapa key={e.id} p={p} e={e} ix={ix} checks={checks} recarregar={carregar} setAviso={setAviso} irPara={irPara} />}
-        <Assistente key={`${p.id}-${mostrarSolicitacao ? "solicitacao" : "etapas"}`} p={p} etapa={mostrarSolicitacao ? "solicitacao" : e.id} disponivel={ia.disponivel} />
+        ) : <Etapa key={e.id} p={p} e={e} ix={ix} numero={aberta.numero} checks={checks} recarregar={carregar} setAviso={setAviso} irPara={irPara} />}
+        <Assistente key={`${p.id}-${mostrarSolicitacao ? "solicitacao" : "etapas"}`} p={p} etapa={aberta.id} disponivel={ia.disponivel} />
       </div>
 
       <Anexos p={p} recarregar={carregar} podeIncluir={tem(eu, "requisitante", "contratacao", "juridico")} />
@@ -178,7 +185,7 @@ function Dados({ p, recarregar, setAviso, abrir }: { p: any; recarregar: () => P
 }
 
 /* ---------- etapa aberta ---------- */
-function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
+function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) {
   const { eu } = useEu();
   const lib = liberada(ix, p, checks), ok = feita(e, p, checks), its = itensDe(e, p), nf = feitos(e, p, checks);
   const atua = podeMarcar(eu.papeis, e);
@@ -219,7 +226,7 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
   return (
     <section className="panel" style={{ minWidth: 0 }}>
       <div className="sec">
-        <div className="row"><div><span className="lbl">Etapa {ix + 2} de {ETAPAS.length + 1}</span><h2>{e.nome}</h2></div>
+        <div className="row"><div><span className="lbl">Etapa {numero} de {TRILHA_PROCESSO.length}</span><h2>{e.nome}</h2></div>
           <span className={"pill " + (ok ? "ok" : lib ? "cur" : "")}>{ok ? "Concluída" : lib ? `${nf} de ${its.length} itens` : "Bloqueada"}</span></div>
         {e.doc && <p className="small muted">Documento da etapa: {e.doc}</p>}
         <p style={{ maxWidth: "72ch" }}>{e.oque}</p>
