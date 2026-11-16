@@ -116,8 +116,9 @@ export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = f
   const acrescentar = (linha: string, colunas: string[] = []) =>
     linha + fornecedores.map((_, i) => colunas[i] ? ` ${colunas[i]} |` : " |").join("");
   return [
-    acrescentar(cabecalho, fornecedores.map(([, nome], i) => `Cotação ${i + 1} — ${nome}`)),
+    acrescentar(cabecalho, fornecedores.map((_, i) => `Cotação ${i + 1}`)),
     `|${"---|".repeat(6 + fornecedores.length)}`,
+    ...(fornecedores.length ? [acrescentar("| | | | | | |", fornecedores.map(([, nome]) => `**${nome}**`))] : []),
     ...itens.map((item, k) => {
       const subtotal = totalDoItem(item);
       const qtd = item.quantidade == null ? "—" : numero(item.quantidade);
@@ -137,20 +138,64 @@ function antesDaAssinatura(texto: string, trecho: string) {
   const depois = assinatura < 0 ? "" : texto.slice(assinatura).trimStart();
   return [antes, trecho, depois].filter(Boolean).join("\n\n");
 }
-/** Garante o quadro de itens no texto mesmo quando o modelo do órgão não tem o campo [[Itens]]: entra antes das assinaturas. */
+function celulasDaLinha(linha: string) {
+  return linha.trim().replace(/^\||\|$/g, "").split("|").map((celula) => normalizarCotacao(celula.replace(/\*\*/g, "")));
+}
+
+function quadrosDosItens(linhas: string[], itens: ItemSolicitacao[]) {
+  const descricoes = new Set(itens.map((item) => normalizarCotacao(celula(item.descricao))));
+  const quadros: { inicio: number; fim: number }[] = [];
+  for (let inicio = 0; inicio < linhas.length;) {
+    if (!linhas[inicio].trimStart().startsWith("|")) { inicio++; continue; }
+    let fim = inicio + 1;
+    while (fim < linhas.length && linhas[fim].trimStart().startsWith("|")) fim++;
+    const cabecalho = linhas[inicio].trim();
+    const rotulos = celulasDaLinha(cabecalho);
+    const descricao = rotulos.findIndex((rotulo) => /^(?:descricao|especificacao|discriminacao)\b/.test(rotulo));
+    const colunaDeItem = rotulos.findIndex((rotulo) => /^(?:item|numero|n[º°o.]|ordem)(?:\s|$)/.test(rotulo));
+    const colunaDeCotacao = rotulos.some((rotulo) => /^(?:cotacao|orcamento|fornecedor|qtd|quantidade|valor unitario)\b/.test(rotulo));
+    const linhasComItem = descricao >= 0 && colunaDeItem >= 0 && colunaDeCotacao
+      ? linhas.slice(inicio + 1, fim).map(celulasDaLinha).filter((linha) => /^\d+\.?$/.test(linha[colunaDeItem] ?? ""))
+      : [];
+    const mesmosItens = linhasComItem.length > 0 && linhasComItem.every((linha) => descricoes.has(linha[descricao]));
+    if (cabecalho === CABECALHO_ANTERIOR || cabecalho === CABECALHO_COTACOES
+      || cabecalho.startsWith(CABECALHO_COTACOES + " ") || mesmosItens) quadros.push({ inicio, fim });
+    inicio = fim;
+  }
+  return quadros;
+}
+
+function limparMarcadoresDeItens(linhas: string[], indiceQuadro: number) {
+  return linhas.flatMap((linha, i) => {
+    if (linha.trim() === TITULO_ITENS) {
+      let proxima = i + 1;
+      while (proxima < linhas.length && !linhas[proxima].trim()) proxima++;
+      const restante = linhas[proxima]?.trim().replace(CAMPO_ITENS, "").trim();
+      if (proxima !== indiceQuadro && restante === "") return [];
+    }
+    if (i === indiceQuadro || linha.trimStart().startsWith("|") || !CAMPO_ITENS.test(linha)) return [linha];
+    const semMarcador = linha.replace(new RegExp(CAMPO_ITENS.source, "gi"), "").trimEnd();
+    return !semMarcador.trim() || /^#{1,2}$/.test(semMarcador.trim()) ? [] : [semMarcador];
+  }).join("\n");
+}
+
+/** Atualiza um único quadro de itens e preserva as demais tabelas e seções do documento. */
 export function inserirItens(texto: string, itens: ItemSolicitacao[], incluirPrecosCotados = false) {
   if (!texto.trim()) return texto;
   const quadro = quadroDeItens(itens, incluirPrecosCotados);
   const linhas = texto.split("\n");
-  const indice = linhas.findIndex((linha) => {
-    const texto = linha.trim();
-    return texto === CABECALHO_ANTERIOR || texto === CABECALHO_COTACOES || texto.startsWith(CABECALHO_COTACOES + " ");
-  });
-  if (indice >= 0) {
-    let fim = indice + 1;
-    while (fim < linhas.length && linhas[fim].trimStart().startsWith("|")) fim++;
-    linhas.splice(indice, fim - indice, quadro || "[[Itens]]");
-    return linhas.join("\n");
+  const quadros = quadrosDosItens(linhas, itens);
+  if (quadros.length) {
+    const primeiro = quadros[0];
+    for (const duplicado of quadros.slice(1).reverse()) {
+      let inicio = duplicado.inicio;
+      let anterior = inicio - 1;
+      while (anterior >= primeiro.fim && !linhas[anterior].trim()) anterior--;
+      if (linhas[anterior]?.trim() === TITULO_ITENS) inicio = anterior;
+      linhas.splice(inicio, duplicado.fim - inicio);
+    }
+    linhas.splice(primeiro.inicio, primeiro.fim - primeiro.inicio, quadro || "[[Itens]]");
+    return quadro ? limparMarcadoresDeItens(linhas, primeiro.inicio) : linhas.join("\n");
   }
   if (!itens.length) return texto;
   const campo = linhas.findIndex((l) => CAMPO_ITENS.test(l));
@@ -161,7 +206,7 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[], incluirPre
       ? `${TITULO_ITENS}\n${quadro}`
       : [prefixo, quadro, depois.trim()].filter(Boolean).join("\n\n");
     linhas.splice(campo, 1, comQuadro);
-    return linhas.join("\n");
+    return limparMarcadoresDeItens(linhas, campo);
   }
   const titulo = linhas.findIndex((l) => l.trim() === TITULO_ITENS);
   if (titulo >= 0) {
