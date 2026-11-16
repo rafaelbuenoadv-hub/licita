@@ -458,7 +458,8 @@ test("protocolo sequencial por órgão; nº do processo e do procedimento só na
   const dep = await lic.get(`/api/processos/${id}`);
   assert.equal(dep.dados.numero, "500/2026");
   assert.equal(dep.dados.procedimento, "Dispensa nº 43/2026");
-  assert.equal(dep.dados.protocolo, "2026/0003");
+  // O protocolo não muda com a numeração. Nas aberturas simultâneas, qual processo recebeu qual número não é garantido.
+  assert.equal(dep.dados.protocolo, rs[0].dados.protocolo);
   // A sugestão do processo seguinte continua a partir do maior número usado.
   const outro = await lic.get(`/api/processos/${rs[1].dados.id}`);
   assert.deepEqual(outro.dados.numeracao.sugestao, { numero: "501/2026", procedimento: "Dispensa nº 44/2026" });
