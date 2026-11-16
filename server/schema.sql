@@ -441,6 +441,18 @@ create index if not exists orcamentos_proc on orcamentos(processo_id);
 alter table orcamentos add column if not exists dados jsonb;
 alter table orcamentos add column if not exists lido_em timestamptz;
 
+-- Pesquisa que embasa a minuta de uma etapa: editais publicados com o mesmo objeto e legislação vigente, com as fontes.
+create table if not exists pesquisas_minuta (
+  id serial primary key,
+  processo_id int not null references processos(id) on delete cascade,
+  etapa text not null,
+  texto text not null,
+  fontes jsonb not null default '[]',
+  usuario_id int references usuarios(id),
+  criado_em timestamptz not null default now()
+);
+create index if not exists pesquisas_minuta_proc on pesquisas_minuta(processo_id, etapa, id desc);
+
 -- Caixa de mensagens entre usuários do mesmo órgão: uma linha por destinatário.
 create table if not exists mensagens (
   id bigserial primary key,

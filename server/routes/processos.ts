@@ -384,7 +384,10 @@ export function rotasProcessos() {
       areas_sem_portaria: cadastro.secretarios.filter((s) => !s.portaria).map((s) => s.secretaria),
       total: cadastro.secretarios.length,
     } : null;
-    res.json({ vigente: vig ?? null, versoes, sugestoes_cadastro, titulares_dfd });
+    const pesquisa = await q1(
+      `select x.texto, x.fontes, x.criado_em, u.nome as autor from pesquisas_minuta x left join usuarios u on u.id = x.usuario_id
+        where x.processo_id=$1 and x.etapa=$2 order by x.id desc limit 1`, [p.id, req.params.etapa]);
+    res.json({ vigente: vig ?? null, versoes, sugestoes_cadastro, titulares_dfd, pesquisa: pesquisa ?? null });
   });
   r.get("/processos/:id/minutas/:etapa/versoes/:v", async (req, res) => {
     const p = await processoDo(req);

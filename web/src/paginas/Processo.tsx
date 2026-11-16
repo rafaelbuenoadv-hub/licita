@@ -10,7 +10,7 @@ import { Solicitacoes } from "./Solicitacoes";
 
 const ACOES: Record<string, string> = {
   "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação", "processo.numerado": "gerou o nº do processo e do procedimento", "etapa.concluida": "conferiu e concluiu a etapa",
-  "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA",
+  "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA", "minuta.pesquisa": "pesquisou editais e legislação para a minuta",
   "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.lido": "pediu a leitura de orçamento à IA", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
   "minuta.titulares": "incluiu os titulares no DFD",
   "solicitacao.incluida": "adicionou solicitação de secretaria", "solicitacao.alterada": "editou solicitação de secretaria",
@@ -351,7 +351,7 @@ function Fracionamento({ id }: { id: number }) {
 function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolean; setAviso: (a: any) => void }) {
   const [timbrado, setTimbrado] = useState("");
   const { ia } = useEu();
-  const [m, setM] = useState<{ vigente: any; versoes: any[]; titulares_dfd: { pode_inserir: boolean; total: number; areas_sem_cadastro: string[]; areas_sem_portaria: string[] } | null } | null>(null);
+  const [m, setM] = useState<{ vigente: any; versoes: any[]; titulares_dfd: { pode_inserir: boolean; total: number; areas_sem_cadastro: string[]; areas_sem_portaria: string[] } | null; pesquisa: { texto: string; fontes: { url: string; titulo: string }[]; criado_em: string; autor: string | null } | null } | null>(null);
   const [modo, setModo] = useState<"ver" | "editar">("ver");
   const [rascunho, setRascunho] = useState("");
   const [vendo, setVendo] = useState<any>(null); // versão antiga em exibição
@@ -359,6 +359,8 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
   const [busy, setBusy] = useState<"" | "redigir" | "salvar" | "sugerir" | "aplicar">("");
   const [confirma, setConfirma] = useState(false);
   const [orient, setOrient] = useState("");
+  const [pesquisar, setPesquisar] = useState(true);
+  const [andamento, setAndamento] = useState("");
   const [vals, setVals] = useState<Record<string, string>>({});
   const [sug, setSug] = useState<Record<string, any>>({});
   const ctl = useRef<AbortController | null>(null);
@@ -378,14 +380,16 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
   const texto = m.vigente?.texto ?? "";
   const pend = pendencias(texto);
   const redigir = async () => {
-    setConfirma(false); setBusy("redigir"); setGerando(""); setModo("ver");
+    setConfirma(false); setBusy("redigir"); setGerando(""); setModo("ver"); setAndamento("");
     ctl.current = new AbortController();
     try {
-      const r = await fluxo(`/processos/${p.id}/ia/redigir`, { etapa: e.id, orientacao: orient }, setGerando, ctl.current.signal);
+      const r = await fluxo(`/processos/${p.id}/ia/redigir`, { etapa: e.id, orientacao: orient, pesquisar }, setGerando, ctl.current.signal, setAndamento);
       await carregar();
-      setAviso(r.truncado ? { t: "A minuta foi cortada pelo limite de tamanho. Peça ao assistente a continuação das seções finais." } : { t: `Minuta redigida pela IA e salva como versão ${r.versao}. Revise antes de usar.`, tipo: "ok" });
+      setAviso(r.truncado ? { t: "A minuta foi cortada pelo limite de tamanho. Peça ao assistente a continuação das seções finais." }
+        : r.aviso ? { t: `Minuta salva como versão ${r.versao}. ${r.aviso}` }
+        : { t: `Minuta redigida pela IA e salva como versão ${r.versao}. Confira os fundamentos e as fontes antes de usar.`, tipo: "ok" });
     } catch (er: any) { if (er.name !== "AbortError") setAviso({ t: er.message, tipo: "bad" }); }
-    finally { setBusy(""); setGerando(""); }
+    finally { setBusy(""); setGerando(""); setAndamento(""); }
   };
   const salvar = async (t: string, msg: string) => {
     setBusy("salvar");
@@ -433,7 +437,7 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
       <div className="row"><span className="lbl">Minuta · {e.doc}</span>
         {m.vigente && <span className="small muted">Versão {m.vigente.versao} · {m.vigente.origem === "ia" ? "redigida pela IA" : m.vigente.origem === "pendencias" ? "campos preenchidos" : m.vigente.origem === "aproveitado" ? "rascunho com dados aproveitados da etapa anterior" : "edição manual"} · {m.vigente.autor ?? "—"} · {dataHora(m.vigente.criado_em)}</span>}</div>
       <div className="tools">
-        {busy === "redigir" ? <><span className="small muted">Redigindo no layout do órgão…</span><button className="btn" onClick={() => ctl.current?.abort()}>Parar</button></>
+        {busy === "redigir" ? <><span className="small muted" role="status">{andamento || "Redigindo no layout do órgão…"}</span><button className="btn" onClick={() => ctl.current?.abort()}>Parar</button></>
           : confirma ? <><button className="btn pri" onClick={redigir}>Confirmar: gerar nova versão</button><button className="btn" onClick={() => setConfirma(false)}>Cancelar</button></>
           : <button className="btn pri" disabled={!editavel || !ia.disponivel || busy !== ""} onClick={() => (texto ? setConfirma(true) : redigir())}>{texto ? "Redigir de novo com IA" : "Redigir minuta com IA"}</button>}
         {busy !== "redigir" && <>
@@ -455,6 +459,16 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
               {m.versoes.map((v: any) => <option key={v.versao} value={v.versao}>{v.versao} · {dataBR(v.criado_em)}</option>)}</select></label>}
         </>}
       </div>
+      {editavel && ia.disponivel && busy !== "redigir" && <label className="small" style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+        <input type="checkbox" checked={pesquisar} onChange={(ev) => setPesquisar(ev.target.checked)} style={{ marginTop: 3 }} />
+        <span>Pesquisar na web, antes de redigir, editais já publicados com o mesmo objeto e a legislação vigente. <span className="muted">Leva alguns minutos a mais e consome mais da IA. A minuta sempre traz o fundamento de cada ponto; com a pesquisa, ele vem conferido em fontes atuais.</span></span>
+      </label>}
+      {m.pesquisa && busy !== "redigir" && <details className="pesquisa">
+        <summary>Pesquisa que embasou a minuta · {m.pesquisa.fontes.length} {m.pesquisa.fontes.length === 1 ? "fonte" : "fontes"} · {dataHora(m.pesquisa.criado_em)}{m.pesquisa.autor ? ` · ${m.pesquisa.autor}` : ""}</summary>
+        <p className="small muted">Editais de outros órgãos e normas localizados pela IA. É material de apoio: abra as fontes e confira antes de citar em documento oficial.</p>
+        {m.pesquisa.fontes.length > 0 && <ul className="fontes">{m.pesquisa.fontes.map((x: { url: string; titulo: string }) => <li key={x.url}><a href={x.url} target="_blank" rel="noopener noreferrer">{x.titulo}</a><span className="small muted"> · {(() => { try { return new URL(x.url).hostname.replace(/^www\./, ""); } catch { return ""; } })()}</span></li>)}</ul>}
+        <div className="corpo small">{m.pesquisa.texto}</div>
+      </details>}
       {m.titulares_dfd && !vendo && modo === "ver" && busy !== "redigir" && <div className="stack">
         {editavel && m.titulares_dfd.pode_inserir && <div>
           <button className="btn" disabled={busy !== ""} onClick={inserirTitulares}>Inserir titulares e portarias</button>
