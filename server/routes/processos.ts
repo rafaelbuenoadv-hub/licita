@@ -205,8 +205,10 @@ export function rotasProcessos() {
       chave_envio: z.uuid(),
       secretaria: z.string().trim().min(2).max(200),
       referencia: z.string().trim().max(120).default(""),
-      descricao: z.string().trim().min(1).max(10000),
+      descricao: z.string().trim().max(10000).default(""),
     }).parse(req.body);
+    if (!d.descricao && !req.file?.size) throw new ErroHttp(400, "Descreva a solicitação ou anexe o documento.");
+    if (req.file && !req.file.size) throw new ErroHttp(400, "O documento anexado está vazio.");
     const nome = req.file ? nomeEnviado(req.file) : null;
     if (nome && !/\.(pdf|docx|txt|md|csv)$/i.test(nome)) {
       throw new ErroHttp(415, "Envie uma solicitação em PDF, Word ou texto.");

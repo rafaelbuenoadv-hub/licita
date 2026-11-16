@@ -742,3 +742,25 @@ test("nova revisão recebe o primeiro PDF no próprio cadastro", async () => {
   const anexo = await lic.get(`/api/revisoes/${criada.dados.id}/arquivos/${detalhes.dados.arquivos[0].id}`);
   assert.deepEqual(anexo.dados, Buffer.from(original));
 });
+
+test("solicitação existente entra no processo pelo arquivo, com descrição opcional", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const criada = await lic.post("/api/processos", { objeto: "Aquisição de materiais", tipo: "bens", via: "licitacao", ano: 2090 });
+  assert.equal(criada.status, 201);
+  const p = `/api/processos/${criada.dados.id}`;
+  const caminho = `${p}/solicitacoes`;
+  const dados = new FormData();
+  dados.set("chave_envio", randomUUID());
+  dados.set("secretaria", "Educação");
+  assert.equal((await lic.post(caminho, dados)).status, 400);
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  const original = Uint8Array.from(await pdf.save());
+  dados.set("arquivo", new Blob([original], { type: "application/pdf" }), "memorando.pdf");
+  const anexo = await lic.post(caminho, dados);
+  assert.equal(anexo.status, 201, JSON.stringify(anexo.dados));
+  const registro = (await lic.get(p)).dados.solicitacoes[0];
+  assert.equal(registro.descricao, "");
+  assert.equal(registro.nome_arquivo, "memorando.pdf");
+  assert.deepEqual((await lic.get(`${caminho}/${anexo.dados.id}/arquivo`)).dados, Buffer.from(original));
+});

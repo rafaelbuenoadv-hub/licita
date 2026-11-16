@@ -197,6 +197,7 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
         {!lib && <p className="note">Conclua a etapa "{ETAPAS[p.etapa_atual].nome}" para liberar esta.</p>}
         {lib && !atua && <p className="note">Seu perfil acompanha esta etapa, mas quem marca os itens é: {e.papeis.join(", ")}.</p>}
       </div>
+      {e.id === "dfd" && <Solicitacoes key={p.id} processo={p} recarregar={recarregar} />}
       <div className="sec"><span className="lbl">Conferência obrigatória</span>
         <ul className="chk">{its.map((i: any) => {
           const q = quem[i.id];
@@ -208,7 +209,6 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
             </li>);
         })}</ul>
       </div>
-      {e.id === "dfd" && <Solicitacoes processo={p} recarregar={recarregar} />}
       {(e.id === "dfd" || e.id === "precos") && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} />}
       {e.id === "precos" && p.via === "dispensa" && <Fracionamento id={p.id} />}
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>
