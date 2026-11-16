@@ -67,6 +67,9 @@ export function valorDasCotacoes(cotacoes: CotacaoItem[], criterio: CriterioPrec
 export const normalizarCotacao = (texto: string) =>
   texto.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ");
 export const LIMITE_SOLICITACAO = 30000;
+export const MAX_ANEXOS_SOLICITACAO = 5;
+export const TAMANHO_ANEXO_SOLICITACAO = 20 * 1024 * 1024;
+export const TIPOS_ANEXOS_SOLICITACAO = ".pdf,.docx,.xlsx,.txt,.md,.csv,.jpg,.jpeg,.png";
 
 const real = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const numero = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 4 });

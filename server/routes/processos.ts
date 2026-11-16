@@ -1,3 +1,4 @@
+import { anexosDaRequisicao, apoiosComTextoLocal, nomeAnexoEnviado, receberAnexosSolicitacao, salvarApoios } from "../anexos-solicitacao.js";
 import { fornecedorNoTexto, limparNomeFornecedor, nomeDoArquivoSemExtensao, nomeFornecedorOrcamento, type OrcamentoLido } from "../../shared/orcamentos.js";
 import { LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao } from "../../shared/solicitacao.js";
 import { modeloSolicitacao, preencherSolicitacao } from "../solicitacao.js";
@@ -21,7 +22,7 @@ import {
 
 export const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 /** Nome do arquivo enviado. O navegador manda em UTF-8 e o multer lê como latin1: sem isto, "orçamento" vira "orÃ§amento". */
-export const nomeEnviado = (f: Express.Multer.File) => Buffer.from(f.originalname, "latin1").toString("utf8");
+export const nomeEnviado = nomeAnexoEnviado;
 
 // O nº do processo e o do procedimento não entram aqui: são gravados ao final, em /processos/:id/numeracao.
 const camposProc = z.object({
@@ -47,7 +48,7 @@ export interface Processo {
 
 /** Carrega o processo garantindo que pertence ao órgão do usuário. */
 export async function processoDo(req: Request, id = Number(req.params.id)) {
-  const p = await q1<Processo>("select * from processos where id = $1 and orgao_id = $2", [id, req.usuario!.orgao_id]);
+  const p = await q1<Processo>("select * from processos where id = $1 and orgao_id = $2 and excluido_em is null", [id, req.usuario!.orgao_id]);
   if (!p) throw new ErroHttp(404, "Processo não encontrado.");
   return p;
 }
@@ -62,7 +63,8 @@ export async function minutaVigente(processoId: number, etapa: string) {
 }
 export async function salvarMinuta(processoId: number, etapa: string, texto: string, origem: string, usuario: number, versaoEsperada?: number) {
   return tx(async (c) => {
-    await c.query("select id from processos where id=$1 for update", [processoId]);
+    const registro = await c.query("select id from processos where id=$1 and excluido_em is null for update", [processoId]);
+    if (!registro.rowCount) throw new ErroHttp(404, "Processo não encontrado.");
     const ult = (await c.query("select versao, texto from minutas where processo_id=$1 and etapa=$2 order by versao desc limit 1 for update", [processoId, etapa])).rows[0];
     if (versaoEsperada !== undefined && (ult?.versao ?? 0) !== versaoEsperada) {
       throw new ErroHttp(409, "A minuta foi alterada. Recarregue antes de aplicar.");
@@ -202,7 +204,7 @@ export function rotasProcessos() {
     const rows = await q(
       `select p.id, p.protocolo, p.numero, p.procedimento, p.objeto, p.tipo, p.via, p.valor_estimado, p.ano, p.situacao, p.requisitante, p.areas_adicionais, p.atualizado_em,
               coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
-         from processos p where p.orgao_id = $1 and ($2::int is null or p.ano = $2) order by p.atualizado_em desc`,
+         from processos p where p.orgao_id = $1 and p.excluido_em is null and ($2::int is null or p.ano = $2) order by p.atualizado_em desc`,
       [req.usuario!.orgao_id, ano]);
     res.json(rows.map(({ itens, ...p }) => {
       const c: Checks = Object.fromEntries((itens as string[]).map((i) => [i, true]));
@@ -246,7 +248,9 @@ export function rotasProcessos() {
       `select o.id, coalesce(o.fornecedor_manual, o.fornecedor) as fornecedor, o.fornecedor_manual, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, o.dados, o.lido_em, u.nome as usuario
          from orcamentos o left join usuarios u on u.id = o.usuario_id where o.processo_id = $1 order by o.id`, [p.id]);
     const solicitacoes = await q(
-      "select id, secretaria, referencia, descricao, nome_arquivo, objeto, justificativa, itens from solicitacoes_processo where processo_id=$1 order by id", [p.id],
+      `select s.id, s.secretaria, s.referencia, s.descricao, s.nome_arquivo, s.objeto, s.justificativa, s.itens,
+        coalesce((select jsonb_agg(jsonb_build_object('id',a.id,'nome',a.nome) order by a.id) from solicitacao_anexos a where a.solicitacao_id=s.id), '[]') as apoios
+        from solicitacoes_processo s where s.processo_id=$1 order by s.id`, [p.id],
     );
     const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [p.orgao_id]);
     const secretarias = await q<{ secretaria: string }>("select secretaria from secretarios where orgao_id=$1 order by secretaria", [p.orgao_id]);
@@ -273,13 +277,28 @@ export function rotasProcessos() {
     res.json({ ok: true });
   });
 
+  r.delete("/processos/:id", exigePapel("contratacao"), async (req, res) => {
+    const id = z.coerce.number().int().positive().max(2147483647).parse(req.params.id);
+    const usuario = req.usuario!;
+    await tx(async (c) => {
+      const { rows: [p] } = await c.query(
+        "update processos set excluido_em=now() where id=$1 and orgao_id=$2 and excluido_em is null returning id,protocolo",
+        [id, usuario.orgao_id],
+      );
+      if (!p) throw new ErroHttp(404, "Processo não encontrado.");
+      await auditar({ orgao: usuario.orgao_id, usuario: usuario.id, processo: id, acao: "processo.excluido", detalhe: { protocolo: p.protocolo } }, c);
+    });
+    res.json({ ok: true });
+  });
+
   r.get("/processos/:id/solicitacoes/modelo", async (req, res) => {
     const p = await processoDo(req);
     res.json({ texto: await modeloSolicitacao(p.orgao_id) });
   });
 
-  r.post("/processos/:id/solicitacoes", exigePapel("requisitante", "contratacao"), upload.single("arquivo"), async (req, res) => {
+  r.post("/processos/:id/solicitacoes", exigePapel("requisitante", "contratacao"), receberAnexosSolicitacao, async (req, res) => {
     const p = await processoDo(req);
+    const { principal, apoios } = anexosDaRequisicao(req);
     const d = z.object({
       chave_envio: z.uuid(),
       secretaria: z.string().trim().min(2).max(200),
@@ -292,21 +311,22 @@ export function rotasProcessos() {
         try { return JSON.parse(v || "[]"); } catch { return null; }
       }, itensSolicitacao),
     }).parse(req.body);
-    if (!d.descricao && !req.file?.size) throw new ErroHttp(400, "Descreva a solicitação ou anexe o documento.");
-    if (req.file && !req.file.size) throw new ErroHttp(400, "O documento anexado está vazio.");
-    const nome = req.file ? nomeEnviado(req.file) : null;
+    if (!d.descricao && !principal?.size && !apoios.length) throw new ErroHttp(400, "Descreva a solicitação ou anexe o documento.");
+    if (principal && !principal.size) throw new ErroHttp(400, "O documento anexado está vazio.");
+    const nome = principal ? nomeEnviado(principal) : null;
     if (nome && !/\.(pdf|docx|txt|md|csv)$/i.test(nome)) {
       throw new ErroHttp(415, "Envie uma solicitação em PDF, Word ou texto.");
     }
-    const arquivo = req.file?.buffer ?? null;
+    const arquivo = principal?.buffer ?? null;
     const texto = nome && arquivo && !/\.pdf$/i.test(nome)
       ? await extrairTexto(nome, arquivo).catch(() => "")
       : "";
+    const documentos = await apoiosComTextoLocal(apoios);
     const itens = calcularItens(d.itens);
     const descricao = await preencherSolicitacao(p, { ...d, itens });
     if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     const resultado = await tx(async (c) => {
-      const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and orgao_id=$2 for update", [p.id, p.orgao_id]);
+      const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and orgao_id=$2 and excluido_em is null for update", [p.id, p.orgao_id]);
       if (!processo) throw new ErroHttp(404, "Processo não encontrado.");
       const { rows: [existente] } = await c.query(
         "select id from solicitacoes_processo where processo_id=$1 and chave_envio=$2", [p.id, d.chave_envio],
@@ -321,6 +341,7 @@ export function rotasProcessos() {
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
         [p.id, d.chave_envio, d.secretaria, d.referencia, descricao, nome, arquivo, texto, req.usuario!.id, d.objeto_solicitacao, d.justificativa, JSON.stringify(itens)],
       );
+      await salvarApoios(c, nova.id, documentos);
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.incluida", detalhe: { id: nova.id, secretaria: d.secretaria } }, c);
       return { id: nova.id, nova: true };
@@ -328,35 +349,42 @@ export function rotasProcessos() {
     res.status(resultado.nova ? 201 : 200).json({ id: resultado.id });
   });
 
-  r.put("/processos/:id/solicitacoes/:sid", exigePapel("requisitante", "contratacao"), async (req, res) => {
+  r.put("/processos/:id/solicitacoes/:sid", exigePapel("requisitante", "contratacao"), receberAnexosSolicitacao, async (req, res) => {
     const p = await processoDo(req);
     const sid = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
+    const { apoios } = anexosDaRequisicao(req);
+    const comoItens = z.preprocess((v) => {
+      if (typeof v !== "string") return v;
+      try { return JSON.parse(v); } catch { return null; }
+    }, itensSolicitacao.optional());
     const d = z.object({
       anterior: z.string().max(LIMITE_SOLICITACAO),
       descricao: z.string().trim().max(LIMITE_SOLICITACAO),
-      itens: itensSolicitacao.optional(),
-      itens_anteriores: itensSolicitacao.optional(),
+      itens: comoItens,
+      itens_anteriores: comoItens,
     }).refine((dados) => dados.itens === undefined || dados.itens_anteriores !== undefined, "Reabra a solicitação antes de editar os itens.").parse(req.body);
     const s = await q1<{ secretaria: string; referencia: string; objeto_solicitacao: string; justificativa: string }>(
       "select secretaria, referencia, objeto as objeto_solicitacao, justificativa from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
     );
     if (!s) throw new ErroHttp(404, "Solicitação não encontrada.");
+    const documentos = await apoiosComTextoLocal(apoios);
     const itens = d.itens && calcularItens(d.itens);
     const descricao = await preencherSolicitacao(p, { ...s, descricao: d.descricao, itens });
     if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     await tx(async (c) => {
-      const { rows: [processo] } = await c.query("select situacao from processos where id=$1 for update", [p.id]);
+      const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and excluido_em is null for update", [p.id]);
       if (processo?.situacao !== "preparacao") throw new ErroHttp(409, "O processo deve estar em preparação para editar a solicitação.");
       const { rows: [existente] } = await c.query<{ descricao: string; tem_arquivo: boolean; itens_iguais: boolean }>(
-        `select descricao, arquivo is not null as tem_arquivo, ($3::jsonb is null or itens = $3::jsonb) as itens_iguais
+        `select descricao, (arquivo is not null or exists (select 1 from solicitacao_anexos a where a.solicitacao_id=solicitacoes_processo.id)) as tem_arquivo, ($3::jsonb is null or itens = $3::jsonb) as itens_iguais
          from solicitacoes_processo where processo_id=$1 and id=$2 for update`,
         [p.id, sid, d.itens_anteriores ? JSON.stringify(d.itens_anteriores) : null],
       );
       if (!existente) throw new ErroHttp(404, "Solicitação não encontrada.");
       if (existente.descricao !== d.anterior || !existente.itens_iguais) throw new ErroHttp(409, "A solicitação mudou. Reabra para ver a versão atualizada.");
-      if (!descricao && !existente.tem_arquivo) throw new ErroHttp(400, "Preencha a descrição da solicitação.");
-      if (!itens && descricao === existente.descricao) return;
+      if (!descricao && !existente.tem_arquivo && !documentos.length) throw new ErroHttp(400, "Preencha a descrição da solicitação.");
+      if (!itens && descricao === existente.descricao && !documentos.length) return;
       if (itens) await conferirOrcamentos(c, p.id, itens);
+      await salvarApoios(c, sid, documentos);
       await c.query("update solicitacoes_processo set descricao=$1, itens=coalesce($2::jsonb,itens) where id=$3", [descricao, itens ? JSON.stringify(itens) : null, sid]);
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.alterada", detalhe: { id: sid } }, c);
@@ -384,6 +412,19 @@ export function rotasProcessos() {
     );
     if (!s) throw new ErroHttp(404, "Arquivo da solicitação não encontrado.");
     enviarArquivo(res, s.nome_arquivo, s.arquivo);
+  });
+
+  r.get("/processos/:id/solicitacoes/:sid/apoios/:aid", async (req, res) => {
+    const processo = await processoDo(req);
+    const id = z.coerce.number().int().positive().max(2147483647);
+    const a = await q1<{ nome: string; arquivo: Buffer }>(
+      `select a.nome,a.arquivo from solicitacao_anexos a join solicitacoes_processo s on s.id=a.solicitacao_id
+       where s.processo_id=$1 and s.id=$2 and a.id=$3`,
+      [processo.id, id.parse(req.params.sid), id.parse(req.params.aid)],
+    );
+    if (!a) throw new ErroHttp(404, "Documento de apoio não encontrado.");
+    res.set("Cache-Control", "private, no-store");
+    enviarArquivo(res, a.nome, a.arquivo);
   });
 
   // Numeração final: o nº do processo e o do procedimento só são gravados quando o processo chega à última etapa.

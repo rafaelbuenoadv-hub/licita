@@ -61,7 +61,7 @@ export function ProcessoPg() {
       </div>
       {aviso && <p className={"note " + (aviso.tipo ?? "")}>{aviso.t} <button className="lnk" onClick={() => setAviso(null)}>Fechar</button></p>}
       <p className="small"><strong>PCA</strong> · {p.pca_item_id ? "Vinculado ao plano do exercício" : "Sem vínculo confirmado. Consulte Dados do processo para conferir o objeto."}</p>
-      <Dados p={p} recarregar={carregar} setAviso={setAviso} />
+      <Dados p={p} recarregar={carregar} setAviso={setAviso} abrir={params.get("editar") === "1"} />
       <Numeracao key={`n${p.numero}|${p.procedimento}`} p={p} recarregar={carregar} setAviso={setAviso} />
 
       <div className="mesa">
@@ -132,7 +132,14 @@ function Numeracao({ p, recarregar, setAviso }: { p: any; recarregar: () => Prom
 }
 
 /* ---------- dados do processo ---------- */
-function Dados({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void }) {
+function Dados({ p, recarregar, setAviso, abrir }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void; abrir: boolean }) {
+  const painel = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (!abrir || !painel.current) return;
+    painel.current.open = true;
+    painel.current.scrollIntoView({ block: "start" });
+    painel.current.querySelector<HTMLElement>("input")?.focus({ preventScroll: true });
+  }, [abrir, p.id]);
   const { eu } = useEu();
   const [d, setD] = useState<DadosProc>(() => ({
     requisitante: p.requisitante, areas_adicionais: p.areas_adicionais, objeto: p.objeto, tipo: p.tipo, via: p.via,
@@ -152,7 +159,7 @@ function Dados({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<
   };
   const pode = tem(eu, "requisitante", "contratacao");
   return (
-    <details className="panel box" id="dados-processo">
+    <details ref={painel} className="panel box" id="dados-processo">
       <summary>Dados do processo</summary>
       <form className="pad stack" onSubmit={salvar}>
         <fieldset disabled={!pode} style={{ border: 0, padding: 0, margin: 0 }}><CamposProcesso d={d} set={setD} plano={plano} podeEditar={pode} /></fieldset>

@@ -1031,3 +1031,58 @@ test("o orçamento recupera o fornecedor do documento e permite identificá-lo m
   const r = (await lic.get(processo)).dados.orcamentos.find((o: { id: number }) => o.id === cotado.ids[0]);
   assert.equal(nomeFornecedorOrcamento(r), "Papelaria Escolar");
 });
+
+test("documentos de apoio ficam na solicitação e podem ser acrescentados após salvar", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+  const novo = await lic.post("/api/processos", { objeto: "Aquisição de luminárias", tipo: "bens", via: "licitacao", ano: 2098 });
+  assert.equal(novo.status, 201);
+  const processo = `/api/processos/${novo.dados.id}`;
+  const dados = new FormData();
+  dados.set("chave_envio", randomUUID());
+  dados.set("secretaria", "Obras");
+  dados.set("descricao", "Pedido de iluminação");
+  dados.append("apoios", new Blob(["10 luminárias"]), "levantamento.txt");
+  dados.append("apoios", new Blob(["Prazo de 30 dias"]), "prazo.txt");
+  const criada = await lic.post(`${processo}/solicitacoes`, dados);
+  assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  assert.equal((await lic.post(`${processo}/solicitacoes`, dados)).status, 200);
+  const detalhe = (await lic.get(processo)).dados.solicitacoes[0];
+  assert.deepEqual(detalhe.apoios.map((a: { nome: string }) => a.nome), ["levantamento.txt", "prazo.txt"]);
+  const link = `${processo}/solicitacoes/${detalhe.id}/apoios/${detalhe.apoios[0].id}`;
+  assert.equal((await lic.get(link)).dados.toString(), "10 luminárias");
+  assert.equal((await outro.get(link)).status, 404);
+  const complemento = new FormData();
+  complemento.set("anterior", detalhe.descricao);
+  complemento.set("descricao", detalhe.descricao);
+  complemento.set("itens", "[]");
+  complemento.set("itens_anteriores", "[]");
+  complemento.append("apoios", new Blob(["Prazo de 30 dias"]), "copia-prazo.txt");
+  complemento.append("apoios", new Blob(["Rua do posto"]), "local.txt");
+  const atualizada = await lic.put(`${processo}/solicitacoes/${detalhe.id}`, complemento);
+  assert.equal(atualizada.status, 200, JSON.stringify(atualizada.dados));
+  assert.deepEqual((await lic.get(processo)).dados.solicitacoes[0].apoios.map((a: { nome: string }) => a.nome), ["levantamento.txt", "prazo.txt", "local.txt"]);
+});
+
+test("exclusão retira o processo das consultas e conserva o protocolo e a auditoria", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+  const dados = { objeto: "Aquisição de tintas", tipo: "bens", via: "licitacao", ano: 2099 };
+  const r = await lic.post("/api/processos", dados);
+  assert.equal(r.status, 201);
+  const caminho = `/api/processos/${r.dados.id}`;
+  assert.equal((await req.put(caminho, { ...dados, objeto: "Compra de tintas para a escola" })).status, 200);
+  assert.equal((await req.req("DELETE", caminho)).status, 403);
+  assert.equal((await outro.req("DELETE", caminho)).status, 404);
+  assert.equal((await lic.req("DELETE", caminho)).status, 200);
+  assert.equal((await lic.get(caminho)).status, 404);
+  assert.equal((await lic.req("DELETE", caminho)).status, 404);
+  assert.deepEqual((await lic.get("/api/processos?ano=2099")).dados, []);
+  const salvo = await q1("select protocolo,excluido_em from processos where id=$1", [r.dados.id]);
+  assert.equal(salvo?.protocolo, r.dados.protocolo);
+  assert.ok(salvo?.excluido_em);
+  assert.ok(await q1("select id from auditoria where processo_id=$1 and acao='processo.excluido'", [r.dados.id]));
+  const posterior = await lic.post("/api/processos", dados);
+  assert.notEqual(posterior.dados.protocolo, r.dados.protocolo);
+});

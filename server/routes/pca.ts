@@ -29,7 +29,7 @@ export async function resumoFracionamento(orgao: number, ano: number) {
   const lim = (inciso: "I" | "II") => limites.find((l) => l.inciso === inciso) ?? null;
   const procs = await q(
     `select id, protocolo, numero, objeto, classe, tipo, via, valor_estimado, situacao, pca_item_id from processos
-      where orgao_id=$1 and ano=$2 and situacao <> 'cancelado'`, [orgao, ano]);
+      where orgao_id=$1 and ano=$2 and excluido_em is null and situacao <> 'cancelado'`, [orgao, ano]);
   const itens = await q("select * from pca_itens where orgao_id=$1 and ano=$2 order by ordem_oficial nulls last, trimestre nulls last, id", [orgao, ano]);
   const classes = new Map<string, { classe: string; inciso: "I" | "II"; planejado: number; processos: number; dispensas: number; ids: number[] }>();
   const pega = (classe: string, tipo: string) => {

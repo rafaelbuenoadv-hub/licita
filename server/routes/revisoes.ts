@@ -95,7 +95,7 @@ export function rotasRevisoes() {
     const pdf = req.file ? await prepararArquivo(req.file, tipoPdf.parse(req.body.tipo)) : null;
     const registro = await tx(async (c) => {
       if (d.processo_id) {
-        const p = await c.query("select id from processos where id=$1 and orgao_id=$2", [d.processo_id, usuario.orgao_id]);
+        const p = await c.query("select id from processos where id=$1 and orgao_id=$2 and excluido_em is null", [d.processo_id, usuario.orgao_id]);
         if (!p.rowCount) throw new ErroHttp(400, "Selecione um processo do seu órgão.");
       }
       const { rows: [nova] } = await c.query(

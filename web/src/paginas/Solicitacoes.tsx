@@ -3,7 +3,7 @@ import { api, brl } from "../api";
 import { useEu } from "../main";
 import { Folha } from "../comp/Folha";
 import { aplicarPendencias, pendencias } from "../../../shared/etapas";
-import { camposDaSolicitacao, FONTES_COTACAO, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { camposDaSolicitacao, FONTES_COTACAO, inserirItens, LIMITE_SOLICITACAO, MAX_ANEXOS_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
 
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
@@ -14,6 +14,7 @@ interface Solicitacao {
   referencia: string;
   descricao: string;
   nome_arquivo: string | null;
+  apoios: { id: number; nome: string }[];
   objeto: string;
   justificativa: string;
   itens: ItemSolicitacao[];
@@ -60,10 +61,12 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [justificativa, setJustificativa] = useState("");
   const [linhas, setLinhas] = useState<LinhaItem[]>([linhaVazia()]);
   const [arquivo, setArquivo] = useState<File | null>(null);
+  const [apoios, setApoios] = useState<File[]>([]);
   const [cotando, setCotando] = useState(false);
   const [ocupado, setOcupado] = useState<"salvar" | "ia" | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; erro?: boolean } | null>(null);
   const seletor = useRef<HTMLInputElement>(null);
+  const seletorApoios = useRef<HTMLInputElement>(null);
   const caminho = `/processos/${processo.id}/solicitacoes`;
   const areas = [processo.requisitante, ...processo.areas_adicionais].filter(Boolean);
   const podeAdicionar = processo.pode.editar && processo.situacao === "preparacao";
@@ -110,6 +113,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       setLinhas([linhaVazia()]);
       trocarTexto(novo === "manual" ? modelo : "");
       setArquivo(null);
+      setApoios([]);
     }
     if (modo && novo === "manual" && !descricao.trim()) trocarTexto(modelo);
     setModo(novo);
@@ -124,6 +128,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setJustificativa(s.justificativa);
     setLinhas(linhasDosItens(s.itens, processo.orcamentos));
     setArquivo(null);
+    setApoios([]);
     trocarTexto(s.descricao);
     setModo("manual");
     setAviso(null);
@@ -133,6 +138,20 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const fechar = () => {
     setEdicao(null);
     setModo(null);
+  };
+
+  const selecionarApoios = (selecionados: File[]) => {
+    const novos = [...apoios];
+    for (const a of selecionados) {
+      if (!novos.some((b) => b.name === a.name && b.size === a.size && b.lastModified === a.lastModified)) novos.push(a);
+    }
+    if (novos.length + (edicao?.apoios.length ?? 0) > MAX_ANEXOS_SOLICITACAO || novos.some((a) => !a.size || a.size > TAMANHO_ANEXO_SOLICITACAO)
+      || novos.reduce((total, a) => total + a.size, 0) > 40 * 1024 * 1024) {
+      setAviso({ erro: true, texto: `Selecione até ${MAX_ANEXOS_SOLICITACAO} documentos de apoio não vazios, de 20 MB cada e 40 MB no total.` });
+      return;
+    }
+    setApoios(novos);
+    setAviso(null);
   };
 
   const montarDados = (texto: string) => {
@@ -145,6 +164,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     dados.set("justificativa", justificativa);
     dados.set("itens", JSON.stringify(lidas.itens));
     if (arquivo) dados.set("arquivo", arquivo);
+    for (const apoio of apoios) dados.append("apoios", apoio);
     return dados;
   };
 
@@ -157,7 +177,12 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       if (modo === "anexo" && !arquivo) throw new Error("Selecione o documento da solicitação.");
       if (lidas.erro) throw new Error(lidas.erro);
       const texto = aplicarPendencias(base, valores).texto;
-      if (edicao) await api.put(`${caminho}/${edicao.id}`, { descricao: texto, anterior: edicao.descricao, itens, itens_anteriores: edicao.itens });
+      if (edicao) {
+        const dados = montarDados(texto);
+        dados.set("anterior", edicao.descricao);
+        dados.set("itens_anteriores", JSON.stringify(edicao.itens));
+        await api.put(`${caminho}/${edicao.id}`, dados);
+      }
       else {
         const dados = montarDados(texto);
         dados.set("chave_envio", chave);
@@ -181,9 +206,17 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setOcupado("ia");
     setAviso(null);
     try {
-      const r = await api.post<{ descricao: string }>(`${caminho}/ia`, montarDados(previa));
+      const dados = montarDados(previa);
+      if (edicao) dados.set("solicitacao_id", String(edicao.id));
+      const r = await api.post<{ descricao: string; objeto: string; justificativa: string; itens: ItemSolicitacao[]; avisos: string[] }>(`${caminho}/ia`, dados);
       trocarTexto(r.descricao);
-      setAviso({ texto: "Rascunho gerado. Confira o texto e salve a solicitação." });
+      if (!edicao && !objeto.trim() && r.objeto) setObjeto(r.objeto);
+      if (!edicao && !justificativa.trim() && r.justificativa) setJustificativa(r.justificativa);
+      if (!itens.length && !lidas.erro && r.itens?.length) {
+        setLinhas(linhasDosItens(r.itens, processo.orcamentos));
+      }
+      const falhas = r.avisos?.length ? ` O rascunho não inclui os arquivos que a IA não conseguiu ler: ${r.avisos.join(", ")}.` : "";
+      setAviso({ texto: "Rascunho gerado. Confira o preenchimento antes de salvar." + falhas, erro: !!falhas });
     } catch (erro) {
       setAviso({ texto: erro instanceof Error ? erro.message : "Não foi possível gerar o rascunho.", erro: true });
     } finally {
@@ -220,11 +253,29 @@ export function Solicitacoes({ processo, recarregar }: Props) {
               <label className="wide">Justificativa
                 <textarea maxLength={8000} value={justificativa} disabled={!!ocupado} placeholder="Por que a secretaria precisa desta contratação" onChange={(e) => setJustificativa(e.target.value)} /></label>
             </>}
+            <fieldset className="wide itens-sol">
+              <legend>Documentos de apoio da solicitação</legend>
+              <div className="tools">
+                <input ref={seletorApoios} hidden type="file" accept={TIPOS_ANEXOS_SOLICITACAO} multiple onChange={(e) => {
+                  selecionarApoios(Array.from(e.target.files ?? []));
+                  e.target.value = "";
+                }} />
+                <button className="btn" type="button" disabled={!!ocupado || cotando || apoios.length + (edicao?.apoios.length ?? 0) >= MAX_ANEXOS_SOLICITACAO}
+                  onClick={() => seletorApoios.current?.click()}>Anexar documentos de apoio</button>
+                <span className="small muted">PDF, Word, Excel (.xlsx), foto ou texto. Até {MAX_ANEXOS_SOLICITACAO} arquivos.</span>
+              </div>
+              {(apoios.length > 0 || !!edicao?.apoios.length) && <ul>
+                {edicao?.apoios.map((a) => <li key={a.id}><a href={`/api${caminho}/${edicao.id}/apoios/${a.id}`}>{a.nome}</a></li>)}
+                {apoios.map((a, i) => <li key={`${a.name}-${i}`}>{a.name}{" "}
+                  <button className="lnk" type="button" disabled={!!ocupado} onClick={() => setApoios(apoios.filter((_, k) => i !== k))}>Remover</button>
+                </li>)}
+              </ul>}
+            </fieldset>
             <ItensSolicitacao processoId={processo.id} linhas={linhas} setLinhas={setLinhas}
               orcamentos={processo.orcamentos} recarregar={recarregar} ia={ia.disponivel} ocupado={!!ocupado} setCotando={setCotando} />
             {lidas.erro && <p className="wide small muted">{lidas.erro}</p>}
             <label className="wide">{modo === "anexo" ? "Descrição complementar (opcional)" : "Descrição da solicitação"}
-              <textarea required={modo !== "anexo" && !edicao?.nome_arquivo} maxLength={LIMITE_SOLICITACAO} value={descricao} disabled={!!ocupado}
+              <textarea required={modo !== "anexo" && !edicao?.nome_arquivo && !edicao?.apoios.length && !apoios.length} maxLength={LIMITE_SOLICITACAO} value={descricao} disabled={!!ocupado}
                 placeholder={modo === "ia" ? "Informe a necessidade, as quantidades e os prazos que já conhece." : undefined}
                 onChange={(e) => trocarTexto(e.target.value)} />
             </label>
@@ -233,7 +284,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
           {modo !== "anexo" && !descricao.trim() && <div><button className="btn" type="button" disabled={!!ocupado} onClick={() => trocarTexto(modelo)}>Usar modelo do órgão</button></div>}
           {!edicao && <div className="tools">
             <input ref={seletor} hidden type="file" accept={tiposArquivo} onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} />
-            <button className="btn" type="button" disabled={!!ocupado} onClick={() => seletor.current?.click()}>{arquivo ? "Trocar documento" : "Anexar documento"}</button>
+            <button className="btn" type="button" disabled={!!ocupado} onClick={() => seletor.current?.click()}>{arquivo ? "Trocar solicitação original" : "Anexar solicitação original"}</button>
             {arquivo && <>
               <span className="small" style={{ overflowWrap: "anywhere" }}>{arquivo.name}</span>
               <button className="lnk" type="button" disabled={!!ocupado} onClick={() => {
@@ -243,10 +294,10 @@ export function Solicitacoes({ processo, recarregar }: Props) {
             </>}
             <span className="small muted">PDF, Word (.docx) ou texto. Até 20 MB.</span>
           </div>}
-          {modo === "ia" && <div className="stack">
+          {(modo === "ia" || !!apoios.length || !!arquivo || !!edicao?.apoios.length || !!edicao?.nome_arquivo) && <div className="stack">
             {ia.disponivel ? <>
               <div><button className="btn" type="button" disabled={!!ocupado || cotando} onClick={gerar}>{ocupado === "ia" ? "Gerando rascunho…" : "Gerar rascunho com IA"}</button></div>
-              <span className="small muted">Ao gerar, o Licita usa a descrição e envia o documento selecionado ao provedor de IA.</span>
+              <span className="small muted">Ao gerar, o Licita usa a descrição e envia os documentos de apoio e a solicitação original anexada ao provedor de IA.</span>
             </> : <p className="note">IA indisponível no servidor. Você pode preencher e salvar a solicitação nesta tela.</p>}
           </div>}
           {descricao.trim() && <div className="stack">
@@ -306,7 +357,11 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                     {s.descricao && <a className="btn sm" href={`/api${caminho}/${s.id}/docx${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>Baixar Word</a>}
                   </div>
                 </td>
-                <td>{s.nome_arquivo ? <a href={`/api${caminho}/${s.id}/arquivo`} download>{s.nome_arquivo}</a> : "—"}</td>
+                <td>
+                  {s.nome_arquivo && <div><a href={`/api${caminho}/${s.id}/arquivo`} download>{s.nome_arquivo}</a></div>}
+                  {s.apoios.map((a) => <div key={a.id}><a href={`/api${caminho}/${s.id}/apoios/${a.id}`} download>{a.nome}</a></div>)}
+                  {!s.nome_arquivo && !s.apoios.length && "—"}
+                </td>
               </tr>
             ))}</tbody>
           </table>
