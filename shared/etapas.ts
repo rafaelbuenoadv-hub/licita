@@ -43,8 +43,8 @@ const it = (id: string, texto: string, base = "", cond?: Condicao): Item => ({ i
 
 export const ETAPAS: Etapa[] = [
   {
-    id: "dfd", nome: "Solicitação", doc: "Documento de Formalização da Demanda (DFD)",
-    oque: "A área que precisa da contratação formaliza o pedido. É o documento que abre o processo e alimenta o plano de contratações anual.",
+    id: "dfd", nome: "DFD", doc: "Documento de Formalização da Demanda (DFD)",
+    oque: "Formalize a demanda com base nas solicitações das áreas requisitantes e confira a relação com o Plano de Contratações Anual.",
     base: [{ rotulo: "Art. 12, VII", url: U.a12 }, { rotulo: "Art. 72, I", url: U.a72 }, { rotulo: "Art. 18, caput", url: U.a18 }],
     papeis: ["requisitante", "contratacao"],
     itens: [

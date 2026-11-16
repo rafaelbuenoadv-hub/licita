@@ -319,3 +319,34 @@ test("agente de contratação: recebe o campo, o formulário e o processo da tel
   assert.equal((await api("POST", "/api/ia/agente", { ...corpo, mensagens: [{ role: "assistant", content: "x" }] })).status, 400);
   assert.equal((await api("POST", "/api/ia/agente", { ...corpo, campo: { ...corpo.campo, rotulo: " " } })).status, 400);
 });
+
+test("a aba Solicitação usa o próprio modelo e o DFD aproveita o pedido registrado", async () => {
+  const criada = await api("POST", "/api/processos", { objeto: "Aquisição de materiais de expediente", tipo: "bens", via: "licitacao", ano: 2026 });
+  assert.equal(criada.status, 201);
+  const caminho = `/api/processos/${(await criada.json()).id}`;
+  const salva = await api("POST", `${caminho}/solicitacoes`, {
+    chave_envio: crypto.randomUUID(), secretaria: "Educação", referencia: "Memorando de teste",
+    descricao: "Reposição de 20 caixas para as escolas.",
+  });
+  assert.equal(salva.status, 201);
+  const mensagens = [{ role: "user", content: "Confira o pedido." }];
+  textoStream = "Revise a quantidade informada.";
+  const pedido = await api("POST", `${caminho}/ia/chat`, { etapa: "solicitacao", mensagens });
+  assert.equal(pedido.status, 200);
+  assert.match(await pedido.text(), /"fim":true/);
+  const ctxPedido = pedidos.at(-1)!.body.messages[0].content;
+  assert.match(ctxPedido, /ABA ABERTA: Solicitação/);
+  assert.match(ctxPedido, /SOLICITAÇÃO DE CONTRATAÇÃO/);
+  assert.doesNotMatch(ctxPedido, /CHECKLIST DA ETAPA/);
+
+  const dfd = await api("POST", `${caminho}/ia/chat`, { etapa: "dfd", mensagens });
+  assert.equal(dfd.status, 200);
+  await dfd.text();
+  const ctxDfd = pedidos.at(-1)!.body.messages[0].content;
+  assert.match(ctxDfd, /ETAPA ABERTA: DFD/);
+  assert.match(ctxDfd, /CHECKLIST DA ETAPA/);
+  assert.match(ctxDfd, /Reposição de 20 caixas para as escolas/);
+
+  const semMinutaAvulsa = await api("POST", `${caminho}/ia/redigir`, { etapa: "solicitacao" });
+  assert.equal(semMinutaAvulsa.status, 404);
+});

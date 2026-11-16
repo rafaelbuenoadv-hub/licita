@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { compararOrcamentos, type DadosOrcamento } from "../../../shared/orcamentos";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, brl, dataBR, dataHora, fluxo, fmtNum, numBR } from "../api";
 import { Folha } from "../comp/Folha";
 import { ETAPAS, TIPOS, VIAS, feita, feitos, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../../shared/etapas";
@@ -22,19 +22,28 @@ export function ProcessoPg() {
   const { eu, ia } = useEu();
   const [p, setP] = useState<any>(null);
   const [erro, setErro] = useState("");
-  const [et, setEt] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const irPara = (aba: string) => {
+    const proxima = new URLSearchParams(params);
+    proxima.set("aba", aba);
+    setParams(proxima, { preventScrollReset: true });
+  };
   const [aviso, setAviso] = useState<{ t: string; tipo?: string } | null>(null);
 
   const carregar = useCallback(async () => {
     try { const r = await api.get(`/processos/${id}`); setP(r); return r; }
     catch (e: any) { setErro(e.message); }
   }, [id]);
-  useEffect(() => { carregar().then((r) => r && setEt((x) => x ?? ETAPAS[r.etapa_atual].id)); }, [carregar]);
+  useEffect(() => { void carregar(); }, [carregar]);
 
   if (erro) return <p className="note bad">{erro}</p>;
-  if (!p || !et) return <p className="muted">Carregando processo…</p>;
-  const checks: Checks = Object.fromEntries(p.checagens.map((c: any) => [c.item, true]));
-  const ix = ETAPAS.findIndex((e) => e.id === et);
+  if (!p) return <p className="muted">Carregando processo…</p>;
+  const checks: Checks = Object.fromEntries(p.checagens.map((c: { item: string }) => [c.item, true]));
+  const aba = params.get("aba");
+  const etapaPedida = ETAPAS.findIndex((e) => e.id === aba);
+  const abriuDfd = p.minutas.some((m: { etapa: string }) => m.etapa === "dfd") || feitos(ETAPAS[0], p, checks) > 0;
+  const mostrarSolicitacao = aba === "solicitacao" || (etapaPedida < 0 && p.etapa_atual === 0 && !abriuDfd);
+  const ix = etapaPedida >= 0 ? etapaPedida : p.etapa_atual;
   const e = ETAPAS[ix];
 
   return (
@@ -56,19 +65,32 @@ export function ProcessoPg() {
       <Numeracao key={`n${p.numero}|${p.procedimento}`} p={p} recarregar={carregar} setAviso={setAviso} />
 
       <div className="mesa">
-        <nav className="panel trilha" aria-label="Etapas">
+        <nav className="panel trilha" aria-label="Solicitação e etapas do processo">
+          <button type="button" className={`et${mostrarSolicitacao ? " sel" : ""}`}
+            aria-current={mostrarSolicitacao ? "page" : undefined} onClick={() => irPara("solicitacao")}>
+            <span className="tx"><span className="nm">Solicitação</span><br /><span className="st">Pedidos, itens e orçamentos</span></span>
+          </button>
           {ETAPAS.map((x, i) => {
             const f = feita(x, p, checks), l = liberada(i, p, checks);
             const c = f ? "ok" : i === p.etapa_atual ? "cur" : l ? "" : "lock";
+            const selecionada = !mostrarSolicitacao && i === ix;
             return (
-              <button key={x.id} className={`et ${c}${i === ix ? " sel" : ""}`} onClick={() => setEt(x.id)} title={x.nome} aria-current={i === ix ? "step" : undefined}>
+              <button key={x.id} type="button" className={`et ${c}${selecionada ? " sel" : ""}`} onClick={() => irPara(x.id)} title={x.nome} aria-current={selecionada ? "step" : undefined}>
                 <span className="n">{f ? "✓" : i + 1}</span>
                 <span className="tx"><span className="nm">{x.nome}</span><br /><span className="st">{f ? "Concluída" : l ? `${feitos(x, p, checks)} de ${itensDe(x, p).length} itens` : "Bloqueada"}</span></span>
               </button>);
           })}
         </nav>
-        <Etapa key={e.id} p={p} e={e} ix={ix} checks={checks} recarregar={carregar} setAviso={setAviso} irPara={setEt} />
-        <Assistente key={"c" + p.id} p={p} etapa={e.id} disponivel={ia.disponivel} />
+        {mostrarSolicitacao ? (
+          <section className="panel" style={{ minWidth: 0 }} aria-labelledby="aba-solicitacao">
+            <div className="sec row">
+              <h2 id="aba-solicitacao">Solicitação</h2>
+              <button className="btn" type="button" onClick={() => irPara("dfd")}>Abrir DFD →</button>
+            </div>
+            <Solicitacoes key={p.id} processo={p} recarregar={carregar} />
+          </section>
+        ) : <Etapa key={e.id} p={p} e={e} ix={ix} checks={checks} recarregar={carregar} setAviso={setAviso} irPara={irPara} />}
+        <Assistente key={`${p.id}-${mostrarSolicitacao ? "solicitacao" : "etapas"}`} p={p} etapa={mostrarSolicitacao ? "solicitacao" : e.id} disponivel={ia.disponivel} />
       </div>
 
       <Anexos p={p} recarregar={carregar} podeIncluir={tem(eu, "requisitante", "contratacao", "juridico")} />
@@ -198,7 +220,6 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
         {!lib && <p className="note">Conclua a etapa "{ETAPAS[p.etapa_atual].nome}" para liberar esta.</p>}
         {lib && !atua && <p className="note">Seu perfil acompanha esta etapa, mas quem marca os itens é: {e.papeis.join(", ")}.</p>}
       </div>
-      {e.id === "dfd" && <Solicitacoes key={p.id} processo={p} recarregar={recarregar} />}
       <div className="sec"><span className="lbl">Conferência obrigatória</span>
         <ul className="chk">{its.map((i: any) => {
           const q = quem[i.id];
@@ -210,7 +231,7 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
             </li>);
         })}</ul>
       </div>
-      {e.id === "precos" && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} irAosItens={() => irPara("dfd")} />}
+      {e.id === "precos" && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} irAosItens={() => irPara("solicitacao")} />}
       {e.id === "precos" && p.via === "dispensa" && <Fracionamento id={p.id} />}
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>
         <ul className="aten">{e.atencao.map((a: string) => <li key={a}>{a}</li>)}</ul></div>
@@ -225,7 +246,7 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
           </li>))}</ul>
       </div>}
       <div className="sec row">
-        {ix > 0 ? <button className="btn" onClick={() => irPara(ETAPAS[ix - 1].id)}>← {ETAPAS[ix - 1].nome}</button> : <span />}
+        {ix > 0 ? <button className="btn" onClick={() => irPara(ETAPAS[ix - 1].id)}>← {ETAPAS[ix - 1].nome}</button> : <button className="btn" type="button" onClick={() => irPara("solicitacao")}>← Solicitação</button>}
         <div className="tools">
           {lib && atua && p.situacao !== "cancelado" && <button className="btn pri" disabled={conferindo} onClick={concluir}>{conferindo ? "Conferindo…" : prox ? "Concluir e avançar" : "Conferir e concluir"}</button>}
           {prox ? <button className="btn" disabled={!ok} onClick={() => irPara(prox.id)}>{ok ? "" : `Faltam ${its.length - nf} · `}{prox.nome} →</button>
@@ -503,8 +524,15 @@ function Assistente({ p, etapa, disponivel }: { p: any; etapa: string; disponive
       <div className="msgs" ref={caixa} aria-live="polite">
         {msgs.map((m, i) => <div key={i} className={`msg ${m.role}${m.err ? " err" : ""}`}>{m.content || "Pensando…"}</div>)}
       </div>
-      <div className="chips">{["O que falta nesta etapa?", "Confira a minuta desta etapa contra o checklist e aponte incoerências com as outras peças.", "Que documentos preciso juntar agora?"].map((q) =>
-        <button key={q} className="chip" disabled={!disponivel || busy} onClick={() => enviar(q)}>{q.length > 40 ? "Conferir a minuta" : q}</button>)}</div>
+      <div className="chips">{(etapa === "solicitacao" ? [
+        ["Conferir a solicitação", "Confira os pedidos das secretarias, os itens e as cotações da Solicitação e indique o que falta."],
+        ["Conferir os orçamentos", "Verifique quais itens estão sem cotação e quais preços precisam de conferência."],
+      ] : [
+        ["O que falta nesta etapa?", "O que falta nesta etapa?"],
+        ["Conferir a minuta", "Confira a minuta desta etapa contra o checklist e aponte incoerências com as outras peças."],
+        ["Que documentos preciso juntar agora?", "Que documentos preciso juntar agora?"],
+      ]).map(([rotulo, pergunta]) =>
+        <button key={rotulo} className="chip" disabled={!disponivel || busy} onClick={() => enviar(pergunta)}>{rotulo}</button>)}</div>
       <form className="chatform" onSubmit={sub}>
         <textarea id="chat-in" value={rasc} onChange={(ev) => setRasc(ev.target.value)} placeholder="Pergunte ou cole um trecho para conferir" aria-label="Mensagem para o assistente"
           onKeyDown={(ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); enviar(rasc); } }} disabled={!disponivel} />
