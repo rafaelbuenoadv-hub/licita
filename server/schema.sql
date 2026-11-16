@@ -303,6 +303,20 @@ create table if not exists solicitacao_anexos (
   unique (solicitacao_id, sha256)
 );
 
+create table if not exists solicitacao_anexos_pendentes (
+  id serial primary key,
+  processo_id int not null references processos(id) on delete cascade,
+  usuario_id int not null references usuarios(id) on delete cascade,
+  chave uuid not null,
+  nome text not null,
+  arquivo bytea not null,
+  texto text not null default '',
+  sha256 text not null,
+  criado_em timestamptz not null default now(),
+  unique (processo_id, usuario_id, chave, sha256)
+);
+create index if not exists solicitacao_anexos_pendentes_criado on solicitacao_anexos_pendentes (criado_em);
+
 alter table processos add column if not exists excluido_em timestamptz;
 
 

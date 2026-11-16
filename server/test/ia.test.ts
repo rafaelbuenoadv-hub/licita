@@ -380,3 +380,46 @@ test("a IA combina anexos salvos e novos para sugerir os campos da solicitação
   assert.match(contexto, /justificativa.txt\nMotivo: lâmpadas apagadas/);
   assert.match(contexto, /quantidades.txt\nLevantamento: 12 luminárias/);
 });
+
+test("uma solicitação reúne mais de cinco documentos e a IA consulta os novos e os salvos", async () => {
+  const processo = await api("POST", "/api/processos", { objeto: "Aquisição de material escolar", tipo: "bens", via: "licitacao", ano: 2026 });
+  assert.equal(processo.status, 201);
+  const caminho = `/api/processos/${(await processo.json()).id}`;
+  const rota = `${caminho}/solicitacoes`;
+  const chave = crypto.randomUUID();
+  const enviar = async (i: number) => {
+    const fd = new FormData();
+    fd.set("chave", chave);
+    fd.append("apoios", new Blob([`Justificativa independente ${i}`]), `apoio-${i}.txt`);
+    const r = await api("POST", `${rota}/apoios`, fd);
+    assert.equal(r.status, 201, await r.clone().text());
+    return (await r.json()).ids[0];
+  };
+  const ids: number[] = [];
+  for (let i = 1; i <= 8; i++) ids.push(await enviar(i));
+  assert.equal(await enviar(1), ids[0]);
+  const base = { secretaria: "Educação", chave_apoios: chave, apoios_ids: ids };
+  assert.equal((await api("POST", rota, { ...base, chave_envio: chave, chave_apoios: crypto.randomUUID() })).status, 409);
+  assert.deepEqual((await (await api("GET", caminho)).json()).solicitacoes, []);
+
+  respostaEstruturada = { descricao: "# SOLICITAÇÃO DE MATERIAL ESCOLAR" };
+  const gerada = await api("POST", `${rota}/ia`, base);
+  assert.equal(gerada.status, 200, await gerada.clone().text());
+  assert.deepEqual((await gerada.json()).avisos, []);
+  let contexto = pedidos.at(-1)!.body.messages[0].content;
+  assert.match(contexto, /apoio-1.txt\nJustificativa independente 1/);
+  assert.match(contexto, /apoio-8.txt\nJustificativa independente 8/);
+
+  const salva = await api("POST", rota, { ...base, chave_envio: chave });
+  assert.equal(salva.status, 201, await salva.clone().text());
+  const id = (await salva.json()).id;
+  const maisUm = await enviar(9);
+  const edicao = { secretaria: "Educação", chave_apoios: chave, apoios_ids: [maisUm] };
+  const revisada = await api("POST", `${rota}/ia`, { ...edicao, solicitacao_id: id });
+  assert.equal(revisada.status, 200, await revisada.clone().text());
+  contexto = pedidos.at(-1)!.body.messages[0].content;
+  assert.match(contexto, /apoio-8.txt\nJustificativa independente 8/);
+  assert.match(contexto, /apoio-9.txt\nJustificativa independente 9/);
+  assert.equal((await api("PUT", `${rota}/${id}`, { ...edicao, anterior: "", descricao: "" })).status, 200);
+  assert.equal((await (await api("GET", caminho)).json()).solicitacoes[0].apoios.length, 9);
+});

@@ -1,4 +1,4 @@
-import { anexosDaRequisicao, apoiosComTextoLocal, nomeAnexoEnviado, receberAnexosSolicitacao, salvarApoios } from "../anexos-solicitacao.js";
+import { anexosDaRequisicao, apoiosComTextoLocal, hashDoAnexo, incorporarApoios, nomeAnexoEnviado, parametrosApoios, receberAnexosSolicitacao, referenciasApoios, salvarApoios } from "../anexos-solicitacao.js";
 import { fornecedorNoTexto, limparNomeFornecedor, nomeDoArquivoSemExtensao, nomeFornecedorOrcamento, type OrcamentoLido } from "../../shared/orcamentos.js";
 import { LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao } from "../../shared/solicitacao.js";
 import { modeloSolicitacao, preencherSolicitacao } from "../solicitacao.js";
@@ -299,11 +299,37 @@ export function rotasProcessos() {
     res.json({ texto: await modeloSolicitacao(p.orgao_id) });
   });
 
+  r.post("/processos/:id/solicitacoes/apoios", exigePapel("requisitante", "contratacao"), receberAnexosSolicitacao, async (req, res) => {
+    const p = await processoDo(req);
+    if (p.situacao !== "preparacao") throw new ErroHttp(409, "O processo deve estar em preparação para anexar documentos.");
+    const usuario = req.usuario!.id;
+    const { chave } = z.object({ chave: z.uuid() }).parse(req.body);
+    const { apoios } = anexosDaRequisicao(req);
+    if (!apoios.length) throw new ErroHttp(400, "Selecione um documento de apoio.");
+    const documentos = await apoiosComTextoLocal(apoios);
+    const ids = await tx(async (c) => {
+      await c.query("delete from solicitacao_anexos_pendentes where criado_em < now() - interval '1 day'");
+      const ids: number[] = [];
+      for (const a of documentos) {
+        const { rows: [linha] } = await c.query<{ id: number }>(
+          `insert into solicitacao_anexos_pendentes (processo_id,usuario_id,chave,nome,arquivo,texto,sha256)
+           values ($1,$2,$3,$4,$5,$6,$7) on conflict (processo_id,usuario_id,chave,sha256)
+           do update set criado_em=now() returning id`,
+          [p.id, usuario, chave, a.nome, a.arquivo, a.texto, hashDoAnexo(a.arquivo)],
+        );
+        ids.push(linha.id);
+      }
+      return ids;
+    });
+    res.status(201).json({ ids });
+  });
+
   r.post("/processos/:id/solicitacoes", exigePapel("requisitante", "contratacao"), receberAnexosSolicitacao, async (req, res) => {
     const p = await processoDo(req);
     const { principal, apoios } = anexosDaRequisicao(req);
     const d = z.object({
       chave_envio: z.uuid(),
+      ...referenciasApoios,
       secretaria: z.string().trim().min(2).max(200),
       referencia: z.string().trim().max(120).default(""),
       descricao: z.string().trim().max(LIMITE_SOLICITACAO).default(""),
@@ -314,7 +340,8 @@ export function rotasProcessos() {
         try { return JSON.parse(v || "[]"); } catch { return null; }
       }, itensSolicitacao),
     }).parse(req.body);
-    if (!d.descricao && !principal?.size && !apoios.length) throw new ErroHttp(400, "Descreva a solicitação ou anexe o documento.");
+    const pendentes = parametrosApoios(d, p.id, req.usuario!.id);
+    if (!d.descricao && !principal?.size && !apoios.length && !d.apoios_ids.length) throw new ErroHttp(400, "Descreva a solicitação ou anexe o documento.");
     if (principal && !principal.size) throw new ErroHttp(400, "O documento anexado está vazio.");
     const nome = principal ? nomeEnviado(principal) : null;
     if (nome && !/\.(pdf|docx|txt|md|csv)$/i.test(nome)) {
@@ -345,6 +372,7 @@ export function rotasProcessos() {
         [p.id, d.chave_envio, d.secretaria, d.referencia, descricao, nome, arquivo, texto, req.usuario!.id, d.objeto_solicitacao, d.justificativa, JSON.stringify(itens)],
       );
       await salvarApoios(c, nova.id, documentos);
+      await incorporarApoios(c, nova.id, pendentes);
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.incluida", detalhe: { id: nova.id, secretaria: d.secretaria } }, c);
       return { id: nova.id, nova: true };
@@ -361,6 +389,7 @@ export function rotasProcessos() {
       try { return JSON.parse(v); } catch { return null; }
     }, itensSolicitacao.optional());
     const d = z.object({
+      ...referenciasApoios,
       anterior: z.string().max(LIMITE_SOLICITACAO),
       descricao: z.string().trim().max(LIMITE_SOLICITACAO),
       itens: comoItens,
@@ -370,6 +399,7 @@ export function rotasProcessos() {
       "select secretaria, referencia, objeto as objeto_solicitacao, justificativa from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
     );
     if (!s) throw new ErroHttp(404, "Solicitação não encontrada.");
+    const pendentes = parametrosApoios(d, p.id, req.usuario!.id);
     const documentos = await apoiosComTextoLocal(apoios);
     const itens = d.itens && calcularItens(d.itens);
     const descricao = await preencherSolicitacao(p, { ...s, descricao: d.descricao, itens });
@@ -384,10 +414,11 @@ export function rotasProcessos() {
       );
       if (!existente) throw new ErroHttp(404, "Solicitação não encontrada.");
       if (existente.descricao !== d.anterior || !existente.itens_iguais) throw new ErroHttp(409, "A solicitação mudou. Reabra para ver a versão atualizada.");
-      if (!descricao && !existente.tem_arquivo && !documentos.length) throw new ErroHttp(400, "Preencha a descrição da solicitação.");
-      if (!itens && descricao === existente.descricao && !documentos.length) return;
+      if (!descricao && !existente.tem_arquivo && !documentos.length && !d.apoios_ids.length) throw new ErroHttp(400, "Preencha a descrição da solicitação.");
+      if (!itens && descricao === existente.descricao && !documentos.length && !d.apoios_ids.length) return;
       if (itens) await conferirOrcamentos(c, p.id, itens);
       await salvarApoios(c, sid, documentos);
+      await incorporarApoios(c, sid, pendentes);
       await c.query("update solicitacoes_processo set descricao=$1, itens=coalesce($2::jsonb,itens) where id=$3", [descricao, itens ? JSON.stringify(itens) : null, sid]);
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.alterada", detalhe: { id: sid } }, c);
