@@ -1070,9 +1070,18 @@ test("as cotações ficam lado a lado no quadro e os fornecedores comuns aparece
   const muitos = documentoDaSolicitacao(texto, [{ ...item, cotacoes: [
     a, b, cotacao("Loja Gama", 30), cotacao("Loja Delta", 40), cotacao("Loja Épsilon", 50),
   ] }]);
-  assert.match(muitos, /\| Cotação 1 \| Cotação 2 \| Cotação 3 \|/);
-  assert.match(muitos, /\| \| \| \| \| \| \| Loja Delta .* \| Loja Épsilon .* \| \|/);
+  assert.match(muitos, /\| Loja Alfa \| Loja Beta \| Loja Gama \|/);
+  assert.match(muitos, /\| \*\*Loja Delta\*\* \| \*\*Loja Épsilon\*\* \| \|/);
+  assert.match(muitos, /\| 1 \| Material escolar \| \| \| \| \| R\$\s40,00 \| R\$\s50,00 \| \|/);
+  assert.equal(muitos.match(/Loja Alfa/g)?.length, 1);
+  assert.doesNotMatch(muitos, /Cotação 1/);
   assert.equal(muitos.match(/Total estimado/g)?.length, 1);
+  const distintos = documentoDaSolicitacao(texto, ["Alfa", "Beta", "Gama", "Delta"].map((nome, k) => ({
+    ...item, descricao: `Item de ${k + 1}`, cotacoes: [cotacao(nome, (k + 1) * 10)],
+  })));
+  assert.match(distintos, /\| 4 \| Item de 4 \| un \| 1 .*R\$\s40,00/);
+  assert.equal(distintos.match(/Delta/g)?.length, 1);
+
 });
 
 test("o orçamento recupera o fornecedor do documento e permite identificá-lo manualmente", async () => {
