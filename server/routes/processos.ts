@@ -1,4 +1,4 @@
-import { MODELO_SOLICITACAO } from "../../shared/solicitacao.js";
+import { LIMITE_SOLICITACAO, MODELO_SOLICITACAO } from "../../shared/solicitacao.js";
 import { modeloSolicitacao, preencherSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesCadastro } from "../portarias.js";
 import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
@@ -182,7 +182,7 @@ export function rotasProcessos() {
       `select o.id, o.fornecedor, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, o.dados, o.lido_em, u.nome as usuario
          from orcamentos o left join usuarios u on u.id = o.usuario_id where o.processo_id = $1 order by o.id`, [p.id]);
     const solicitacoes = await q(
-      "select id, secretaria, referencia, descricao, nome_arquivo from solicitacoes_processo where processo_id=$1 order by id", [p.id],
+      "select id, secretaria, referencia, descricao, nome_arquivo, objeto, justificativa, itens from solicitacoes_processo where processo_id=$1 order by id", [p.id],
     );
     const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [p.orgao_id]);
     const secretarias = await q<{ secretaria: string }>("select secretaria from secretarios where orgao_id=$1 order by secretaria", [p.orgao_id]);
@@ -220,7 +220,16 @@ export function rotasProcessos() {
       chave_envio: z.uuid(),
       secretaria: z.string().trim().min(2).max(200),
       referencia: z.string().trim().max(120).default(""),
-      descricao: z.string().trim().max(10000).default(""),
+      descricao: z.string().trim().max(LIMITE_SOLICITACAO).default(""),
+      objeto_solicitacao: z.string().trim().max(4000).default(""),
+      justificativa: z.string().trim().max(8000).default(""),
+      // Em formulário com arquivo os itens chegam como texto JSON.
+      itens: z.preprocess((v) => { if (typeof v !== "string") return v ?? []; try { return JSON.parse(v || "[]"); } catch { return null; } }, z.array(z.object({
+        descricao: z.string().trim().min(1).max(500),
+        unidade: z.string().trim().max(30).default(""),
+        quantidade: z.number().nonnegative().max(1e12).nullable().default(null),
+        valor_unitario: z.number().nonnegative().max(1e12).nullable().default(null),
+      })).max(200)),
     }).parse(req.body);
     if (!d.descricao && !req.file?.size) throw new ErroHttp(400, "Descreva a solicitação ou anexe o documento.");
     if (req.file && !req.file.size) throw new ErroHttp(400, "O documento anexado está vazio.");
@@ -233,7 +242,7 @@ export function rotasProcessos() {
       ? await extrairTexto(nome, arquivo).catch(() => "")
       : "";
     const descricao = await preencherSolicitacao(p, d);
-    if (descricao.length > 10000) throw new ErroHttp(400, "A descrição preenchida ultrapassa 10 mil caracteres.");
+    if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     const resultado = await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and orgao_id=$2 for update", [p.id, p.orgao_id]);
       if (!processo) throw new ErroHttp(404, "Processo não encontrado.");
@@ -245,9 +254,9 @@ export function rotasProcessos() {
         throw new ErroHttp(409, "A solicitação só pode ser adicionada enquanto o processo estiver em preparação.");
       }
       const { rows: [nova] } = await c.query(
-        `insert into solicitacoes_processo (processo_id, chave_envio, secretaria, referencia, descricao, nome_arquivo, arquivo, texto_arquivo, usuario_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
-        [p.id, d.chave_envio, d.secretaria, d.referencia, descricao, nome, arquivo, texto, req.usuario!.id],
+        `insert into solicitacoes_processo (processo_id, chave_envio, secretaria, referencia, descricao, nome_arquivo, arquivo, texto_arquivo, usuario_id, objeto, justificativa, itens)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
+        [p.id, d.chave_envio, d.secretaria, d.referencia, descricao, nome, arquivo, texto, req.usuario!.id, d.objeto_solicitacao, d.justificativa, JSON.stringify(d.itens)],
       );
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.incluida", detalhe: { id: nova.id, secretaria: d.secretaria } }, c);
@@ -259,13 +268,13 @@ export function rotasProcessos() {
   r.put("/processos/:id/solicitacoes/:sid", exigePapel("requisitante", "contratacao"), async (req, res) => {
     const p = await processoDo(req);
     const sid = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
-    const d = z.object({ anterior: z.string().max(10000), descricao: z.string().trim().max(10000) }).parse(req.body);
+    const d = z.object({ anterior: z.string().max(LIMITE_SOLICITACAO), descricao: z.string().trim().max(LIMITE_SOLICITACAO) }).parse(req.body);
     const s = await q1<{ secretaria: string; referencia: string }>(
       "select secretaria, referencia from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
     );
     if (!s) throw new ErroHttp(404, "Solicitação não encontrada.");
     const descricao = await preencherSolicitacao(p, { ...s, descricao: d.descricao });
-    if (descricao.length > 10000) throw new ErroHttp(400, "A descrição preenchida ultrapassa 10 mil caracteres.");
+    if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 for update", [p.id]);
       if (processo?.situacao !== "preparacao") throw new ErroHttp(409, "O processo deve estar em preparação para editar a solicitação.");

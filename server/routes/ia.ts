@@ -1,4 +1,4 @@
-import { ASSINATURA_SOLICITACAO } from "../../shared/solicitacao.js";
+import { ASSINATURA_SOLICITACAO, LIMITE_SOLICITACAO } from "../../shared/solicitacao.js";
 import { compararOrcamentos, type DadosOrcamento } from "../../shared/orcamentos.js";
 import { modeloSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso } from "../portarias.js";
@@ -190,7 +190,7 @@ export function rotasIA() {
     const dados = z.object({
       secretaria: z.string().trim().min(2).max(200),
       referencia: z.string().trim().max(120).default(""),
-      descricao: z.string().trim().max(10000).default(""),
+      descricao: z.string().trim().max(LIMITE_SOLICITACAO).default(""),
     }).parse(req.body);
     if (!iaDisponivel()) throw new ErroHttp(503, "A IA está indisponível no servidor. Você pode preencher ou anexar a solicitação.");
     try {
@@ -212,7 +212,7 @@ TEXTO DO DOCUMENTO DE APOIO
 ${corta(documento)}`, "medium");
       const corpo = resposta.descricao.split("\n").filter((linha) => !/^\s*@\s/.test(linha)).join("\n").trim();
       const descricao = corpo ? `${corpo}\n\n${ASSINATURA_SOLICITACAO}` : "";
-      if (!descricao || descricao.length > 10000) throw new ErroHttp(502, "A IA gerou um texto fora do limite do campo. Tente novamente com informações mais específicas.");
+      if (!descricao || descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(502, "A IA gerou um texto fora do limite do campo. Tente novamente com informações mais específicas.");
       res.json({ descricao });
     } catch (e) {
       throw traduzErroIA(e);

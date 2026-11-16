@@ -139,6 +139,9 @@ details.box>summary{padding:12px 16px;cursor:pointer;font-weight:600;font-family
 
 table.t tr.com-leitura td{border-bottom:0;padding-bottom:2px} .lido{margin:0} .lido>summary{cursor:pointer;font-size:13.5px;color:var(--accent)} .lido table.t{font-size:13px;margin-top:6px}
 
+.itens-sol{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;min-width:0;display:flex;flex-direction:column;gap:8px}
+.itens-sol legend{font-size:13px;color:var(--muted);padding:0 4px} .itens-sol table.t td{padding:5px 6px;vertical-align:middle} .itens-sol table.t{min-width:760px} .itens-sol table.t th:nth-child(2){min-width:260px}
+
 /* mensagens */
 .lateral a .conta{margin-left:8px;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--accent);color:var(--accent-ink)}
 .caixa{display:grid;grid-template-columns:minmax(260px,380px) minmax(0,1fr);gap:16px;align-items:start}

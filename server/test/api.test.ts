@@ -810,3 +810,63 @@ test("modelo da solicitação preenche o titular, guarda pendências e exporta a
   assert.equal((await outro.get(`${rota}/docx`)).status, 404);
   assert.equal((await admin.put("/api/admin/modelos/solicitacao", { texto: "" })).status, 200);
 });
+
+test("solicitação com objeto genérico, justificativa e itens com quantidade e valor", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const { dados: { id, protocolo } } = await admin.post("/api/processos", { objeto: "Aquisição de mobiliário para as escolas municipais", tipo: "bens", via: "licitacao", ano: 2028, requisitante: "SEDUC" });
+  const rota = `/api/processos/${id}/solicitacoes`;
+  const modelo = (await admin.get(`${rota}/modelo`)).dados.texto as string;
+  assert.ok(modelo.includes("[[Itens]]"));
+  const itens = [
+    { descricao: "Cadeira escolar | empilhável", unidade: "un", quantidade: 30, valor_unitario: 300 },
+    { descricao: "Mesa escolar individual", unidade: "un", quantidade: 30, valor_unitario: 250.5 },
+    { descricao: "Armário de aço", unidade: "", quantidade: null, valor_unitario: null },
+  ];
+  const corpo = (extra: object) => ({ chave_envio: crypto.randomUUID(), secretaria: "SEDUC", referencia: "Memorando 7/2028", descricao: modelo, ...extra });
+  const r = await admin.post(rota, corpo({ objeto_solicitacao: "Mobiliário escolar", justificativa: "As cadeiras atuais estão quebradas.", itens }));
+  assert.equal(r.status, 201, JSON.stringify(r.dados));
+  const s = (await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r.dados.id);
+  assert.equal(s.objeto, "Mobiliário escolar");
+  assert.equal(s.justificativa, "As cadeiras atuais estão quebradas.");
+  assert.deepEqual(s.itens, itens);
+  assert.ok(s.descricao.includes(`Protocolo ${protocolo}`));
+  assert.match(s.descricao, /## Objeto\nMobiliário escolar\n/);
+  assert.match(s.descricao, /## Justificativa da necessidade\nAs cadeiras atuais estão quebradas\.\n/);
+  assert.match(s.descricao, /## Itens solicitados\n\| Item \| Descrição \| Un\. \| Qtd\. \| Valor unitário \| Valor total \|\n\|---/);
+  assert.match(s.descricao, /\| 1 \| Cadeira escolar \/ empilhável \| un \| 30 \| R\$\s300,00 \| R\$\s9\.000,00 \|/);
+  assert.match(s.descricao, /\| 2 \| Mesa escolar individual \| un \| 30 \| R\$\s250,50 \| R\$\s7\.515,00 \|/);
+  assert.match(s.descricao, /\| 3 \| Armário de aço \| — \| — \| — \| — \|/);
+  assert.match(s.descricao, /\| \| Total estimado \| \| \| \| R\$\s16\.515,00 \|/);
+  assert.match(s.descricao, /@ Denise da Silva Lima/);
+  assert.equal(s.descricao.match(/## Itens solicitados/g).length, 1);
+
+  // Sem objeto próprio vale o do processo; sem itens o campo do modelo continua pendente.
+  const r2 = await admin.post(rota, corpo({ secretaria: "Finanças" }));
+  const s2 = (await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r2.dados.id);
+  assert.match(s2.descricao, /## Objeto\nAquisição de mobiliário para as escolas municipais\n/);
+  assert.ok(s2.descricao.includes("[[Itens]]") && s2.descricao.includes("[[Justificativa da contratação]]"));
+  assert.deepEqual(s2.itens, []);
+
+  // Texto livre, sem o campo [[Itens]]: o quadro entra antes da assinatura, uma única vez.
+  const r3 = await admin.post(rota, corpo({ secretaria: "Governo", descricao: "# PEDIDO\nPrecisamos dos itens abaixo.\n\n@ Fulana", itens: itens.slice(0, 1) }));
+  const s3 = (await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r3.dados.id);
+  assert.match(s3.descricao, /^# PEDIDO\nPrecisamos dos itens abaixo\.\n\n## Itens solicitados\n\| Item [\s\S]*R\$\s9\.000,00 \|\n\n@ Fulana$/);
+  // Modelo do órgão com [[Itens]] sob outro título não recebe o quadro duas vezes.
+  const r4 = await admin.post(rota, corpo({ secretaria: "Administração", descricao: "## Relação\n[[Itens]]\n\n@ Beltrano", itens: itens.slice(0, 1) }));
+  const s4 = (await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r4.dados.id);
+  assert.equal(s4.descricao.match(/\| Item \| Descrição/g).length, 1);
+  assert.ok(!s4.descricao.includes("## Itens solicitados"));
+
+  // Itens inválidos são recusados.
+  assert.equal((await admin.post(rota, corpo({ itens: [{ descricao: "", quantidade: 1, valor_unitario: 1 }] }))).status, 400);
+  assert.equal((await admin.post(rota, corpo({ itens: [{ descricao: "X", quantidade: -1, valor_unitario: 1 }] }))).status, 400);
+  assert.equal((await admin.post(rota, corpo({ itens: "isto não é uma lista" }))).status, 400);
+  // Pelo formulário com arquivo, os itens chegam como texto JSON.
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(corpo({ secretaria: "Saúde", descricao: "" }))) fd.set(k, String(v));
+  fd.set("itens", JSON.stringify(itens.slice(0, 2)));
+  fd.set("arquivo", new Blob(["Pedido da Saúde"]), "pedido.txt");
+  const r5 = await admin.req("POST", rota, fd);
+  assert.equal(r5.status, 201, JSON.stringify(r5.dados));
+  assert.equal((await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r5.dados.id).itens.length, 2);
+});

@@ -288,6 +288,10 @@ create table if not exists solicitacoes_processo (
   unique (processo_id, chave_envio)
 );
 create index if not exists solicitacoes_processo_processo on solicitacoes_processo(processo_id, id);
+-- Dados estruturados da solicitação: objeto genérico, justificativa e itens com quantidade e valor.
+alter table solicitacoes_processo add column if not exists objeto text not null default '';
+alter table solicitacoes_processo add column if not exists justificativa text not null default '';
+alter table solicitacoes_processo add column if not exists itens jsonb not null default '[]';
 
 -- Protocolo: identificador único do processo desde a abertura, no formato ANO/0001, sequencial por órgão e ano.
 -- O nº do processo administrativo e o do procedimento (colunas numero e procedimento) só são gravados ao final.
