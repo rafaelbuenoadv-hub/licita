@@ -11,6 +11,7 @@ import { rotasAdmin } from "./routes/admin.js";
 import { rotasSecretarios } from "./routes/secretarios.js";
 import { rotasProcessos } from "./routes/processos.js";
 import { rotasIA } from "./routes/ia.js";
+import { rotasPncp } from "./routes/pncp.js";
 import { rotasPca } from "./routes/pca.js";
 import { rotasContratos } from "./routes/contratos.js";
 import { rotasPainel } from "./routes/painel.js";
@@ -43,6 +44,7 @@ export function criarApp() {
   api.use(rotasIA());
   api.use(rotasRevisoes());
   api.use(rotasPca());
+  api.use(rotasPncp());
   api.use(rotasContratos());
   api.use(rotasPainel());
   api.use(rotasMensagens());

@@ -2,6 +2,9 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "pdf-lib";
+import { buscarPncp } from "../routes/pncp.js";
+import { destinosDoOrcamento } from "../../shared/importar-orcamento.js";
+import { valorDasCotacoes } from "../../shared/solicitacao.js";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -869,4 +872,95 @@ test("solicitação com objeto genérico, justificativa e itens com quantidade e
   const r5 = await admin.req("POST", rota, fd);
   assert.equal(r5.status, 201, JSON.stringify(r5.dados));
   assert.equal((await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r5.dados.id).itens.length, 2);
+});
+
+test("cotações anexadas calculam médias unitárias, subtotais e total da solicitação", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const novo = (objeto: string) => lic.post("/api/processos", { objeto, tipo: "bens", via: "licitacao", ano: 2094 });
+  const p = (await novo("Aquisição de equipamentos de climatização")).dados.id;
+  const outro = (await novo("Aquisição de mobiliário")).dados.id;
+  const anexar = async (processo: number, nome: string) => {
+    const dados = new FormData();
+    dados.append("arquivo", new Blob(["Proposta de teste"]), nome);
+    const r = await lic.post(`/api/processos/${processo}/orcamentos?origem=solicitacao`, dados);
+    assert.equal(r.status, 201, JSON.stringify(r.dados));
+    return r.dados.ids[0] as number;
+  };
+  const a = await anexar(p, "proposta-a.txt");
+  const b = await anexar(p, "proposta-b.txt");
+  const c = await anexar(outro, "proposta-c.txt");
+  const cotacao = (orcamento_id: number, fornecedor: string, valor_unitario: number | null) => ({ orcamento_id, fornecedor, valor_unitario });
+  const itens = [
+    { descricao: "Ar-condicionado", unidade: "un", quantidade: 3, valor_unitario: 9999, cotacoes: [cotacao(a, "Fornecedor A", 100), cotacao(b, "Fornecedor B", 120)] },
+    { descricao: "Suporte", unidade: "un", quantidade: 2, valor_unitario: null, cotacoes: [cotacao(a, "Fornecedor A", 50), cotacao(b, "Fornecedor B", null)] },
+    { descricao: "Controle remoto", unidade: "un", quantidade: 1, valor_unitario: null, cotacoes: [] },
+  ];
+  const processo = `/api/processos/${p}`;
+  const caminho = `${processo}/solicitacoes`;
+  const salvar = (itens: unknown) => lic.post(caminho, {
+    chave_envio: randomUUID(), secretaria: "Educação", descricao: "# PEDIDO\n[[Itens]]", itens,
+  });
+  assert.equal((await salvar([{ ...itens[0], cotacoes: [cotacao(c, "Fornecedor C", 100)] }])).status, 400);
+  assert.equal((await salvar([{ ...itens[0], cotacoes: [cotacao(a, "Fornecedor A", 100), cotacao(b, " FORNECEDOR A ", 120)] }])).status, 400);
+  const criada = await salvar(itens);
+  assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  const anterior = (await lic.get(processo)).dados.solicitacoes[0];
+  assert.deepEqual(anterior.itens.map((i: { valor_unitario: number | null }) => i.valor_unitario), [110, 50, null]);
+  assert.match(anterior.descricao, /Ar-condicionado .*R\$\s110,00 .*R\$\s330,00/);
+  assert.match(anterior.descricao, /Subtotal dos itens com valor .*R\$\s430,00/);
+  assert.equal((await lic.req("DELETE", `${processo}/orcamentos/${a}`)).status, 409);
+
+  const completos = [itens[0], itens[1], { ...itens[2], cotacoes: [cotacao(b, "Fornecedor B", 25)] }];
+  const alteracao = { anterior: anterior.descricao, descricao: anterior.descricao, itens_anteriores: anterior.itens, itens: completos };
+  const alterada = await lic.put(`${caminho}/${criada.dados.id}`, alteracao);
+  assert.equal(alterada.status, 200, JSON.stringify(alterada.dados));
+  const final = (await lic.get(processo)).dados.solicitacoes[0];
+  assert.match(final.descricao, /Total estimado .*R\$\s455,00/);
+  assert.equal(final.descricao.match(/Valor unitário estimado/g).length, 1);
+  assert.equal((await lic.put(`${caminho}/${criada.dados.id}`, alteracao)).status, 409);
+  const criterio = await lic.put(`${caminho}/${criada.dados.id}`, {
+    anterior: final.descricao, descricao: final.descricao, itens_anteriores: final.itens,
+    itens: [{ ...completos[0], criterio: "menor" }, ...completos.slice(1)],
+  });
+  assert.equal(criterio.status, 200, JSON.stringify(criterio.dados));
+  assert.match((await lic.get(processo)).dados.solicitacoes[0].descricao, /Total estimado .*R\$\s425,00/);
+});
+
+test("busca PNCP usa os filtros do Licita Ibaiti e devolve o link oficial com o valor unitário", async () => {
+  assert.equal((await new Cliente().get("/api/pncp-search?q=ar+condicionado")).status, 401);
+  const c = await new Cliente().entrar("req@a.gov.br");
+  assert.equal((await c.get("/api/pncp-search?q=A")).status, 400);
+  assert.equal((await c.get("/api/pncp-search?q=ar+condicionado&uf=XX")).status, 400);
+  const chamadas: URL[] = [];
+  const resposta = await buscarPncp({ q: "ar condicionado", uf: "PR", status: "encerradas" }, async (entrada) => {
+    const url = new URL(String(entrada));
+    chamadas.push(url);
+    if (url.pathname === "/api/search/") return Response.json({ items: [{
+      numero_controle_pncp: "75378844000170-1-000049/2026", orgao_nome: "Prefeitura de teste", uf: "PR",
+      municipio_nome: "Município de teste", modalidade_nome: "Pregão eletrônico",
+    }] });
+    return Response.json([
+      { numeroItem: 1, descricao: "Ar condicionado split", quantidade: 5, unidadeMedida: "un", valorUnitarioEstimado: 2750 },
+      { numeroItem: 2, descricao: "Armário de aço", quantidade: 5, valorUnitarioEstimado: 1150 },
+      { numeroItem: 3, descricao: "Suporte de ar condicionado" },
+    ]);
+  });
+  assert.equal(chamadas[0].searchParams.get("ufs"), "PR");
+  assert.equal(chamadas[0].searchParams.get("status"), "encerradas");
+  assert.equal(chamadas[1].pathname, "/api/pncp/v1/orgaos/75378844000170/compras/2026/49/itens");
+  assert.equal(resposta.resultados.length, 1);
+  assert.equal(resposta.resultados[0].unitValue, 2750);
+  assert.equal(resposta.resultados[0].sourceUrl, "https://pncp.gov.br/app/editais/75378844000170/2026/49");
+});
+
+test("leitura de proposta separa os itens novos e evita lançar duas linhas no mesmo item", () => {
+  const lido = { descricao: "Ar condicionado", unidade: "UN", quantidade: 5, valor_unitario: 2500, valor_total: 12500 };
+  const existentes = [{ descricao: "AR CONDICIONADO", unidade: "un" }, { descricao: "Suporte", unidade: "par" }];
+  assert.deepEqual(destinosDoOrcamento(existentes, [lido, lido, { ...lido, descricao: "Suporte", unidade: "un" }]), [
+    { indice: 0, ambigua: false }, { indice: null, ambigua: true }, { indice: null, ambigua: false },
+  ]);
+  const fontes = [100, 120, 900].map((valor_unitario, i) => ({ orcamento_id: i + 1, fornecedor: `Fonte ${i + 1}`, valor_unitario }));
+  assert.equal(valorDasCotacoes(fontes, "media"), 373.33);
+  assert.equal(valorDasCotacoes(fontes, "mediana"), 120);
+  assert.equal(valorDasCotacoes(fontes, "menor"), 100);
 });

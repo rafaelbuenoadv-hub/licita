@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, brl, numBR } from "../api";
+import { api, brl } from "../api";
 import { useEu } from "../main";
 import { Folha } from "../comp/Folha";
 import { aplicarPendencias, pendencias } from "../../../shared/etapas";
-import { camposDaSolicitacao, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { camposDaSolicitacao, FONTES_COTACAO, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
+
+import type { OrcamentoLido } from "../../../shared/orcamentos";
+import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
 
 interface Solicitacao {
   id: number;
@@ -15,24 +18,6 @@ interface Solicitacao {
   justificativa: string;
   itens: ItemSolicitacao[];
 }
-/** Linha do quadro de itens enquanto é digitada: quantidade e valor ficam como texto até salvar. */
-interface LinhaItem { descricao: string; unidade: string; quantidade: string; valor: string }
-const linhaVazia = (): LinhaItem => ({ descricao: "", unidade: "", quantidade: "", valor: "" });
-/** Converte as linhas digitadas em itens; devolve a mensagem do primeiro erro, se houver. */
-function lerLinhas(linhas: LinhaItem[]): { itens: ItemSolicitacao[]; erro?: string } {
-  const itens: ItemSolicitacao[] = [];
-  for (const [k, l] of linhas.entries()) {
-    const vazia = !l.descricao.trim() && !l.unidade.trim() && !l.quantidade.trim() && !l.valor.trim();
-    if (vazia) continue;
-    if (!l.descricao.trim()) return { itens, erro: `Item ${k + 1}: informe a descrição.` };
-    const quantidade = numBR(l.quantidade), valor_unitario = numBR(l.valor);
-    if (Number.isNaN(quantidade) || (quantidade != null && quantidade < 0)) return { itens, erro: `Item ${k + 1}: quantidade inválida. Use, por exemplo, 30 ou 12,5.` };
-    if (Number.isNaN(valor_unitario) || (valor_unitario != null && valor_unitario < 0)) return { itens, erro: `Item ${k + 1}: valor unitário inválido. Use, por exemplo, 1.250,00.` };
-    itens.push({ descricao: l.descricao.trim(), unidade: l.unidade.trim(), quantidade, valor_unitario });
-  }
-  return { itens };
-}
-
 interface Props {
   processo: {
     id: number;
@@ -44,6 +29,7 @@ interface Props {
     situacao: string;
     pode: { editar: boolean };
     solicitacoes: Solicitacao[];
+    orcamentos: OrcamentoLido[];
     secretarias: string[];
   };
   recarregar: () => Promise<unknown>;
@@ -74,6 +60,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [justificativa, setJustificativa] = useState("");
   const [linhas, setLinhas] = useState<LinhaItem[]>([linhaVazia()]);
   const [arquivo, setArquivo] = useState<File | null>(null);
+  const [cotando, setCotando] = useState(false);
   const [ocupado, setOcupado] = useState<"salvar" | "ia" | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; erro?: boolean } | null>(null);
   const seletor = useRef<HTMLInputElement>(null);
@@ -84,13 +71,12 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const areaEscolhida = secretaria.trim();
   const titular = cadastro?.area === areaEscolhida ? cadastro.titular : null;
   const lidas = lerLinhas(linhas);
-  const itens = edicao ? [] : lidas.itens;
+  const itens = lidas.itens;
   // Mesmo caminho do servidor: o quadro de itens entra no texto e os campos do modelo recebem o que foi digitado.
   const base = inserirItens(descricao, itens);
-  const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: edicao ? "" : objeto, justificativa: edicao ? "" : justificativa, itens });
+  const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: objeto, justificativa, itens });
   const faltantes = pendencias(base).filter((x) => !automaticos[x.i]);
   const previa = aplicarPendencias(base, { ...automaticos, ...valores }).texto;
-  const total = totalDosItens(itens);
 
   useEffect(() => {
     let ativo = true;
@@ -134,6 +120,9 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setEdicao(s);
     setSecretaria(s.secretaria);
     setReferencia(s.referencia);
+    setObjeto(s.objeto);
+    setJustificativa(s.justificativa);
+    setLinhas(linhasDosItens(s.itens));
     setArquivo(null);
     trocarTexto(s.descricao);
     setModo("manual");
@@ -161,13 +150,14 @@ export function Solicitacoes({ processo, recarregar }: Props) {
 
   const salvar = async (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
+    if (cotando) return;
     setOcupado("salvar");
     setAviso(null);
     try {
       if (modo === "anexo" && !arquivo) throw new Error("Selecione o documento da solicitação.");
-      if (!edicao && lidas.erro) throw new Error(lidas.erro);
+      if (lidas.erro) throw new Error(lidas.erro);
       const texto = aplicarPendencias(base, valores).texto;
-      if (edicao) await api.put(`${caminho}/${edicao.id}`, { descricao: texto, anterior: edicao.descricao });
+      if (edicao) await api.put(`${caminho}/${edicao.id}`, { descricao: texto, anterior: edicao.descricao, itens, itens_anteriores: edicao.itens });
       else {
         const dados = montarDados(texto);
         dados.set("chave_envio", chave);
@@ -207,7 +197,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       {areas.length > 0 && <p><strong>Áreas requisitantes</strong> · {areas.join("; ")}</p>}
       {podeAdicionar && !edicao && <div className="tools">
         {(Object.entries(modos) as [Modo, string][]).map(([k, rotulo]) => (
-          <button key={k} type="button" className={modo === k ? "btn pri" : "btn"} aria-pressed={modo === k} disabled={!!ocupado} onClick={() => abrir(k)}>{rotulo}</button>
+          <button key={k} type="button" className={modo === k ? "btn pri" : "btn"} aria-pressed={modo === k} disabled={!!ocupado || cotando} onClick={() => abrir(k)}>{rotulo}</button>
         ))}
       </div>}
       {podeAdicionar && modo && (
@@ -229,33 +219,10 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                 <span className="small muted">Descrição resumida do que a secretaria pede, sem marca. Em branco, vale o objeto do processo.</span></label>
               <label className="wide">Justificativa
                 <textarea maxLength={8000} value={justificativa} disabled={!!ocupado} placeholder="Por que a secretaria precisa desta contratação" onChange={(e) => setJustificativa(e.target.value)} /></label>
-              <fieldset className="wide itens-sol" disabled={!!ocupado}>
-                <legend>Itens</legend>
-                <div className="tw"><table className="t">
-                  <thead><tr><th style={{ width: 36 }}>Nº</th><th>Descrição do item</th><th style={{ width: 80 }}>Un.</th><th style={{ width: 100 }} className="r">Qtd.</th><th style={{ width: 130 }} className="r">Valor unitário</th><th style={{ width: 120 }} className="r">Total</th><th /></tr></thead>
-                  <tbody>{linhas.map((l, k) => {
-                    const muda = (campo: keyof LinhaItem, v: string) => setLinhas(linhas.map((x, i) => (i === k ? { ...x, [campo]: v } : x)));
-                    const q = numBR(l.quantidade), v = numBR(l.valor);
-                    const t = q != null && v != null && !Number.isNaN(q) && !Number.isNaN(v) ? totalDoItem({ descricao: "", unidade: "", quantidade: q, valor_unitario: v }) : null;
-                    return (
-                      <tr key={k}>
-                        <td className="mono">{k + 1}</td>
-                        <td><input aria-label={`Descrição do item ${k + 1}`} maxLength={500} value={l.descricao} onChange={(e) => muda("descricao", e.target.value)} /></td>
-                        <td><input aria-label={`Unidade do item ${k + 1}`} maxLength={30} value={l.unidade} placeholder="un" onChange={(e) => muda("unidade", e.target.value)} /></td>
-                        <td><input aria-label={`Quantidade do item ${k + 1}`} inputMode="decimal" style={{ textAlign: "right" }} value={l.quantidade} onChange={(e) => muda("quantidade", e.target.value)} /></td>
-                        <td><input aria-label={`Valor unitário do item ${k + 1}`} inputMode="decimal" style={{ textAlign: "right" }} value={l.valor} placeholder="0,00" onChange={(e) => muda("valor", e.target.value)} /></td>
-                        <td className="r">{brl(t)}</td>
-                        <td className="r">{linhas.length > 1 && <button type="button" className="lnk" aria-label={`Remover item ${k + 1}`} onClick={() => setLinhas(linhas.filter((_, i) => i !== k))}>Remover</button>}</td>
-                      </tr>);
-                  })}</tbody>
-                  <tfoot><tr><td colSpan={5} className="r"><b>Total estimado</b></td><td className="r"><b>{brl(total)}</b></td><td /></tr></tfoot>
-                </table></div>
-                <div className="tools">
-                  {linhas.length < 200 && <button type="button" className="btn sm" onClick={() => setLinhas([...linhas, linhaVazia()])}>Adicionar item</button>}
-                  {lidas.erro ? <span className="small" role="alert" style={{ color: "var(--bad)" }}>{lidas.erro}</span> : <span className="small muted">Quantidade e valor podem ficar em branco se ainda não forem conhecidos. Os itens entram no documento como quadro.</span>}
-                </div>
-              </fieldset>
             </>}
+            <ItensSolicitacao processoId={processo.id} linhas={linhas} setLinhas={setLinhas}
+              orcamentos={processo.orcamentos} recarregar={recarregar} ia={ia.disponivel} ocupado={!!ocupado} setCotando={setCotando} />
+            {lidas.erro && <p className="wide small muted">{lidas.erro}</p>}
             <label className="wide">{modo === "anexo" ? "Descrição complementar (opcional)" : "Descrição da solicitação"}
               <textarea required={modo !== "anexo" && !edicao?.nome_arquivo} maxLength={LIMITE_SOLICITACAO} value={descricao} disabled={!!ocupado}
                 placeholder={modo === "ia" ? "Informe a necessidade, as quantidades e os prazos que já conhece." : undefined}
@@ -278,7 +245,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
           </div>}
           {modo === "ia" && <div className="stack">
             {ia.disponivel ? <>
-              <div><button className="btn" type="button" disabled={!!ocupado} onClick={gerar}>{ocupado === "ia" ? "Gerando rascunho…" : "Gerar rascunho com IA"}</button></div>
+              <div><button className="btn" type="button" disabled={!!ocupado || cotando} onClick={gerar}>{ocupado === "ia" ? "Gerando rascunho…" : "Gerar rascunho com IA"}</button></div>
               <span className="small muted">Ao gerar, o Licita usa a descrição e envia o documento selecionado ao provedor de IA.</span>
             </> : <p className="note">IA indisponível no servidor. Você pode preencher e salvar a solicitação nesta tela.</p>}
           </div>}
@@ -301,8 +268,8 @@ export function Solicitacoes({ processo, recarregar }: Props) {
             })}
           </div>}
           <div className="tools">
-            <button className="btn pri" disabled={!!ocupado}>{ocupado === "salvar" ? "Salvando…" : "Salvar solicitação"}</button>
-            <button className="btn" type="button" disabled={!!ocupado} onClick={() => { fechar(); setAviso(null); }}>Cancelar</button>
+            <button className="btn pri" disabled={!!ocupado || cotando}>{ocupado === "salvar" ? "Salvando…" : "Salvar solicitação"}</button>
+            <button className="btn" type="button" disabled={!!ocupado || cotando} onClick={() => { fechar(); setAviso(null); }}>Cancelar</button>
           </div>
         </form>
       )}
@@ -322,8 +289,17 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                 <td>{s.secretaria}</td>
                 <td>{s.referencia && <strong>{s.referencia}</strong>}
                   {s.objeto && <div>{s.objeto}</div>}
-                  {s.itens?.length > 0 && <div className="small muted">{s.itens.length} {s.itens.length === 1 ? "item" : "itens"}{totalDosItens(s.itens) != null ? ` · total estimado ${brl(totalDosItens(s.itens))}` : ""}</div>}
+                  {s.itens?.length > 0 && <div className="small muted">{s.itens.length} {s.itens.length === 1 ? "item" : "itens"}{totalDosItens(s.itens) != null ? ` · ${s.itens.some((i) => totalDoItem(i) == null) ? "subtotal dos itens com valor" : "total estimado"} ${brl(totalDosItens(s.itens))}` : ""}</div>}
                   {s.descricao && <details><summary>Ver solicitação</summary><Folha texto={s.descricao} /></details>}
+                  {s.itens.some((item) => item.cotacoes?.length) && <details><summary>Cotações por item</summary>
+                    <ul>{s.itens.filter((item) => item.cotacoes?.length).map((item, i) => <li key={i}>{item.descricao}
+                      <ul>{item.cotacoes?.map((c) => <li key={c.orcamento_id}>
+                        <a href={`/api/processos/${processo.id}/orcamentos/${c.orcamento_id}/arquivo`}>{c.fornecedor || "Orçamento anexado"}</a> · {brl(c.valor_unitario)}
+                        {c.fonte && c.fonte !== "fornecedor" && <> · {FONTES_COTACAO[c.fonte]}</>}
+                        {c.link && <> · <a href={c.link} target="_blank" rel="noreferrer">Abrir fonte</a></>}
+                      </li>)}</ul>
+                    </li>)}</ul>
+                  </details>}
                   <div className="tools">
                     {podeAdicionar && <button type="button" className="btn sm" disabled={!!ocupado || !!modo} onClick={() => editar(s)}>Editar</button>}
                     {s.descricao && <a className="btn sm" href={`/api${caminho}/${s.id}/docx${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>Baixar Word</a>}

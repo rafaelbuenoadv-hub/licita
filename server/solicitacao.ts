@@ -13,7 +13,7 @@ export async function preencherSolicitacao(
   dados: { secretaria: string; referencia: string; descricao: string; objeto_solicitacao?: string; justificativa?: string; itens?: ItemSolicitacao[] },
 ) {
   // O quadro de itens entra antes de preencher os campos: assim um modelo com [[Itens]] não recebe o quadro duas vezes.
-  const base = inserirItens(dados.descricao, dados.itens ?? []);
+  const base = dados.itens === undefined ? dados.descricao : inserirItens(dados.descricao, dados.itens);
   if (!base.includes("[[")) return base;
   const procurar = await localizadorDeTitulares(processo.orgao_id);
   const titular = procurar(dados.secretaria);
