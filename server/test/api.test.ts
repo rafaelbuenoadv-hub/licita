@@ -1011,17 +1011,16 @@ test("preços lançados aparecem na solicitação e entram na estimativa após o
   assert.equal(antes.itens[0].valor_unitario, null);
   const rota = `${caminho}/${salva.dados.id}`;
   const previa = documentoDaSolicitacao("# SOLICITAÇÃO\nRelação: [[Itens]]", antes.itens);
-  assert.match(previa, /^# SOLICITAÇÃO\nRelação:\n\n\| Item \| Descrição/);
-  assert.match(previa, /Papelaria A \| R\$\s12,50 \| Anexo pendente/);
-  assert.match(previa, /Papelaria B \| R\$\s18,00 \| Anexo pendente/);
-  assert.doesNotMatch(previa, /Total estimado|\[\[Itens\]\]/);
+  assert.match(previa, /^# SOLICITAÇÃO\nRelação:\n\n\| Item \| Descrição .*Cotações por fornecedor/);
+  assert.match(previa, /Resma de papel .*Papelaria A — R\$\s12,50 \(anexo pendente\) • Papelaria B — R\$\s18,00 \(anexo pendente\)/);
+  assert.doesNotMatch(previa, /Total estimado|\[\[Itens\]\]|Orçamentos por item/);
+  assert.equal(documentoDaSolicitacao(previa, antes.itens), previa);
 
   const wordAntes = await lic.get(`${rota}/docx`);
   assert.equal(wordAntes.status, 200);
   const textoAntes = await extrairTexto("solicitacao.docx", wordAntes.dados);
-  assert.match(textoAntes, /Papelaria A \| R\$\s12,50 \| Anexo pendente/);
-  assert.doesNotMatch(textoAntes, /Total estimado/);
-
+  assert.match(textoAntes, /Resma de papel .*Papelaria A — R\$\s12,50 \(anexo pendente\)/);
+  assert.doesNotMatch(textoAntes, /Total estimado|Orçamentos por item/);
 
   const form = new FormData();
   form.set("arquivo", new Blob(["Proposta A para resmas de papel"]), "proposta-a.txt");
@@ -1041,10 +1040,10 @@ test("preços lançados aparecem na solicitação e entram na estimativa após o
   const wordDepois = await lic.get(`${rota}/docx`);
   assert.equal(wordDepois.status, 200);
   const textoDepois = await extrairTexto("solicitacao.docx", wordDepois.dados);
-  assert.match(textoDepois, /Resma de papel .*R\$\s12,50 .*R\$\s50,00/);
-  assert.match(textoDepois, /Papelaria A \| R\$\s12,50 \| Anexo vinculado/);
-  assert.match(textoDepois, /Papelaria B \| R\$\s18,00 \| Anexo pendente/);
-  assert.match(textoDepois, /Orçamentos por item[\s\S]+Titular/);
+  assert.match(textoDepois, /Resma de papel .*R\$\s12,50 .*R\$\s50,00 .*Papelaria A — R\$\s12,50 \(anexo vinculado\) • Papelaria B — R\$\s18,00 \(anexo pendente\)/);
+  assert.match(textoDepois, /## Itens solicitados|Itens solicitados/);
+  assert.match(textoDepois, /Total estimado .*R\$\s50,00[\s\S]+Titular/);
+  assert.doesNotMatch(textoDepois, /Orçamentos por item/);
   const pdf = await lic.get(`${rota}/pdf`);
   assert.equal(pdf.status, 200);
   assert.equal(pdf.tipo, "application/pdf");
