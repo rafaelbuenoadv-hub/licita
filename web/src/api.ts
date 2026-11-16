@@ -23,7 +23,7 @@ export const api = {
 };
 
 /** Lê uma resposta NDJSON da IA: chama onTexto com o texto acumulado; devolve a linha final. */
-export async function fluxo(url: string, corpo: unknown, onTexto: (t: string) => void, sinal?: AbortSignal) {
+export async function fluxo(url: string, corpo: unknown, onTexto: (t: string) => void, sinal?: AbortSignal, onStatus?: (s: string) => void) {
   const r = await fetch("/api" + url, {
     method: "POST", headers: { "x-licita": "1", "content-type": "application/json" }, body: JSON.stringify(corpo), signal: sinal,
   });
@@ -43,7 +43,7 @@ export async function fluxo(url: string, corpo: unknown, onTexto: (t: string) =>
       const linha = buf.slice(0, k); buf = buf.slice(k + 1);
       if (!linha.trim()) continue;
       const o = JSON.parse(linha);
-      if (o.d) { texto += o.d; onTexto(texto); } else fim = o;
+      if (o.d) { texto += o.d; onTexto(texto); } else if (typeof o.s === "string") onStatus?.(o.s); else fim = o;
     }
   }
   if (!fim) throw new ErroApi(502, "A resposta da IA foi interrompida.");

@@ -190,6 +190,11 @@ table.t tr.com-leitura td{border-bottom:0;padding-bottom:2px} .lido{margin:0} .l
 @media (max-width:720px){ .agente-nome{display:none} .agente-icone{padding:12px} }
 @media print{ .agente-icone,.agente-dica{display:none} }
 
+.pesquisa{border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--bg)}
+.pesquisa>summary{cursor:pointer;font-weight:600;font-size:14px} .pesquisa[open]>summary{margin-bottom:8px}
+.pesquisa .fontes{margin:6px 0 10px;padding-left:18px;display:flex;flex-direction:column;gap:3px;font-size:13.5px;overflow-wrap:anywhere}
+.pesquisa .corpo{max-height:50vh;overflow:auto;max-width:none}
+
 /* mensagens */
 .lateral a .conta{margin-left:8px;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--accent);color:var(--accent-ink)}
 .caixa{display:grid;grid-template-columns:minmax(260px,380px) minmax(0,1fr);gap:16px;align-items:start}

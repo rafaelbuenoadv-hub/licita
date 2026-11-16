@@ -10,6 +10,10 @@ const pedidos: { headers: http.IncomingHttpHeaders; body: any }[] = [];
 let respostaEstruturada: object = {};
 let textoStream = "";
 let pararPor = "end_turn";
+// Pedidos com ferramentas de pesquisa na web: texto próprio, citações, pausas (pause_turn) e falha simulada.
+let textoPesquisa = "";
+let pausasDaPesquisa = 0;
+let pesquisaFalha = false;
 
 const falso = http.createServer((req, res) => {
   let raw = "";
@@ -26,9 +30,38 @@ const falso = http.createServer((req, res) => {
       res.end(JSON.stringify(msg([{ type: "text", text: JSON.stringify(respostaEstruturada) }], pararPor)));
       return;
     }
+    const pesquisa = Array.isArray(body.tools) && body.tools.some((t: any) => t.type === "web_search_20260209");
+    if (pesquisa && pesquisaFalha) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "web search is not enabled for this organization" } }));
+      return;
+    }
     res.writeHead(200, { "content-type": "text/event-stream" });
     const ev = (t: string, d: object) => res.write(`event: ${t}\ndata: ${JSON.stringify({ type: t, ...d })}\n\n`);
     ev("message_start", { message: msg([], null as any) });
+    if (pesquisa) {
+      // Uma busca, o resultado dela e o texto, com uma citação; na primeira volta a resposta pode vir pausada.
+      const pausa = pausasDaPesquisa > 0;
+      if (pausa) pausasDaPesquisa--;
+      ev("content_block_start", { index: 0, content_block: { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: {} } });
+      ev("content_block_delta", { index: 0, delta: { type: "input_json_delta", partial_json: '{"query":"edital gavetário"}' } });
+      ev("content_block_stop", { index: 0 });
+      ev("content_block_start", { index: 1, content_block: { type: "web_search_tool_result", tool_use_id: "srvtoolu_1", content: [
+        { type: "web_search_result", url: "https://pncp.gov.br/app/editais/1", title: "Edital 12/2026 - Município X", encrypted_content: "x", page_age: null },
+        { type: "web_search_result", url: "https://exemplo.com/blog", title: "Blog não citado", encrypted_content: "y", page_age: null },
+      ] } });
+      ev("content_block_stop", { index: 1 });
+      if (!pausa) {
+        ev("content_block_start", { index: 2, content_block: { type: "text", text: "", citations: [] } });
+        ev("content_block_delta", { index: 2, delta: { type: "citations_delta", citation: { type: "web_search_result_location", url: "https://pncp.gov.br/app/editais/1", title: "Edital 12/2026 - Município X", cited_text: "gavetário", encrypted_index: "i" } } });
+        for (const parte of textoPesquisa.match(/[\s\S]{1,40}/g) ?? []) ev("content_block_delta", { index: 2, delta: { type: "text_delta", text: parte } });
+        ev("content_block_stop", { index: 2 });
+      }
+      ev("message_delta", { delta: { stop_reason: pausa ? "pause_turn" : "end_turn", stop_sequence: null }, usage: { output_tokens: 10 } });
+      ev("message_stop", {});
+      res.end();
+      return;
+    }
     ev("content_block_start", { index: 0, content_block: { type: "text", text: "" } });
     for (const parte of textoStream.match(/[\s\S]{1,40}/g) ?? []) ev("content_block_delta", { index: 0, delta: { type: "text_delta", text: parte } });
     ev("content_block_stop", { index: 0 });
@@ -470,4 +503,76 @@ test("uma solicitação reúne mais de cinco documentos e a IA consulta os novos
   assert.match(contexto, /apoio-9.txt\nJustificativa independente 9/);
   assert.equal((await api("PUT", `${rota}/${id}`, { ...edicao, anterior: "", descricao: "" })).status, 200);
   assert.equal((await (await api("GET", caminho)).json()).solicitacoes[0].apoios.length, 9);
+});
+
+test("redigir com pesquisa: busca editais e legislação, guarda o dossiê com as fontes e redige com a fundamentação", async () => {
+  const c = await api("POST", "/api/processos", { objeto: "Construção de gavetário no cemitério municipal", tipo: "obra", via: "dispensa", ano: 2026, requisitante: "Obras" });
+  const id = ((await c.json()) as any).id;
+  textoStream = "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA\n## 1. Objeto\nGavetário (art. 72, I, da Lei nº 14.133/2021).";
+  textoPesquisa = "Vou consultar o PNCP.\nDOSSIÊ DE PESQUISA\nA) EDITAIS E PEÇAS SEMELHANTES\n- Município X, PR, Dispensa 12/2026: exige atestado de capacidade técnica.\nB) LEGISLAÇÃO E ENTENDIMENTOS VIGENTES\n- Decreto nº 12.807/2025: atualiza os valores do art. 75.";
+  pausasDaPesquisa = 1;
+  const antes = pedidos.length;
+  const r = await api("POST", `/api/processos/${id}/ia/redigir`, { etapa: "dfd", pesquisar: true, orientacao: "priorizar municípios do Paraná" });
+  const linhas = (await r.text()).trim().split("\n").map((l) => JSON.parse(l));
+  const fim = linhas.at(-1);
+  assert.equal(fim.fim, true, JSON.stringify(fim));
+  assert.equal(fim.aviso, "");
+  // Andamento informado à tela: pesquisa, busca na web e redação.
+  const status = linhas.filter((l) => l.s).map((l) => l.s);
+  assert.match(status[0], /Pesquisando editais publicados/);
+  assert.ok(status.includes("Pesquisando na web…"));
+  assert.match(status.at(-1), /Redigindo a minuta com a fundamentação/);
+  assert.equal(linhas.filter((l) => l.d).map((l) => l.d).join(""), textoStream);
+
+  // Três pedidos: pesquisa, continuação da pesquisa pausada e redação.
+  const feitos = pedidos.slice(antes).map((x) => x.body);
+  assert.equal(feitos.length, 3);
+  assert.deepEqual(feitos[0].tools.map((t: any) => [t.type, t.name]), [["web_search_20260209", "web_search"], ["web_fetch_20260209", "web_fetch"]]);
+  assert.ok(feitos[0].tools.every((t: any) => t.max_uses > 0));
+  assert.match(feitos[0].messages[0].content, /Portal Nacional de Contratações Públicas \(pncp\.gov\.br\)/);
+  assert.match(feitos[0].messages[0].content, /Construção de gavetário no cemitério municipal/);
+  assert.match(feitos[0].messages[0].content, /priorizar municípios do Paraná/);
+  // A continuação reenvia o pedido e a resposta pausada, sem mensagem nova do usuário.
+  assert.deepEqual(feitos[1].messages.map((m: any) => m.role), ["user", "assistant"]);
+  assert.equal(feitos[1].messages[1].content[0].type, "server_tool_use");
+  // A redação não leva ferramentas e recebe o dossiê, as fontes e a regra de fundamentação.
+  assert.equal(feitos[2].tools, undefined);
+  const redacao = feitos[2].messages[0].content as string;
+  assert.match(redacao, /PESQUISA FEITA EM \d\d\/\d\d\/\d{4}/);
+  assert.match(redacao, /Dispensa 12\/2026: exige atestado de capacidade técnica/);
+  assert.match(redacao, /- Edital 12\/2026 - Município X: https:\/\/pncp\.gov\.br\/app\/editais\/1/);
+  assert.match(redacao, /FUNDAMENTAÇÃO \(obrigatória em toda a minuta\)/);
+  assert.ok(!redacao.includes("Vou consultar o PNCP"), "a narração das buscas não entra no dossiê");
+  assert.ok(!redacao.includes('"Fontes consultadas"'), "no DFD as fontes ficam só no dossiê");
+
+  const m: any = await (await api("GET", `/api/processos/${id}/minutas/dfd`)).json();
+  assert.match(m.pesquisa.texto, /^DOSSIÊ DE PESQUISA\nA\) EDITAIS/);
+  assert.deepEqual(m.pesquisa.fontes, [{ url: "https://pncp.gov.br/app/editais/1", titulo: "Edital 12/2026 - Município X" }]);
+  assert.equal(m.pesquisa.autor, "Req");
+
+  // Sem marcar a pesquisa, a redação reaproveita o dossiê guardado e não chama as ferramentas.
+  const a2 = pedidos.length;
+  await (await api("POST", `/api/processos/${id}/ia/redigir`, { etapa: "dfd" })).text();
+  assert.equal(pedidos.length - a2, 1);
+  assert.match(pedidos.at(-1)!.body.messages[0].content, /PESQUISA FEITA EM/);
+});
+
+test("redigir com pesquisa: se a pesquisa falha, a minuta sai assim mesmo e a tela é avisada", async () => {
+  const c = await api("POST", "/api/processos", { objeto: "Aquisição de material de expediente", tipo: "bens", via: "dispensa", ano: 2026, requisitante: "Administração" });
+  const id = ((await c.json()) as any).id;
+  textoStream = "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA\n## 1. Objeto\nMaterial de expediente.";
+  pesquisaFalha = true;
+  try {
+    const r = await api("POST", `/api/processos/${id}/ia/redigir`, { etapa: "dfd", pesquisar: true });
+    const linhas = (await r.text()).trim().split("\n").map((l) => JSON.parse(l));
+    const fim = linhas.at(-1);
+    assert.equal(fim.fim, true, JSON.stringify(fim));
+    assert.match(fim.aviso, /A pesquisa na web não pôde ser feita .* só com os dados do processo/);
+    const redacao = pedidos.at(-1)!.body.messages[0].content as string;
+    assert.ok(!redacao.includes("PESQUISA FEITA EM"));
+    assert.match(redacao, /FUNDAMENTAÇÃO \(obrigatória em toda a minuta\)/);
+    const m: any = await (await api("GET", `/api/processos/${id}/minutas/dfd`)).json();
+    assert.equal(m.pesquisa, null);
+    assert.equal(m.vigente.origem, "ia");
+  } finally { pesquisaFalha = false; }
 });

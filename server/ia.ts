@@ -95,6 +95,56 @@ export async function gerarEstruturado<S extends z.ZodType>(esquema: S, conteudo
   return r.parsed_output as z.infer<S>;
 }
 
+export interface Fonte { url: string; titulo: string }
+
+/**
+ * Pesquisa na web com as ferramentas do servidor da API (busca e leitura de páginas) e devolve o texto final
+ * e as fontes citadas. Uma pesquisa longa pode voltar pausada (pause_turn): o pedido é reenviado para continuar.
+ */
+export async function pesquisarNaWeb(opts: { conteudo: string; sinal?: AbortSignal; onStatus?: (s: string) => void; buscas?: number; leituras?: number }) {
+  const tools: Anthropic.Beta.BetaToolUnion[] = [
+    { type: "web_search_20260209", name: "web_search", max_uses: opts.buscas ?? 8 },
+    { type: "web_fetch_20260209", name: "web_fetch", max_uses: opts.leituras ?? 6, max_content_tokens: 30000 },
+  ];
+  const pedido: Anthropic.Beta.BetaMessageParam = { role: "user", content: opts.conteudo };
+  const anterior: Anthropic.Beta.BetaContentBlock[] = [];
+  const fontes = new Map<string, Fonte>();
+  const resultados = new Map<string, Fonte>();
+  let texto = "", truncado = false;
+  for (let volta = 0; volta < 5; volta++) {
+    const stream = cliente().beta.messages.stream({
+      model: MODELO,
+      max_tokens: 32000,
+      betas: BETAS,
+      fallbacks: "default",
+      system: REGRAS,
+      output_config: { effort: "medium" },
+      tools,
+      messages: anterior.length ? [pedido, { role: "assistant", content: anterior as Anthropic.Beta.BetaContentBlockParam[] }] : [pedido],
+    }, { signal: opts.sinal });
+    for await (const ev of stream) {
+      if (ev.type === "content_block_start" && ev.content_block.type === "server_tool_use") {
+        opts.onStatus?.(ev.content_block.name === "web_fetch" ? "Lendo uma das fontes encontradas…" : "Pesquisando na web…");
+      }
+    }
+    const final = await stream.finalMessage();
+    confereRecusa(final);
+    for (const b of final.content) {
+      if (b.type === "text") {
+        texto += b.text;
+        for (const c of b.citations ?? []) if (c.type === "web_search_result_location") fontes.set(c.url, { url: c.url, titulo: c.title ?? c.url });
+      } else if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
+        for (const r of b.content) if (r.type === "web_search_result") resultados.set(r.url, { url: r.url, titulo: r.title });
+      }
+    }
+    truncado = final.stop_reason === "max_tokens";
+    if (final.stop_reason !== "pause_turn") break;
+    anterior.push(...final.content);
+  }
+  // Fontes efetivamente citadas; sem citação marcada, vale o que a busca devolveu.
+  return { texto, truncado, fontes: [...(fontes.size ? fontes : resultados).values()].slice(0, 40) };
+}
+
 /** Transcreve um PDF (inclusive digitalizado) para texto. */
 export async function textoDePdf(pdf: Buffer) {
   const { texto } = await gerarTexto({
