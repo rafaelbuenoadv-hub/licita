@@ -79,21 +79,38 @@ export function totalDosItens(itens: ItemSolicitacao[]) {
   const t = itens.map(totalDoItem).filter((x): x is number => x != null);
   return t.length ? Math.round(t.reduce((a, b) => a + b, 0) * 100) / 100 : null;
 }
+function precosCotados(item: ItemSolicitacao) {
+  return (item.cotacoes ?? []).flatMap((cotacao) => {
+    if (cotacao.valor_unitario == null) return [];
+    const fornecedor = celula(cotacao.fornecedor) || "Fornecedor a identificar";
+    const comprovante = cotacao.orcamento_id == null ? "anexo pendente" : "anexo vinculado";
+    return [`${fornecedor} — ${real(cotacao.valor_unitario)} (${comprovante})`];
+  }).join(" • ");
+}
+
+const CABECALHO_ANTERIOR = "| Item | Descrição | Un. | Qtd. | Valor unitário | Valor total |";
+const CABECALHO_COTACOES = "| Item | Descrição | Un. | Qtd. | Valor unitário estimado | Valor total |";
+const CABECALHO_ORCAMENTOS = `${CABECALHO_COTACOES} Cotações por fornecedor |`;
+
 /** Quadro de itens no formato das minutas (linhas com barras verticais). */
-export function quadroDeItens(itens: ItemSolicitacao[]) {
+export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = false) {
   if (!itens.length) return "";
   const total = totalDosItens(itens);
   const temCotacoes = itens.some((i) => i.cotacoes !== undefined);
   const parcial = temCotacoes && itens.some((i) => totalDoItem(i) == null);
+  const precos = incluirPrecosCotados ? itens.map(precosCotados) : [];
+  const temPrecos = precos.some(Boolean);
   return [
-    temCotacoes ? CABECALHO_COTACOES : CABECALHO_ANTERIOR,
-    "|---|---|---|---|---|---|",
-    ...itens.map((i, k) => `| ${k + 1} | ${celula(i.descricao)} | ${celula(i.unidade) || "—"} | ${i.quantidade == null ? "—" : numero(i.quantidade)} | ${i.valor_unitario == null ? "—" : real(i.valor_unitario)} | ${totalDoItem(i) == null ? "—" : real(totalDoItem(i)!)} |`),
-    ...(total == null ? [] : [`| | ${parcial ? "Subtotal dos itens com valor" : "Total estimado"} | | | | ${real(total)} |`]),
+    temPrecos ? CABECALHO_ORCAMENTOS : temCotacoes ? CABECALHO_COTACOES : CABECALHO_ANTERIOR,
+    temPrecos ? "|---|---|---|---|---|---|---|" : "|---|---|---|---|---|---|",
+    ...itens.map((i, k) => {
+      const subtotal = totalDoItem(i);
+      const linha = `| ${k + 1} | ${celula(i.descricao)} | ${celula(i.unidade) || "—"} | ${i.quantidade == null ? "—" : numero(i.quantidade)} | ${i.valor_unitario == null ? "—" : real(i.valor_unitario)} | ${subtotal == null ? "—" : real(subtotal)} |`;
+      return temPrecos ? `${linha} ${precos[k] || "—"} |` : linha;
+    }),
+    ...(total == null ? [] : [`| | ${parcial ? "Subtotal dos itens com valor" : "Total estimado"} | | | | ${real(total)} |${temPrecos ? " |" : ""}`]),
   ].join("\n");
 }
-const CABECALHO_ANTERIOR = "| Item | Descrição | Un. | Qtd. | Valor unitário | Valor total |";
-const CABECALHO_COTACOES = "| Item | Descrição | Un. | Qtd. | Valor unitário estimado | Valor total |";
 const TITULO_ITENS = "## Itens solicitados";
 const CAMPO_ITENS = /\[\[\s*(?:preencher:\s*)?itens(?: solicitados)?\s*\]\]/i;
 
@@ -104,14 +121,15 @@ function antesDaAssinatura(texto: string, trecho: string) {
   return [antes, trecho, depois].filter(Boolean).join("\n\n");
 }
 /** Garante o quadro de itens no texto mesmo quando o modelo do órgão não tem o campo [[Itens]]: entra antes das assinaturas. */
-export function inserirItens(texto: string, itens: ItemSolicitacao[]) {
+export function inserirItens(texto: string, itens: ItemSolicitacao[], incluirPrecosCotados = false) {
   if (!texto.trim()) return texto;
+  const quadro = quadroDeItens(itens, incluirPrecosCotados);
   const linhas = texto.split("\n");
-  const indice = linhas.findIndex((l) => [CABECALHO_ANTERIOR, CABECALHO_COTACOES].includes(l.trim()));
+  const indice = linhas.findIndex((l) => [CABECALHO_ANTERIOR, CABECALHO_COTACOES, CABECALHO_ORCAMENTOS].includes(l.trim()));
   if (indice >= 0) {
     let fim = indice + 1;
     while (fim < linhas.length && linhas[fim].trimStart().startsWith("|")) fim++;
-    linhas.splice(indice, fim - indice, quadroDeItens(itens) || "[[Itens]]");
+    linhas.splice(indice, fim - indice, quadro || "[[Itens]]");
     return linhas.join("\n");
   }
   if (!itens.length) return texto;
@@ -119,7 +137,6 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[]) {
   if (campo >= 0) {
     const [antes, depois] = linhas[campo].split(CAMPO_ITENS, 2);
     const prefixo = antes.trim();
-    const quadro = quadroDeItens(itens);
     const comQuadro = /^#{1,2}$/.test(prefixo) && !depois.trim()
       ? `${TITULO_ITENS}\n${quadro}`
       : [prefixo, quadro, depois.trim()].filter(Boolean).join("\n\n");
@@ -128,25 +145,15 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[]) {
   }
   const titulo = linhas.findIndex((l) => l.trim() === TITULO_ITENS);
   if (titulo >= 0) {
-    linhas.splice(titulo + 1, 0, quadroDeItens(itens), "");
+    linhas.splice(titulo + 1, 0, quadro, "");
     return linhas.join("\n");
   }
-  return antesDaAssinatura(texto, `${TITULO_ITENS}\n${quadroDeItens(itens)}`);
+  return antesDaAssinatura(texto, `${TITULO_ITENS}\n${quadro}`);
 }
 
-/** Acrescenta as cotações registradas a partir dos itens, para a prévia e a exportação. */
+/** Renderiza os preços cotados no quadro da prévia e dos arquivos exportados. */
 export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[]) {
-  if (!texto.trim() || !itens.length) return texto;
-  const corpo = inserirItens(texto, itens);
-  const precos = itens.flatMap((item, indice) => (item.cotacoes ?? []).flatMap((cotacao) => {
-    if (cotacao.valor_unitario == null) return [];
-    const fonte = celula(cotacao.fornecedor) || "A identificar";
-    const comprovante = cotacao.orcamento_id == null ? "Anexo pendente" : "Anexo vinculado";
-    return [`| ${indice + 1} | ${fonte} | ${real(cotacao.valor_unitario)} | ${comprovante} |`];
-  }));
-  if (!precos.length) return corpo;
-  const quadro = ["## Orçamentos por item", "| Item | Fornecedor ou fonte | Preço unitário cotado | Comprovante |", "|---|---|---|---|", ...precos].join("\n");
-  return antesDaAssinatura(corpo, quadro);
+  return itens.length ? inserirItens(texto, itens, true) : texto;
 }
 
 export function camposDaSolicitacao(texto: string, dados: {
