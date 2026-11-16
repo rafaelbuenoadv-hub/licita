@@ -1,5 +1,5 @@
 import { ASSINATURA_SOLICITACAO, LIMITE_SOLICITACAO, MODELO_SOLICITACAO } from "../../shared/solicitacao.js";
-import { compararOrcamentos, type DadosOrcamento } from "../../shared/orcamentos.js";
+import { compararOrcamentos, fornecedorNoTexto, limparNomeFornecedor, nomeFornecedorOrcamento, type DadosOrcamento } from "../../shared/orcamentos.js";
 import { modeloSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso } from "../portarias.js";
 import { Router, type Request, type Response } from "express";
@@ -79,9 +79,10 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
     }
   }
   l.push(`Observações: ${p.obs || "nenhuma"}`, "", "ANDAMENTO");
+  l.push("1. Solicitação: pedidos, itens e orçamentos das secretarias");
   ETAPAS.forEach((x, i) => {
     const its = itensDe(x, p);
-    l.push(`${i + 1}. ${x.nome}: ${its.filter((it) => c[it.id]).length} de ${its.length} itens conferidos`);
+    l.push(`${i + 2}. ${x.nome}: ${its.filter((it) => c[it.id]).length} de ${its.length} itens conferidos`);
   });
   if (solicitacao) {
     l.push("", "ABA ABERTA: Solicitação", "Ajude a registrar os pedidos das secretarias, os itens e os orçamentos. O DFD tem uma etapa própria de minuta e conferência.");
@@ -98,18 +99,18 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
     l.push("", atual ? `MINUTA ATUAL DESTA ETAPA (${nome})` : `OUTRA PEÇA DO PROCESSO: ${nome}`, corta(m.texto));
   }
   for (const a of anexos) l.push("", `DOCUMENTO DE APOIO ANEXADO: ${a.nome}`, corta(a.texto));
-  const orcs = await q("select id, fornecedor, valor, nome, texto, dados from orcamentos where processo_id=$1 order by id", [p.id]);
-  if (orcs.length) l.push("", "ORÇAMENTOS ANEXADOS À SOLICITAÇÃO", ...orcs.map((o, i) => `${i + 1}. ${o.fornecedor} — ${moeda(o.valor)} — arquivo: ${o.nome}`));
+  const orcs = await q("select id, fornecedor, fornecedor_manual, valor, nome, texto, dados from orcamentos where processo_id=$1 order by id", [p.id]);
+  if (orcs.length) l.push("", "ORÇAMENTOS ANEXADOS À SOLICITAÇÃO", ...orcs.map((o, i) => `${i + 1}. ${nomeFornecedorOrcamento(o) || "Fornecedor a informar"} — ${moeda(o.valor)} — arquivo: ${o.nome}`));
   for (const o of orcs) {
     const d = o.dados as DadosOrcamento | null;
     if (d) {
-      l.push("", `ORÇAMENTO LIDO E CONFERIDO NO SISTEMA: ${d.fornecedor ?? o.fornecedor} (${o.nome})`,
+      l.push("", `ORÇAMENTO LIDO E CONFERIDO NO SISTEMA: ${nomeFornecedorOrcamento(o) || "Fornecedor a informar"} (${o.nome})`,
         `CNPJ/CPF: ${d.cnpj ?? "não consta"} · Data: ${d.data ?? "não consta"} · Validade: ${d.validade ?? "não consta"} · Total: ${moeda(d.valor_total)} · Frete: ${d.frete} · Instalação: ${d.instalacao} · Prazo de entrega: ${d.prazo_entrega ?? "não consta"}`,
         ...d.itens.map((it, k) => `  ${k + 1}. ${it.descricao} — ${it.quantidade ?? "?"} ${it.unidade ?? ""} × ${moeda(it.valor_unitario)} = ${moeda(it.valor_total)}`));
       if (d.observacoes) l.push(`  Observações: ${d.observacoes}`);
     } else if (o.texto) l.push("", `TEXTO DO ORÇAMENTO DE ${o.fornecedor} (${o.nome})`, corta(o.texto));
   }
-  const alertas = compararOrcamentos(orcs.map((o) => ({ id: o.id, nome: o.nome, dados: o.dados })), new Date().toISOString().slice(0, 10));
+  const alertas = compararOrcamentos(orcs, new Date().toISOString().slice(0, 10));
   if (alertas.length) l.push("", "DIFERENÇAS ENTRE OS ORÇAMENTOS (considere na formação de preços)", ...alertas.map((a) => `- ${a.texto}`));
   return { texto: l.join("\n"), etapa: e, checks: c, cadastro };
 }
@@ -396,7 +397,7 @@ Referências: ${JSON.stringify(referencias.map(({ nome, resumo }, indice) => ({ 
     const visual = ext === "pdf" || ext === "jpg" || ext === "jpeg" || ext === "png";
     const instrucao = `TAREFA
 Leia o orçamento de fornecedor ${visual ? "no arquivo anexo" : "no TEXTO abaixo"} e extraia os dados para a pesquisa de preços.
-- fornecedor: razão social ou nome de quem assina a proposta; cnpj: CNPJ ou CPF como está escrito;
+- fornecedor: razão social ou nome comercial do emissor da proposta. Procure no cabeçalho, na logomarca legível, no bloco do emitente e na assinatura. Diferencie o emissor do destinatário/comprador. Use o nome que acompanha o CNPJ/CPF do emissor e nunca o nome do comprador, órgão destinatário ou apenas do contato. Se não houver identificação clara, devolva null. cnpj: CNPJ ou CPF do emissor como está escrito;
 - data e validade: no formato AAAA-MM-DD. Se a validade vier em dias ("válida por 30 dias"), some à data do orçamento;
 - itens: um por linha cotada, com descrição, unidade, quantidade, valor unitário e valor total, em reais;
 - valor_total: total geral da proposta;
@@ -417,14 +418,15 @@ Use null para o que não constar. Não calcule nem deduza valor que não esteja 
     try {
       const lido = await gerarEstruturado(esquema, conteudo, "medium");
       const dataOk = (d: string | null) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null);
-      const dados: DadosOrcamento = { ...lido, data: dataOk(lido.data), validade: dataOk(lido.validade), itens: lido.itens.slice(0, 300) };
+      const fornecedor = fornecedorNoTexto(o.texto) || limparNomeFornecedor(lido.fornecedor) || null;
+      const dados: DadosOrcamento = { ...lido, fornecedor, data: dataOk(lido.data), validade: dataOk(lido.validade), itens: lido.itens.slice(0, 300) };
       // O valor digitado pelo servidor prevalece; a leitura só preenche o que estava vazio.
       const valor = o.valor ?? (dados.valor_total != null && dados.valor_total >= 0 ? dados.valor_total : null);
-      const salvo = await q1("update orcamentos set dados=$1, lido_em=now(), valor=coalesce(valor,$2), fornecedor=coalesce(nullif($3,''), fornecedor) where id=$4 and processo_id=$5 returning valor",
+      const salvo = await q1("update orcamentos set dados=$1, lido_em=now(), valor=coalesce(valor,$2), fornecedor=coalesce(nullif($3,''), fornecedor) where id=$4 and processo_id=$5 returning id,nome,valor,fornecedor,fornecedor_manual,dados",
         [JSON.stringify(dados), valor, (dados.fornecedor ?? "").trim().slice(0, 200), o.id, p.id]);
       if (!salvo) throw new ErroHttp(404, "Orçamento não encontrado.");
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.lido", detalhe: { nome: o.nome, itens: dados.itens.length } });
-      res.json({ dados, valor: salvo.valor });
+      res.json({ dados: { ...dados, fornecedor: nomeFornecedorOrcamento(salvo) || null }, valor: salvo.valor });
     } catch (e) {
       throw traduzErroIA(e);
     }

@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { compararOrcamentos, type DadosOrcamento } from "../../../shared/orcamentos";
+import { compararOrcamentos, nomeFornecedorOrcamento, type DadosOrcamento } from "../../../shared/orcamentos";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, brl, dataBR, dataHora, fluxo, fmtNum, numBR } from "../api";
 import { Folha } from "../comp/Folha";
@@ -11,7 +11,7 @@ import { Solicitacoes } from "./Solicitacoes";
 const ACOES: Record<string, string> = {
   "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação", "processo.numerado": "gerou o nº do processo e do procedimento", "etapa.concluida": "conferiu e concluiu a etapa",
   "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA",
-  "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.lido": "pediu a leitura de orçamento à IA", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
+  "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.lido": "pediu a leitura de orçamento à IA", "orcamento.fornecedor": "identificou o fornecedor do orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
   "minuta.titulares": "incluiu os titulares no DFD",
   "solicitacao.incluida": "adicionou solicitação de secretaria", "solicitacao.alterada": "editou solicitação de secretaria",
   "ia.sugestoes": "pediu sugestões à IA", "contrato.criado": "registrou contrato",
@@ -68,7 +68,7 @@ export function ProcessoPg() {
         <nav className="panel trilha" aria-label="Solicitação e etapas do processo">
           <button type="button" className={`et${mostrarSolicitacao ? " sel" : ""}`}
             aria-current={mostrarSolicitacao ? "page" : undefined} onClick={() => irPara("solicitacao")}>
-            <span className="tx"><span className="nm">Solicitação</span><br /><span className="st">Pedidos, itens e orçamentos</span></span>
+            <span className="n">1</span><span className="tx"><span className="nm">Solicitação</span><br /><span className="st">Pedidos, itens e orçamentos</span></span>
           </button>
           {ETAPAS.map((x, i) => {
             const f = feita(x, p, checks), l = liberada(i, p, checks);
@@ -76,7 +76,7 @@ export function ProcessoPg() {
             const selecionada = !mostrarSolicitacao && i === ix;
             return (
               <button key={x.id} type="button" className={`et ${c}${selecionada ? " sel" : ""}`} onClick={() => irPara(x.id)} title={x.nome} aria-current={selecionada ? "step" : undefined}>
-                <span className="n">{f ? "✓" : i + 1}</span>
+                <span className="n">{i + 2}</span>
                 <span className="tx"><span className="nm">{x.nome}</span><br /><span className="st">{f ? "Concluída" : l ? `${feitos(x, p, checks)} de ${itensDe(x, p).length} itens` : "Bloqueada"}</span></span>
               </button>);
           })}
@@ -84,7 +84,7 @@ export function ProcessoPg() {
         {mostrarSolicitacao ? (
           <section className="panel" style={{ minWidth: 0 }} aria-labelledby="aba-solicitacao">
             <div className="sec row">
-              <h2 id="aba-solicitacao">Solicitação</h2>
+              <div><span className="lbl">Etapa 1 de {ETAPAS.length + 1}</span><h2 id="aba-solicitacao">Solicitação</h2></div>
               <button className="btn" type="button" onClick={() => irPara("dfd")}>Abrir DFD →</button>
             </div>
             <Solicitacoes key={p.id} processo={p} recarregar={carregar} />
@@ -212,7 +212,7 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
   return (
     <section className="panel" style={{ minWidth: 0 }}>
       <div className="sec">
-        <div className="row"><div><span className="lbl">Etapa {ix + 1} de {ETAPAS.length}</span><h2>{e.nome}</h2></div>
+        <div className="row"><div><span className="lbl">Etapa {ix + 2} de {ETAPAS.length + 1}</span><h2>{e.nome}</h2></div>
           <span className={"pill " + (ok ? "ok" : lib ? "cur" : "")}>{ok ? "Concluída" : lib ? `${nf} de ${its.length} itens` : "Bloqueada"}</span></div>
         {e.doc && <p className="small muted">Documento da etapa: {e.doc}</p>}
         <p style={{ maxWidth: "72ch" }}>{e.oque}</p>
@@ -264,7 +264,7 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
   const [lendo, setLendo] = useState<number[]>([]);
   const lista: any[] = p.orcamentos ?? [];
   const legivel = (nome: string) => /\.(pdf|jpe?g|png|docx|xlsx|txt|csv)$/i.test(nome);
-  const alertas = compararOrcamentos(lista.map((o) => ({ id: o.id, nome: o.nome, dados: o.dados as DadosOrcamento | null })), new Date().toLocaleDateString("sv-SE"));
+  const alertas = compararOrcamentos(lista, new Date().toLocaleDateString("sv-SE"));
   /** Pede à IA a leitura de cada orçamento, um por vez, e mostra o que não pôde ser lido. */
   const ler = async (ids: number[]) => {
     const falhas: string[] = [];
@@ -287,20 +287,30 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
     try { await api.put(`/processos/${p.id}/orcamentos/${o.id}`, { valor: v }); await recarregar(); }
     catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
   };
+  const gravarFornecedor = async (o: { id: number; nome: string; fornecedor?: string; fornecedor_manual?: string | null; dados: DadosOrcamento | null }, texto: string) => {
+    const fornecedor = texto.trim();
+    if (fornecedor === nomeFornecedorOrcamento(o)) return;
+    try { await api.put(`/processos/${p.id}/orcamentos/${o.id}`, { fornecedor }); await recarregar(); }
+    catch (e) { setAviso({ t: e instanceof Error ? e.message : "Não foi possível salvar o fornecedor.", tipo: "bad" }); }
+  };
   const inclusao = (v: string) => v === "incluso" ? "incluído" : v === "nao_incluso" ? "não incluído" : "não informado";
   return (
     <div className="sec"><span className="lbl">Orçamentos</span>
       <p className="small muted">Consulte as propostas do processo e registre as cotações na Solicitação.</p>
       {lista.length === 0 ? <p className="muted">Nenhum orçamento anexado.</p> :
         <div className="tw"><table className="t">
-          <thead><tr><th>Orçamento</th><th className="r">Valor (R$)</th><th /></tr></thead>
+          <thead><tr><th>Orçamento</th><th>Fornecedor</th><th className="r">Valor (R$)</th><th /></tr></thead>
           <tbody>{lista.map((o) => {
             const d = o.dados as DadosOrcamento | null;
+            const fornecedor = nomeFornecedorOrcamento(o);
             return (<Fragment key={o.id}>
             <tr className={d ? "com-leitura" : ""}>
               <td><a href={`/api/processos/${p.id}/orcamentos/${o.id}/arquivo`} download>{o.nome}</a>
                 <div className="small muted">{o.usuario ?? "—"} · {dataHora(o.criado_em)}</div>
                 {lendo.includes(o.id) && <div className="small" role="status">A IA está lendo este orçamento…</div>}</td>
+              <td>{pode ? <input key={`${o.id}-${fornecedor}`} aria-label={`Fornecedor do orçamento ${o.nome}`} maxLength={200}
+                defaultValue={fornecedor} placeholder="Identifique o fornecedor" onBlur={(e) => gravarFornecedor(o, e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} /> : (fornecedor || "A identificar")}</td>
               <td className="r" style={{ width: 150 }}>{pode
                 ? <input key={`${o.id}-${o.valor}`} aria-label={`Valor do orçamento ${o.nome}`} defaultValue={fmtNum(o.valor)} placeholder="informar" inputMode="decimal" style={{ textAlign: "right" }}
                     onBlur={(e) => gravarValor(o, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
@@ -308,9 +318,9 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
               <td className="r">{pode && <div className="stack" style={{ gap: 4, alignItems: "flex-end" }}>
                 {ia.disponivel && legivel(o.nome) && <button className="lnk" disabled={lendo.length > 0} onClick={() => ler([o.id])}>{d ? "Ler de novo" : "Ler com IA"}</button>}
                 <button className="lnk" onClick={() => remover(o)}>Remover</button></div>}</td></tr>
-            {d && <tr><td colSpan={3}>
+            {d && <tr><td colSpan={4}>
                 <details className="lido">
-                  <summary>{d.fornecedor ?? "Fornecedor não identificado"}{d.cnpj ? ` · ${d.cnpj}` : ""}{d.data ? ` · ${dataBR(d.data)}` : ""} · {d.itens.length} {d.itens.length === 1 ? "item" : "itens"}</summary>
+                  <summary>{fornecedor || "Fornecedor a identificar"}{d.cnpj ? ` · ${d.cnpj}` : ""}{d.data ? ` · ${dataBR(d.data)}` : ""} · {d.itens.length} {d.itens.length === 1 ? "item" : "itens"}</summary>
                   <p className="small muted">Lido pela IA em {dataHora(o.lido_em)}. Validade: {d.validade ? dataBR(d.validade) : "não consta"} · Frete: {inclusao(d.frete)} · Instalação: {inclusao(d.instalacao)}{d.prazo_entrega ? ` · Entrega: ${d.prazo_entrega}` : ""}</p>
                   {d.itens.length > 0 && <div className="tw"><table className="t">
                     <thead><tr><th>Item</th><th className="r">Qtd.</th><th>Un.</th><th className="r">Unitário</th><th className="r">Total</th></tr></thead>
