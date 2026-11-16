@@ -53,7 +53,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 }
 
 /* formulários */
-.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px}
 .form label,.campo{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);min-width:0}
 .form .wide{grid-column:1/-1}
 input:not([type=checkbox]):not([type=file]),select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;color:var(--ink);width:100%}
@@ -79,7 +79,10 @@ table.t tr.link{cursor:pointer} table.t tr.link:hover td{background:var(--sunk)}
 .alerta::before{content:"";border-radius:4px;background:var(--warn)} .alerta.alto::before{background:var(--bad)}
 
 /* trilha do processo */
-.mesa{display:grid;grid-template-columns:220px minmax(0,1fr) 360px;gap:16px;align-items:start}
+.mesa{display:grid;grid-template-columns:200px minmax(0,1fr);gap:10px 16px;align-items:start}
+.mesa>.trilha{grid-column:1;grid-row:1/span 2;min-width:0}
+.mesa-corpo{grid-column:2;grid-row:2;min-width:0}
+.mesa-corpo a{overflow-wrap:anywhere}
 .trilha{display:flex;flex-direction:column;padding:8px}
 .et{display:grid;grid-template-columns:26px minmax(0,1fr);gap:8px;align-items:start;padding:8px;border-radius:6px;border:0;background:none;text-align:left;cursor:pointer;width:100%}
 .et:hover{background:var(--sunk)} .et.sel{background:var(--accent-soft)}
@@ -118,8 +121,13 @@ textarea.edit{min-height:460px;background:var(--paper);color:var(--paper-ink);fo
 .pf{display:flex;flex-direction:column;gap:5px;padding-top:10px;border-top:1px dashed var(--line)}
 .pf label{font-size:13.5px;line-height:1.45;overflow-wrap:anywhere}
 .pf .b{font-size:12.5px;color:var(--muted)} .pf .sg{color:var(--accent)} .pf .falta{color:var(--warn)}
-.chat{display:flex;flex-direction:column;gap:10px;padding:14px;position:sticky;top:12px;max-height:calc(100vh - 24px);min-width:0}
-.msgs{display:flex;flex-direction:column;gap:8px;overflow-y:auto;min-height:120px;flex:1}
+.chat{grid-column:2;grid-row:1;justify-self:end;min-width:0;max-width:100%}
+.chat>summary{padding:6px 11px;font-size:13px;font-weight:600;cursor:pointer}
+.chat[open]{width:min(320px,100%)}
+.chat[open]>summary{border-bottom:1px solid var(--line)}
+.chat-corpo{display:flex;flex-direction:column;gap:8px;padding:10px;max-height:min(64dvh,520px);overflow-y:auto}
+.msgs{display:flex;flex-direction:column;gap:8px;overflow-y:auto;min-height:0;max-height:280px}
+.msgs:empty{display:none}
 .msg{padding:8px 11px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;max-width:94%}
 .msg.user{align-self:flex-end;background:var(--accent-soft)}
 .msg.assistant{align-self:flex-start;background:var(--sunk)}
@@ -130,8 +138,18 @@ textarea.edit{min-height:460px;background:var(--paper);color:var(--paper-ink);fo
 .chatform{display:flex;gap:8px;align-items:flex-end}
 .chatform textarea{min-height:44px;max-height:160px;flex:1;min-width:0}
 details.box>summary{padding:12px 16px;cursor:pointer;font-weight:600;font-family:var(--f-head)}
-@media (max-width:1180px){ .mesa{grid-template-columns:200px minmax(0,1fr)} .chat{grid-column:1/-1;position:static;max-height:none} .msgs{max-height:420px} }
-@media (max-width:720px){ .mesa{grid-template-columns:minmax(0,1fr)} .trilha{flex-direction:row;overflow-x:auto;gap:4px} .et{grid-template-columns:26px minmax(0,1fr);min-width:126px;width:auto}.et .tx{display:block} }
+@media (min-width:1360px){
+  .mesa:has(>.chat[open]){grid-template-columns:200px minmax(0,1fr) 250px}
+  .mesa:has(>.chat[open])>.mesa-corpo{grid-row:1/span 2}
+  .mesa>.chat[open]{grid-column:3;grid-row:1/span 2;width:100%;position:sticky;top:12px}
+}
+@media (max-width:860px){
+  .mesa{grid-template-columns:minmax(0,1fr)}
+  .mesa>.trilha,.mesa>.chat,.mesa>.mesa-corpo{grid-column:1;grid-row:auto}
+  .trilha{flex-direction:row;overflow-x:auto;gap:4px}
+  .et{grid-template-columns:26px minmax(0,1fr);min-width:126px;width:auto}
+  .et .tx{display:block}
+}
 
 .titular{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px 12px;padding:8px 10px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0}
 .titular label{color:var(--ink)} .titular input[readonly]{background:var(--surface)} .titular>span{grid-column:1/-1}
@@ -144,7 +162,7 @@ table.t tr.com-leitura td{border-bottom:0;padding-bottom:2px} .lido{margin:0} .l
 
 .itens-sol{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;min-width:0;display:flex;flex-direction:column;gap:8px}
 .itens-sol legend{font-size:13px;color:var(--muted);padding:0 4px}
-.cotacao-item{border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+.cotacao-item{border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0;container-type:inline-size}
 .cotacao-item h4{margin:0}
 .cotacao-item summary{cursor:pointer;margin:6px 0}
 .cotacao-fornecedor{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px}
@@ -154,12 +172,12 @@ table.t tr.com-leitura td{border-bottom:0;padding-bottom:2px} .lido{margin:0} .l
 .cotacao-anexo{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding-top:17px}
 .cotacao-anexo a{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cotacao-item .cotacao-detalhes summary{font-size:13px;margin:0 0 4px}
-@media(max-width:680px){.cotacao-grade{grid-template-columns:minmax(0,1fr) minmax(90px,130px)}.cotacao-anexo{grid-column:1/-1;padding-top:0}}
+@container (max-width:470px){.cotacao-grade{grid-template-columns:minmax(0,1fr) minmax(90px,130px)}.cotacao-anexo{grid-column:1/-1;padding-top:0}}
 .cotacao-fornecedor input:not([type=file]),.cotacao-fornecedor select{background:var(--surface)}
 .cotacao-soma{border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px 20px;align-items:flex-end;flex-wrap:wrap}
 .cotacao-soma select{min-width:126px}
 .pncp-resultados{list-style:none;padding:0;margin:0;display:grid;gap:8px;max-height:430px;overflow:auto}
-@media (min-width: 720px){.cotacao-dados{grid-template-columns:minmax(0,1fr) 90px 105px}}
+@container (min-width:390px){.cotacao-dados{grid-template-columns:minmax(0,1fr) 90px 105px}}
 
 /* agente de contratação */
 .agente-icone{position:fixed;right:18px;bottom:18px;z-index:30;display:inline-flex;align-items:center;gap:8px;padding:11px 16px 11px 13px;border-radius:99px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:600;cursor:grab;box-shadow:0 8px 22px -10px #000a}

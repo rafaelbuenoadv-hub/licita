@@ -88,16 +88,18 @@ export function ProcessoPg() {
               </button>);
           })}
         </nav>
-        {mostrarSolicitacao ? (
-          <section className="panel" style={{ minWidth: 0 }} aria-labelledby="aba-solicitacao">
-            <div className="sec row">
-              <div><span className="lbl">Etapa {aberta.numero} de {TRILHA_PROCESSO.length}</span><h2 id="aba-solicitacao">Solicitação</h2></div>
-              <button className="btn" type="button" onClick={() => irPara("dfd")}>Abrir DFD →</button>
-            </div>
-            <Solicitacoes key={p.id} processo={p} recarregar={recarregarSolicitacao} />
-          </section>
-        ) : <Etapa key={e.id} p={p} e={e} ix={ix} numero={aberta.numero} checks={checks} recarregar={carregar} setAviso={setAviso} irPara={irPara} />}
         <Assistente key={`${p.id}-${mostrarSolicitacao ? "solicitacao" : "etapas"}`} p={p} etapa={aberta.id} disponivel={ia.disponivel} />
+        <div className="mesa-corpo">
+          {mostrarSolicitacao ? (
+            <section className="panel" style={{ minWidth: 0 }} aria-labelledby="aba-solicitacao">
+              <div className="sec row">
+                <div><span className="lbl">Etapa {aberta.numero} de {TRILHA_PROCESSO.length}</span><h2 id="aba-solicitacao">Solicitação</h2></div>
+                <button className="btn" type="button" onClick={() => irPara("dfd")}>Abrir DFD →</button>
+              </div>
+              <Solicitacoes key={p.id} processo={p} recarregar={recarregarSolicitacao} />
+            </section>
+          ) : <Etapa key={e.id} p={p} e={e} ix={ix} numero={aberta.numero} checks={checks} recarregar={carregar} setAviso={setAviso} irPara={irPara} />}
+        </div>
       </div>
 
       <Anexos p={p} recarregar={carregar} podeIncluir={tem(eu, "requisitante", "contratacao", "juridico")} />
@@ -546,27 +548,32 @@ function Assistente({ p, etapa, disponivel }: { p: any; etapa: string; disponive
   };
   const sub = (ev: FormEvent) => { ev.preventDefault(); enviar(rasc); };
   return (
-    <aside className="panel chat" aria-label="Assistente">
-      <div><h3>Assistente</h3><p className="small muted">Responde com os dados do processo, a etapa aberta, as minutas e os documentos anexados.</p></div>
-      {!disponivel && <p className="note">A IA não está configurada neste servidor.</p>}
-      <div className="msgs" ref={caixa} aria-live="polite">
-        {msgs.map((m, i) => <div key={i} className={`msg ${m.role}${m.err ? " err" : ""}`}>{m.content || "Pensando…"}</div>)}
+    <details className="panel chat" onToggle={(ev) => {
+      if (ev.currentTarget.open) caixa.current?.scrollTo(0, caixa.current.scrollHeight);
+    }}>
+      <summary>Assistente</summary>
+      <div className="chat-corpo">
+        <p className="small muted">Ajuda com esta etapa e os documentos do processo.</p>
+        {!disponivel && <p className="note">A IA não está configurada neste servidor.</p>}
+        <div className="msgs" ref={caixa} aria-live="polite">
+          {msgs.map((m, i) => <div key={i} className={`msg ${m.role}${m.err ? " err" : ""}`}>{m.content || "Pensando…"}</div>)}
+        </div>
+        <div className="chips">{(etapa === "solicitacao" ? [
+          ["Conferir a solicitação", "Confira os pedidos das secretarias, os itens e as cotações da Solicitação e indique o que falta."],
+          ["Conferir os orçamentos", "Verifique quais itens estão sem cotação e quais preços precisam de conferência."],
+        ] : [
+          ["O que falta nesta etapa?", "O que falta nesta etapa?"],
+          ["Conferir a minuta", "Confira a minuta desta etapa contra o checklist e aponte incoerências com as outras peças."],
+          ["Que documentos preciso juntar agora?", "Que documentos preciso juntar agora?"],
+        ]).map(([rotulo, pergunta]) =>
+          <button key={rotulo} className="chip" disabled={!disponivel || busy} onClick={() => enviar(pergunta)}>{rotulo}</button>)}</div>
+        <form className="chatform" onSubmit={sub}>
+          <textarea id="chat-in" value={rasc} onChange={(ev) => setRasc(ev.target.value)} placeholder="Pergunte ou cole um trecho para conferir" aria-label="Mensagem para o assistente"
+            onKeyDown={(ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); enviar(rasc); } }} disabled={!disponivel} />
+          {busy ? <button type="button" className="btn" onClick={() => ctl.current?.abort()}>Parar</button> : <button className="btn pri" disabled={!disponivel}>Enviar</button>}
+        </form>
       </div>
-      <div className="chips">{(etapa === "solicitacao" ? [
-        ["Conferir a solicitação", "Confira os pedidos das secretarias, os itens e as cotações da Solicitação e indique o que falta."],
-        ["Conferir os orçamentos", "Verifique quais itens estão sem cotação e quais preços precisam de conferência."],
-      ] : [
-        ["O que falta nesta etapa?", "O que falta nesta etapa?"],
-        ["Conferir a minuta", "Confira a minuta desta etapa contra o checklist e aponte incoerências com as outras peças."],
-        ["Que documentos preciso juntar agora?", "Que documentos preciso juntar agora?"],
-      ]).map(([rotulo, pergunta]) =>
-        <button key={rotulo} className="chip" disabled={!disponivel || busy} onClick={() => enviar(pergunta)}>{rotulo}</button>)}</div>
-      <form className="chatform" onSubmit={sub}>
-        <textarea id="chat-in" value={rasc} onChange={(ev) => setRasc(ev.target.value)} placeholder="Pergunte ou cole um trecho para conferir" aria-label="Mensagem para o assistente"
-          onKeyDown={(ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); enviar(rasc); } }} disabled={!disponivel} />
-        {busy ? <button type="button" className="btn" onClick={() => ctl.current?.abort()}>Parar</button> : <button className="btn pri" disabled={!disponivel}>Enviar</button>}
-      </form>
-    </aside>
+    </details>
   );
 }
 
