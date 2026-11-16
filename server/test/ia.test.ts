@@ -2,6 +2,7 @@
 // Confere o que o sistema envia (modelo, respaldo, saída estruturada) e o tratamento das respostas.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { PDFDocument } from "pdf-lib";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -43,7 +44,10 @@ let mod: any;
 const SENHA = "senha-de-teste-123";
 let cookie = "";
 const api = async (metodo: string, url: string, corpo?: object) => {
-  const r = await fetch(base + url, { method: metodo, headers: { "x-licita": "1", "content-type": "application/json", cookie }, body: corpo ? JSON.stringify(corpo) : undefined });
+  const headers: Record<string, string> = { "x-licita": "1", cookie };
+  const body = corpo instanceof FormData ? corpo : corpo && JSON.stringify(corpo);
+  if (typeof body === "string") headers["content-type"] = "application/json";
+  const r = await fetch(base + url, { method: metodo, headers, body });
   const sc = r.headers.get("set-cookie");
   if (sc) cookie = sc.split(";")[0];
   return r;
@@ -146,4 +150,39 @@ test("recusa do modelo vira mensagem amigável", async () => {
   const fim = JSON.parse((await r.text()).trim().split("\n").at(-1)!);
   assert.match(fim.erro, /não pôde atender/);
   pararPor = "end_turn";
+});
+
+test("IA de revisão lê todas as páginas e analisa parecer no mesmo PDF dos autos", async () => {
+  const criacao = await api("POST", "/api/revisoes", { numero: "19/2024", objeto: "Manutenção de escola", via: "dispensa" });
+  assert.equal(criacao.status, 201);
+  const caminho = `/api/revisoes/${(await criacao.json()).id}`;
+  assert.equal((await api("POST", `${caminho}/ia`, { tipo: "saneamento" })).status, 400);
+  const pdf = await PDFDocument.create();
+  for (let p = 0; p < 41; p++) pdf.addPage();
+  const form = new FormData();
+  form.append("tipo", "autos");
+  form.append("arquivo", new Blob([Uint8Array.from(await pdf.save())], { type: "application/pdf" }), "autos.pdf");
+  assert.equal((await api("POST", `${caminho}/arquivos`, form)).status, 201);
+  textoStream = "O parecer consta do PDF. Recomendação de complementar a pesquisa.";
+  respostaEstruturada = {
+    minuta: "Minuta de resposta para conferência",
+    recomendacoes: [{ descricao: "Complementar a pesquisa", referencia: "autos.pdf, p. 41", ajuste: "Juntar pesquisa complementar" }],
+  };
+  const antes = pedidos.length;
+  const resposta = await api("POST", `${caminho}/ia`, { tipo: "saneamento" });
+  assert.equal(resposta.status, 200);
+  const fim = JSON.parse((await resposta.text()).trim().split("\n").at(-1)!);
+  assert.equal(fim.fim, true, JSON.stringify(fim));
+  assert.deepEqual(fim.recomendacoes, (respostaEstruturada as { recomendacoes: unknown[] }).recomendacoes);
+  const [primeiro, ultimo, consolidacao] = pedidos.slice(antes).map((p) => p.body.messages[0].content);
+  assert.equal(pedidos.length - antes, 3);
+  assert.match(primeiro[0].source.data, /^JVBER/);
+  assert.match(primeiro[1].text, /páginas 1 a 40/);
+  assert.match(ultimo[1].text, /páginas 41 a 41/);
+  assert.match(consolidacao, /Lei Federal nº 14\.133\/2021/);
+  assert.match(consolidacao, /Acórdão/);
+  assert.match(consolidacao, /O parecer consta do PDF/);
+  const detalhe = await (await api("GET", caminho)).json();
+  assert.deepEqual(detalhe.minutas, []);
+  assert.deepEqual(detalhe.recomendacoes, []);
 });

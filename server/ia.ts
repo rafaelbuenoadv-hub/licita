@@ -80,7 +80,7 @@ export async function gerarTexto(opts: {
 }
 
 /** Resposta em JSON validado por um esquema zod (saída estruturada). */
-export async function gerarEstruturado<S extends z.ZodType>(esquema: S, conteudo: string, effort: Effort = "high"): Promise<z.infer<S>> {
+export async function gerarEstruturado<S extends z.ZodType>(esquema: S, conteudo: string, effort: Effort = "high", sinal?: AbortSignal): Promise<z.infer<S>> {
   const r = await cliente().beta.messages.parse({
     model: MODELO,
     max_tokens: 16000,
@@ -89,7 +89,7 @@ export async function gerarEstruturado<S extends z.ZodType>(esquema: S, conteudo
     system: REGRAS,
     output_config: { effort, format: betaZodOutputFormat(esquema) },
     messages: [{ role: "user", content: conteudo }],
-  });
+  }, { signal: sinal });
   confereRecusa(r);
   if (r.parsed_output == null) throw new ErroHttp(502, "A IA respondeu fora do formato esperado. Tente de novo.");
   return r.parsed_output as z.infer<S>;

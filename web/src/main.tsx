@@ -13,6 +13,7 @@ import { Pca } from "./paginas/Pca";
 import { Contratos } from "./paginas/Contratos";
 import { ContratoPg } from "./paginas/Contrato";
 import { Config } from "./paginas/Config";
+import { Revisoes } from "./paginas/Revisoes";
 import { Mensagens } from "./paginas/Mensagens";
 
 export interface Eu { id: number; nome: string; email: string; cargo: string; papeis: Papel[]; orgao_id: number; orgao_nome: string }
@@ -56,6 +57,7 @@ function App() {
             <div className="orgao">{eu.orgao_nome}</div>
             <NavLink to="/" end className={({ isActive }) => (isActive ? "ativo" : "")}>Painel</NavLink>
             <NavLink to="/processos" className={({ isActive }) => (isActive ? "ativo" : "")}>Processos</NavLink>
+            {tem(eu, "contratacao", "juridico") && <NavLink to="/revisoes" className={({ isActive }) => (isActive ? "ativo" : "")}>Revisão de processos</NavLink>}
             <NavLink to="/pca" className={({ isActive }) => (isActive ? "ativo" : "")}>Plano de contratações</NavLink>
             <NavLink to="/contratos" className={({ isActive }) => (isActive ? "ativo" : "")}>Contratos</NavLink>
             <NavLink to="/mensagens" className={({ isActive }) => (isActive ? "ativo" : "")}>Mensagens{naoLidas > 0 && <span className="conta" aria-label={`${naoLidas} não lidas`}>{naoLidas}</span>}</NavLink>
@@ -68,6 +70,8 @@ function App() {
               <Route path="/processos" element={<Processos />} />
               <Route path="/processos/novo" element={<NovoProcesso />} />
               <Route path="/processos/:id" element={<ProcessoPg />} />
+              <Route path="/revisoes" element={<Revisoes />} />
+              <Route path="/revisoes/:id" element={<Revisoes />} />
               <Route path="/pca" element={<Pca />} />
               <Route path="/contratos" element={<Contratos />} />
               <Route path="/contratos/:id" element={<ContratoPg />} />

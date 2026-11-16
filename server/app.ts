@@ -1,3 +1,4 @@
+import { rotasRevisoes } from "./routes/revisoes.js";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cookieParser from "cookie-parser";
 import path from "node:path";
@@ -40,6 +41,7 @@ export function criarApp() {
   api.use(rotasSecretarios());
   api.use(rotasProcessos());
   api.use(rotasIA());
+  api.use(rotasRevisoes());
   api.use(rotasPca());
   api.use(rotasContratos());
   api.use(rotasPainel());

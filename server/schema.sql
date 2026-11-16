@@ -454,3 +454,47 @@ create index if not exists mensagens_de on mensagens(de_id, criado_em desc);
 insert into limites_dispensa (orgao_id, ano, inciso, valor, fonte)
 values (0, 2026, 'I', 130984.20, 'Decreto Federal nº 12.807/2025')
 on conflict do nothing;
+
+create table if not exists revisoes (
+  id serial primary key,
+  orgao_id int not null references orgaos(id) on delete cascade,
+  processo_id int references processos(id) on delete set null,
+  numero text not null,
+  objeto text not null,
+  via text not null check (via in ('licitacao','dispensa','inexigibilidade','a_confirmar')),
+  criado_em timestamptz not null default now()
+);
+create index if not exists revisoes_orgao on revisoes(orgao_id, id desc);
+
+create table if not exists revisao_arquivos (
+  id serial primary key,
+  revisao_id int not null references revisoes(id) on delete cascade,
+  tipo text not null check (tipo in ('autos','parecer','complemento')),
+  nome text not null,
+  paginas int not null check (paginas > 0),
+  sha256 text not null,
+  arquivo bytea not null,
+  unique (revisao_id, tipo, sha256)
+);
+
+create table if not exists revisao_minutas (
+  id serial primary key,
+  revisao_id int not null references revisoes(id) on delete cascade,
+  tipo text not null check (tipo in ('revisao','parecer','saneamento')),
+  texto text not null,
+  origem text not null check (origem in ('manual','ia')),
+  autor_id int references usuarios(id) on delete set null,
+  criado_em timestamptz not null default now()
+);
+create index if not exists revisao_minutas_indice on revisao_minutas(revisao_id, tipo, id desc);
+
+create table if not exists revisao_recomendacoes (
+  id serial primary key,
+  revisao_id int not null references revisoes(id) on delete cascade,
+  descricao text not null,
+  referencia text not null default '',
+  ajuste text not null default '',
+  evidencia text not null default '',
+  situacao text not null default 'pendente' check (situacao in ('pendente','em_adequacao','atendida','justificada'))
+);
+create index if not exists revisao_recomendacoes_indice on revisao_recomendacoes(revisao_id, id);

@@ -95,7 +95,7 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
 }
 
 /** Resposta em linhas JSON (NDJSON): {"d": trecho} ... {"fim": true, ...} ou {"erro": "..."} */
-function abreFluxo(req: Request, res: Response) {
+export function abreFluxo(req: Request, res: Response) {
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("X-Accel-Buffering", "no");
