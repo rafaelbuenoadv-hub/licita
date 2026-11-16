@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import { QUEBRA_NA_CELULA } from "../../../shared/solicitacao";
 
 // Renderiza a marcação das minutas como folha de documento oficial.
 function inline(s: string, k: string): ReactNode[] {
@@ -22,7 +23,7 @@ export function Folha({ texto, vazio }: { texto: string; vazio?: string }) {
     if (!tab.length) return;
     const [cab, ...corpo] = tab;
     const quadroItens = cab[0] === "Item" && cab[1] === "Descrição";
-    el.push(<div className="tw" key={"t" + n++}><table className={quadroItens ? "quadro-itens" : undefined}><thead><tr>{cab.map((c, i) => <th key={i}>{inline(c, "h" + i)}</th>)}</tr></thead>
+    el.push(<div className="tw" key={"t" + n++}><table className={quadroItens ? "quadro-itens" : undefined}><thead><tr>{cab.map((c, i) => <th key={i}>{c.split(QUEBRA_NA_CELULA).map((trecho, j) => <Fragment key={j}>{j > 0 && <br />}{inline(trecho, `h${i}-${j}`)}</Fragment>)}</th>)}</tr></thead>
       <tbody>{corpo.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{inline(c, `c${i}-${j}`)}</td>)}</tr>)}</tbody></table></div>);
     tab = [];
   };

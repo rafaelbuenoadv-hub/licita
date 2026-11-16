@@ -1,7 +1,7 @@
 import {
   AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, PageOrientation, Paragraph, Table, TableCell, TableLayoutType, TableRow, TextRun, WidthType,
 } from "docx";
-import { quantidadeColunasCotacoes } from "../shared/solicitacao.js";
+import { quantidadeColunasCotacoes, QUEBRA_NA_CELULA } from "../shared/solicitacao.js";
 
 // Converte a marcação das minutas em .docx:
 //   "# "  título centralizado      "## " seção em negrito
@@ -26,7 +26,7 @@ function runs(t: string, extra: { bold?: boolean } = {}): TextRun[] {
 function tabela(linhas: string[][], larguraUtil: number) {
   const cols = Math.max(...linhas.map((l) => l.length));
   const borda = { style: BorderStyle.SINGLE, size: 4, color: "000000" };
-  const comCotacoes = linhas[0][0] === "Item" && linhas[0][1] === "Descrição" && /^Cotação 1 /.test(linhas[0][4] ?? "");
+  const comCotacoes = linhas[0][0] === "Item" && linhas[0][1] === "Descrição" && /^Cotação 1\s/.test(linhas[0][4] ?? "");
   const pesos = Array.from({ length: cols }, (_, i) => [6, 29, 6, 6][i] ?? 12);
   const soma = pesos.reduce((total, peso) => total + peso, 0);
   const columnWidths = comCotacoes ? pesos.map((peso) => Math.floor(larguraUtil * peso / soma)) : undefined;
@@ -37,7 +37,8 @@ function tabela(linhas: string[][], larguraUtil: number) {
     rows: linhas.map((l, i) => new TableRow({
       tableHeader: i === 0,
       children: Array.from({ length: cols }, (_, j) => new TableCell({
-        children: [new Paragraph({ children: runs(l[j] ?? "", i === 0 ? { bold: true } : {}) })],
+        children: [new Paragraph({ children: (l[j] ?? "").split(QUEBRA_NA_CELULA).flatMap((trecho, indice) =>
+          [...(indice ? [new TextRun({ break: 1 })] : []), ...runs(trecho, i === 0 ? { bold: true } : {})]) })],
       })),
     })),
   });

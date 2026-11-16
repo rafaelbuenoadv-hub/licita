@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit";
-import { quantidadeColunasCotacoes } from "../shared/solicitacao.js";
+import { quantidadeColunasCotacoes, QUEBRA_NA_CELULA } from "../shared/solicitacao.js";
 import type { Timbrado } from "./docx.js";
 
 type Trecho = { texto: string; negrito: boolean; pendente: boolean; largura: number };
@@ -86,7 +86,7 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
     const tamanho = 10;
     const altura = 13;
     const espaco = 4;
-    const quadroComCotacoes = colunas > 6 && linhas[0][0] === "Item" && linhas[0][1] === "Descrição";
+    const quadroComCotacoes = linhas[0][0] === "Item" && linhas[0][1] === "Descrição" && linhas[0].some((coluna) => /^Cotação 1\s/.test(coluna));
     const pesos = Array.from({ length: colunas }, (_, c) => {
       const minimos = [6, 144, 10, 6];
       const minimo = quadroComCotacoes ? minimos[c] ?? (c === colunas - 1 ? 29 : 15) : 6;
@@ -103,7 +103,8 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
     });
     for (const [i, linha] of linhas.entries()) {
       const celulas = Array.from({ length: colunas }, (_, c) =>
-        quebrar(linha[c] ?? "", Math.max(1, posicoes[c].largura - 2 * espaco), tamanho, i === 0));
+        (linha[c] ?? "").split(QUEBRA_NA_CELULA).flatMap((trecho) =>
+          quebrar(trecho, Math.max(1, posicoes[c].largura - 2 * espaco), tamanho, i === 0)));
       const total = Math.max(...celulas.map((celula) => celula.length));
       // Preserve a linha inteira quando couber em uma página. Linhas maiores seguem na página seguinte.
       const alturaLinha = total * altura + 2 * espaco;
