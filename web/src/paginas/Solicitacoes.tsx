@@ -76,6 +76,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const titular = cadastro?.area === areaEscolhida ? cadastro.titular : null;
   const lidas = lerLinhas(linhas);
   const itens = lidas.itens;
+  const temOrcamento = itens.some((item) => item.cotacoes?.some((cotacao) => cotacao.orcamento_id != null));
   // Mesmo caminho do servidor: o quadro de itens entra no texto e os campos do modelo recebem o que foi digitado.
   const base = inserirItens(descricao, itens);
   const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: objeto, justificativa, itens });
@@ -220,18 +221,22 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       setAviso({ texto: "Informe a secretaria antes de gerar o rascunho.", erro: true });
       return;
     }
+    if (lidas.erro) {
+      setAviso({ texto: lidas.erro, erro: true });
+      return;
+    }
     setOcupado("ia");
     setAviso(null);
     try {
       const dados = montarDados(previa);
       await enviarApoios(dados);
-      setProgresso("Lendo os documentos de apoio…");
+      setProgresso("Analisando os documentos de apoio e os orçamentos dos itens…");
       if (edicao) dados.set("solicitacao_id", String(edicao.id));
       const r = await api.post<{ descricao: string; objeto: string; justificativa: string; itens: ItemSolicitacao[]; avisos: string[] }>(`${caminho}/ia`, dados);
       trocarTexto(r.descricao);
-      if (!edicao && !objeto.trim() && r.objeto) setObjeto(r.objeto);
-      if (!edicao && !justificativa.trim() && r.justificativa) setJustificativa(r.justificativa);
-      if (!itens.length && !lidas.erro && r.itens?.length) {
+      if (!objeto.trim() && r.objeto) setObjeto(r.objeto);
+      if (!justificativa.trim() && r.justificativa) setJustificativa(r.justificativa);
+      if (!itens.length && r.itens?.length) {
         setLinhas(linhasDosItens(r.itens, processo.orcamentos));
       }
       const falhas = r.avisos?.length ? ` O rascunho não inclui os arquivos que a IA não conseguiu ler: ${r.avisos.join(", ")}.` : "";
@@ -315,10 +320,10 @@ export function Solicitacoes({ processo, recarregar }: Props) {
             </>}
             <span className="small muted">PDF, Word (.docx) ou texto. Até 20 MB.</span>
           </div>}
-          {(modo === "ia" || !!apoios.length || !!arquivo || !!edicao?.apoios.length || !!edicao?.nome_arquivo) && <div className="stack">
+          {(modo === "ia" || !!apoios.length || !!arquivo || !!edicao?.apoios.length || !!edicao?.nome_arquivo || temOrcamento) && <div className="stack">
             {ia.disponivel ? <>
               <div><button className="btn" type="button" disabled={!!ocupado || cotando} onClick={gerar}>{ocupado === "ia" ? "Gerando rascunho…" : "Gerar rascunho com IA"}</button></div>
-              <span className="small muted">Ao gerar, o Licita usa a descrição e envia os documentos de apoio e a solicitação original anexada ao provedor de IA.</span>
+              <span className="small muted">A IA usa os dados preenchidos, os anexos desta solicitação e os orçamentos vinculados aos itens. Essas fontes são enviadas ao provedor de IA para gerar o rascunho.</span>
             </> : <p className="note">IA indisponível no servidor. Você pode preencher e salvar a solicitação nesta tela.</p>}
           </div>}
           {descricao.trim() && <div className="stack">
@@ -346,7 +351,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
         </form>
       )}
       {aviso && <p className={`note ${aviso.erro ? "bad" : "ok"}`} role={aviso.erro ? "alert" : "status"}>{aviso.texto}</p>}
-      {processo.solicitacoes.some((s) => s.descricao) && processo.timbrados.length > 0 && <label className="campo" style={{ maxWidth: 320 }}>Timbrado do Word
+      {processo.solicitacoes.some((s) => s.descricao) && processo.timbrados.length > 0 && <label className="campo" style={{ maxWidth: 320 }}>Timbrado do documento
         <select value={timbrado} onChange={(e) => setTimbrado(e.target.value)}>
           <option value="">Sem timbrado</option>
           {processo.timbrados.map((t) => <option key={t.codigo} value={t.codigo}>{t.nome}</option>)}
@@ -375,7 +380,10 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                   </details>}
                   <div className="tools">
                     {podeAdicionar && <button type="button" className="btn sm" disabled={!!ocupado || !!modo} onClick={() => editar(s)}>Editar</button>}
-                    {s.descricao && <a className="btn sm" href={`/api${caminho}/${s.id}/docx${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>Baixar Word</a>}
+                    {s.descricao && <>
+                      <a className="btn sm" href={`/api${caminho}/${s.id}/docx${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>Baixar Word</a>
+                      <a className="btn sm" href={`/api${caminho}/${s.id}/pdf${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>Baixar PDF</a>
+                    </>}
                   </div>
                 </td>
                 <td>

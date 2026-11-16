@@ -244,7 +244,10 @@ function DetalheRevisao({ id }: { id: string }) {
         <button className="btn pri" disabled={!!ocupado || !ia.disponivel || !autos} onClick={gerar}> {texto.trim() ? "Gerar novo rascunho com IA" : "Gerar com IA"}</button>
         {ocupado === "ia" && <button className="btn" onClick={() => cancelar.current?.abort()}>Parar análise</button>}
         <button className="btn" disabled={!!ocupado || !texto.trim()} onClick={salvar}>Salvar nova versão</button>
-        {versao && <a className="btn" href={`/api${caminho}/minutas/${versao}?formato=docx`}>Baixar versão em Word</a>}
+        {versao && <>
+          <a className="btn" href={`/api${caminho}/minutas/${versao}?formato=docx`}>Baixar versão em Word</a>
+          <a className="btn" href={`/api${caminho}/minutas/${versao}?formato=pdf`}>Baixar PDF</a>
+        </>}
       </div>
       {!ia.disponivel && <p className="small muted">IA indisponível. Você pode revisar os PDFs e elaborar a minuta manualmente.</p>}
       {ia.disponivel && !autos && <p className="small muted">Anexe os autos para gerar uma análise.</p>}

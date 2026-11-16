@@ -450,6 +450,10 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
   };
 
   const exibido = busy === "redigir" ? gerando : vendo ? vendo.texto : texto;
+  const opcoesExportacao = new URLSearchParams({
+    ...(vendo ? { versao: String(vendo.versao) } : {}),
+    ...(timbrado ? { timbrado } : {}),
+  });
   return (
     <div className="sec" id="minuta-etapa">
       <div className="row"><span className="lbl">Minuta · {e.doc}</span>
@@ -461,17 +465,17 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
         {busy !== "redigir" && <>
           <button className="btn" disabled={!editavel || !!vendo} onClick={() => { setModo(modo === "ver" ? "editar" : "ver"); setRascunho(texto); }}>{modo === "ver" ? "Editar texto" : "Ver na folha"}</button>
           {texto && p.timbrados?.length > 0 && (
-            <label>Timbrado do Word
+            <label>Timbrado do documento
               <select value={timbrado} onChange={(ev) => setTimbrado(ev.target.value)}>
                 <option value="">Sem timbrado</option>
                 {p.timbrados.map((t: { codigo: string; nome: string }) => <option key={t.codigo} value={t.codigo}>{t.nome}</option>)}
               </select>
             </label>
           )}
-          {texto && <a className="btn" href={`/api/processos/${p.id}/minutas/${e.id}/docx?${new URLSearchParams({
-            ...(vendo ? { versao: String(vendo.versao) } : {}),
-            ...(timbrado ? { timbrado } : {}),
-          })}`}>Baixar Word</a>}
+          {m.vigente && <>
+            <a className="btn" href={`/api/processos/${p.id}/minutas/${e.id}/docx?${opcoesExportacao}`}>Baixar Word</a>
+            <a className="btn" href={`/api/processos/${p.id}/minutas/${e.id}/pdf?${opcoesExportacao}`}>Baixar PDF</a>
+          </>}
           {m.versoes.length > 1 && <label className="campo" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>Versão
             <select id="versao" value={vendo?.versao ?? m.vigente?.versao} onChange={(ev) => verVersao(ev.target.value)} style={{ width: "auto" }}>
               {m.versoes.map((v: any) => <option key={v.versao} value={v.versao}>{v.versao} · {dataBR(v.criado_em)}</option>)}</select></label>}

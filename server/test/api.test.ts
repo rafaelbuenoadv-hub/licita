@@ -299,7 +299,7 @@ test("preenche portaria de nomeação pelo cadastro, sem usar ato de fiscal ou a
   assert.equal((await admin.get("/api/admin/secretarios")).dados.lista.find((s: { id: number }) => s.id === saude.id).portaria, "");
 });
 
-test("minuta versionada, campos pendentes e exportação .docx", async () => {
+test("minuta versionada, campos pendentes e exportação Word e PDF", async () => {
   const req = await new Cliente().entrar("req@a.gov.br");
   const texto = "# ESTUDO TÉCNICO PRELIMINAR\nProcesso nº 367/2026\n## 2. Necessidade\n| Indicador | Dado |\n|---|---|\n| Sepultamentos 2024 | [[nº]] |\n| Sepultamentos 2025 | [[nº]] |\nIbaiti, [[dia]] de novembro de 2026.\n\n@ FULANA DE TAL\n@ Arquiteta";
   const s1 = await req.post(`/api/processos/${procId}/minutas/etp`, { texto });
@@ -317,11 +317,20 @@ test("minuta versionada, campos pendentes e exportação .docx", async () => {
   const d = await req.get(`/api/processos/${procId}/minutas/etp/docx`);
   assert.equal(d.status, 200);
   assert.equal(d.dados.subarray(0, 2).toString(), "PK");
+  const pdfV1 = await req.get(`/api/processos/${procId}/minutas/etp/pdf?versao=1`);
+  const pdfV2 = await req.get(`/api/processos/${procId}/minutas/etp/pdf`);
+  for (const pdf of [pdfV1, pdfV2]) {
+    assert.equal(pdf.status, 200);
+    assert.equal(pdf.tipo, "application/pdf");
+    assert.equal((await PDFDocument.load(pdf.dados)).getPageCount(), 1);
+  }
+  assert.notDeepEqual(pdfV1.dados, pdfV2.dados);
+  assert.equal((await req.get(`/api/processos/${procId}/minutas/etp/pdf?versao=999`)).status, 404);
   // Minuta de etapa ainda bloqueada.
   assert.equal((await req.post(`/api/processos/${procId}/minutas/tr`, { texto: "x" })).status, 409);
 });
 
-test("Ibaiti pode baixar seus 11 timbrados e aplicá-los à minuta Word", async () => {
+test("Ibaiti pode baixar seus 11 timbrados e usá-los nas exportações Word e PDF", async () => {
   const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
   const outro = await new Cliente().entrar("req@a.gov.br");
   const { timbrados } = (await admin.get("/api/orgao")).dados;
@@ -348,6 +357,15 @@ test("Ibaiti pode baixar seus 11 timbrados e aplicá-los à minuta Word", async 
   assert.equal(solicitacao.status, 200);
   assert.ok(solicitacao.dados.includes(Buffer.from("word/header1.xml")));
   assert.ok(solicitacao.dados.includes(Buffer.from("word/footer1.xml")));
+  for (const url of [`${rota}/pdf?timbrado=semad&versao=1`, `${solicitacoes}/${s.dados.id}/pdf?timbrado=semad`]) {
+    const pdf = await admin.get(url);
+    assert.equal(pdf.status, 200);
+    assert.equal(pdf.tipo, "application/pdf");
+    assert.equal((await PDFDocument.load(pdf.dados)).getPageCount(), 1);
+    assert.ok(pdf.dados.includes(Buffer.from("/Subtype /Image")));
+    assert.equal((await outro.get(url)).status, 404);
+  }
+  assert.equal((await admin.get(`${rota}/pdf?timbrado=inexistente`)).status, 404);
 });
 
 test("anexo .docx tem o texto extraído (inclusive quadros)", async () => {
@@ -713,6 +731,13 @@ test("revisão avulsa preserva PDFs, versões e evidências dentro do órgão", 
   const word = await lic.get(`${caminho}/minutas/${segunda.dados.id}?formato=docx`);
   assert.match(word.tipo, /wordprocessingml/);
   assert.equal(word.dados.subarray(0, 2).toString(), "PK");
+
+  const urlPdf = `${caminho}/minutas/${primeira.dados.id}?formato=pdf`;
+  const parecerPdf = await lic.get(urlPdf);
+  assert.equal(parecerPdf.status, 200);
+  assert.equal(parecerPdf.tipo, "application/pdf");
+  assert.equal((await PDFDocument.load(parecerPdf.dados)).getPageCount(), 1);
+  assert.equal((await outro.get(urlPdf)).status, 404);
 
   const rec = { descricao: "Atualizar pesquisa de preços", referencia: "Parecer, item 2" };
   assert.equal((await lic.post(`${caminho}/recomendacoes`, { ...rec, situacao: "atendida" })).status, 400);
