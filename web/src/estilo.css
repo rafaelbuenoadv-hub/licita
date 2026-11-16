@@ -140,7 +140,16 @@ details.box>summary{padding:12px 16px;cursor:pointer;font-weight:600;font-family
 table.t tr.com-leitura td{border-bottom:0;padding-bottom:2px} .lido{margin:0} .lido>summary{cursor:pointer;font-size:13.5px;color:var(--accent)} .lido table.t{font-size:13px;margin-top:6px}
 
 .itens-sol{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;min-width:0;display:flex;flex-direction:column;gap:8px}
-.itens-sol legend{font-size:13px;color:var(--muted);padding:0 4px} .itens-sol table.t td{padding:5px 6px;vertical-align:middle} .itens-sol table.t{min-width:760px} .itens-sol table.t th:nth-child(2){min-width:260px}
+.itens-sol legend{font-size:13px;color:var(--muted);padding:0 4px}
+.cotacao-item{border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+.cotacao-item h4{margin:0}
+.cotacao-item summary{cursor:pointer;margin:6px 0}
+.cotacao-fornecedor{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px}
+.cotacao-fornecedor input:not([type=file]),.cotacao-fornecedor select{background:var(--surface)}
+.cotacao-soma{border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px 20px;align-items:flex-end;flex-wrap:wrap}
+.cotacao-soma select{min-width:126px}
+.pncp-resultados{list-style:none;padding:0;margin:0;display:grid;gap:8px;max-height:430px;overflow:auto}
+@media (min-width: 720px){.cotacao-dados{grid-template-columns:minmax(0,1fr) 90px 105px}}
 
 /* agente de contratação */
 .agente-icone{position:fixed;right:18px;bottom:18px;z-index:30;display:inline-flex;align-items:center;gap:8px;padding:11px 16px 11px 13px;border-radius:99px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:600;cursor:grab;box-shadow:0 8px 22px -10px #000a}

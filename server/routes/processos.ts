@@ -1,9 +1,10 @@
-import { LIMITE_SOLICITACAO, MODELO_SOLICITACAO } from "../../shared/solicitacao.js";
+import { LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao } from "../../shared/solicitacao.js";
 import { modeloSolicitacao, preencherSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesCadastro } from "../portarias.js";
 import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
+import type { PoolClient } from "pg";
 import { z } from "zod";
 import { q, q1, tx, auditar } from "../db.js";
 import { exigeLogin, exigePapel, temPapel } from "../auth.js";
@@ -129,6 +130,48 @@ async function validarItemPca(id: number | null, orgao: number, ano: number) {
   if (!item) throw new ErroHttp(400, "Selecione um item do PCA do órgão para o exercício do processo.");
 }
 
+const idOrcamento = z.number().int().positive().max(2147483647);
+const itensSolicitacao = z.array(z.object({
+  descricao: z.string().trim().min(1).max(500),
+  unidade: z.string().trim().max(30).default(""),
+  quantidade: z.number().nonnegative().max(1e12).nullable().default(null),
+  valor_unitario: z.number().nonnegative().max(1e12).nullable().default(null),
+  criterio: z.enum(["media", "mediana", "menor"]).optional(),
+  cotacoes: z.array(z.object({
+    orcamento_id: idOrcamento,
+    fornecedor: z.string().trim().max(200),
+    valor_unitario: z.number().positive().max(1e12).nullable(),
+    fonte: z.enum(["fornecedor", "loja", "pncp", "outra"]).optional(),
+    link: z.string().trim().max(1500).pipe(z.union([z.url({ protocol: /^https?$/ }), z.literal("")])).optional(),
+    consultado_em: z.iso.date().optional(),
+  })).max(20).optional(),
+})).max(200);
+
+function calcularItens(itens: ItemSolicitacao[]) {
+  return itens.map((item, indice) => {
+    if (!item.cotacoes) return item;
+    const fornecedores = new Set<string>();
+    const anexos = new Set<number>();
+    for (const cotacao of item.cotacoes) {
+      const nome = normalizarCotacao(cotacao.fornecedor);
+      if (cotacao.valor_unitario != null && !nome) throw new ErroHttp(400, `Informe o fornecedor da cotação do item ${indice + 1}.`);
+      if (anexos.has(cotacao.orcamento_id) || (nome && fornecedores.has(nome))) {
+        throw new ErroHttp(400, `Use uma única cotação por fornecedor no item ${indice + 1}.`);
+      }
+      anexos.add(cotacao.orcamento_id);
+      if (nome) fornecedores.add(nome);
+    }
+    return { ...item, valor_unitario: valorDasCotacoes(item.cotacoes, item.criterio) };
+  });
+}
+
+async function conferirOrcamentos(c: PoolClient, processo: number, itens: ItemSolicitacao[]) {
+  const ids = [...new Set(itens.flatMap((item) => (item.cotacoes ?? []).map((cotacao) => cotacao.orcamento_id)))];
+  if (!ids.length) return;
+  const encontrados = await c.query("select id from orcamentos where processo_id=$1 and id=any($2::int[])", [processo, ids]);
+  if (encontrados.rowCount !== ids.length) throw new ErroHttp(400, "Selecione orçamentos anexados a este processo.");
+}
+
 export function rotasProcessos() {
   const r = Router();
   r.use("/processos", exigeLogin);
@@ -223,13 +266,10 @@ export function rotasProcessos() {
       descricao: z.string().trim().max(LIMITE_SOLICITACAO).default(""),
       objeto_solicitacao: z.string().trim().max(4000).default(""),
       justificativa: z.string().trim().max(8000).default(""),
-      // Em formulário com arquivo os itens chegam como texto JSON.
-      itens: z.preprocess((v) => { if (typeof v !== "string") return v ?? []; try { return JSON.parse(v || "[]"); } catch { return null; } }, z.array(z.object({
-        descricao: z.string().trim().min(1).max(500),
-        unidade: z.string().trim().max(30).default(""),
-        quantidade: z.number().nonnegative().max(1e12).nullable().default(null),
-        valor_unitario: z.number().nonnegative().max(1e12).nullable().default(null),
-      })).max(200)),
+      itens: z.preprocess((v) => {
+        if (typeof v !== "string") return v ?? [];
+        try { return JSON.parse(v || "[]"); } catch { return null; }
+      }, itensSolicitacao),
     }).parse(req.body);
     if (!d.descricao && !req.file?.size) throw new ErroHttp(400, "Descreva a solicitação ou anexe o documento.");
     if (req.file && !req.file.size) throw new ErroHttp(400, "O documento anexado está vazio.");
@@ -241,7 +281,8 @@ export function rotasProcessos() {
     const texto = nome && arquivo && !/\.pdf$/i.test(nome)
       ? await extrairTexto(nome, arquivo).catch(() => "")
       : "";
-    const descricao = await preencherSolicitacao(p, d);
+    const itens = calcularItens(d.itens);
+    const descricao = await preencherSolicitacao(p, { ...d, itens });
     if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     const resultado = await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and orgao_id=$2 for update", [p.id, p.orgao_id]);
@@ -253,10 +294,11 @@ export function rotasProcessos() {
       if (processo.situacao !== "preparacao") {
         throw new ErroHttp(409, "A solicitação só pode ser adicionada enquanto o processo estiver em preparação.");
       }
+      await conferirOrcamentos(c, p.id, itens);
       const { rows: [nova] } = await c.query(
         `insert into solicitacoes_processo (processo_id, chave_envio, secretaria, referencia, descricao, nome_arquivo, arquivo, texto_arquivo, usuario_id, objeto, justificativa, itens)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
-        [p.id, d.chave_envio, d.secretaria, d.referencia, descricao, nome, arquivo, texto, req.usuario!.id, d.objeto_solicitacao, d.justificativa, JSON.stringify(d.itens)],
+        [p.id, d.chave_envio, d.secretaria, d.referencia, descricao, nome, arquivo, texto, req.usuario!.id, d.objeto_solicitacao, d.justificativa, JSON.stringify(itens)],
       );
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.incluida", detalhe: { id: nova.id, secretaria: d.secretaria } }, c);
@@ -268,24 +310,33 @@ export function rotasProcessos() {
   r.put("/processos/:id/solicitacoes/:sid", exigePapel("requisitante", "contratacao"), async (req, res) => {
     const p = await processoDo(req);
     const sid = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
-    const d = z.object({ anterior: z.string().max(LIMITE_SOLICITACAO), descricao: z.string().trim().max(LIMITE_SOLICITACAO) }).parse(req.body);
-    const s = await q1<{ secretaria: string; referencia: string }>(
-      "select secretaria, referencia from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
+    const d = z.object({
+      anterior: z.string().max(LIMITE_SOLICITACAO),
+      descricao: z.string().trim().max(LIMITE_SOLICITACAO),
+      itens: itensSolicitacao.optional(),
+      itens_anteriores: itensSolicitacao.optional(),
+    }).refine((dados) => dados.itens === undefined || dados.itens_anteriores !== undefined, "Reabra a solicitação antes de editar os itens.").parse(req.body);
+    const s = await q1<{ secretaria: string; referencia: string; objeto_solicitacao: string; justificativa: string }>(
+      "select secretaria, referencia, objeto as objeto_solicitacao, justificativa from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
     );
     if (!s) throw new ErroHttp(404, "Solicitação não encontrada.");
-    const descricao = await preencherSolicitacao(p, { ...s, descricao: d.descricao });
+    const itens = d.itens && calcularItens(d.itens);
+    const descricao = await preencherSolicitacao(p, { ...s, descricao: d.descricao, itens });
     if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 for update", [p.id]);
       if (processo?.situacao !== "preparacao") throw new ErroHttp(409, "O processo deve estar em preparação para editar a solicitação.");
-      const { rows: [existente] } = await c.query<{ descricao: string; tem_arquivo: boolean }>(
-        "select descricao, arquivo is not null as tem_arquivo from solicitacoes_processo where processo_id=$1 and id=$2 for update", [p.id, sid],
+      const { rows: [existente] } = await c.query<{ descricao: string; tem_arquivo: boolean; itens_iguais: boolean }>(
+        `select descricao, arquivo is not null as tem_arquivo, ($3::jsonb is null or itens = $3::jsonb) as itens_iguais
+         from solicitacoes_processo where processo_id=$1 and id=$2 for update`,
+        [p.id, sid, d.itens_anteriores ? JSON.stringify(d.itens_anteriores) : null],
       );
       if (!existente) throw new ErroHttp(404, "Solicitação não encontrada.");
-      if (existente.descricao !== d.anterior) throw new ErroHttp(409, "A solicitação mudou. Reabra para ver o texto atualizado.");
+      if (existente.descricao !== d.anterior || !existente.itens_iguais) throw new ErroHttp(409, "A solicitação mudou. Reabra para ver a versão atualizada.");
       if (!descricao && !existente.tem_arquivo) throw new ErroHttp(400, "Preencha a descrição da solicitação.");
-      if (descricao === existente.descricao) return;
-      await c.query("update solicitacoes_processo set descricao=$1 where id=$2", [descricao, sid]);
+      if (!itens && descricao === existente.descricao) return;
+      if (itens) await conferirOrcamentos(c, p.id, itens);
+      await c.query("update solicitacoes_processo set descricao=$1, itens=coalesce($2::jsonb,itens) where id=$3", [descricao, itens ? JSON.stringify(itens) : null, sid]);
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.alterada", detalhe: { id: sid } }, c);
     });
@@ -479,12 +530,15 @@ export function rotasProcessos() {
       if (!tipoOrcamento(nomeEnviado(f))) throw new ErroHttp(415, `"${nomeEnviado(f)}": formato não aceito. Envie .pdf, .docx, .xlsx, .xls, .jpg, .png, .txt ou .csv.`);
     }
     const ids: number[] = [];
+    const daSolicitacao = req.query.origem === "solicitacao";
+    if (daSolicitacao && p.situacao !== "preparacao") throw new ErroHttp(409, "O processo deve estar em preparação para anexar a cotação.");
     for (const f of arquivos) {
       const nome = nomeEnviado(f);
       // O orçamento é identificado pelo nome do arquivo, sem a extensão.
       const fornecedor = (nome.replace(/\.[^.]+$/, "").trim() || nome).slice(0, 200);
       // A leitura do texto é um extra: planilha, imagem ou PDF que não puder ser lido fica só com o arquivo.
-      const texto = /\.(docx|pdf|txt|csv)$/i.test(nome) ? await extrairTexto(nome, f.buffer).catch(() => "") : "";
+      const podeExtrair = /\.(docx|xlsx|txt|csv)$/i.test(nome) || (!daSolicitacao && /\.pdf$/i.test(nome));
+      const texto = podeExtrair ? await extrairTexto(nome, f.buffer).catch(() => "") : "";
       const o = await q1("insert into orcamentos (processo_id, fornecedor, nome, arquivo, texto, usuario_id) values ($1,$2,$3,$4,$5,$6) returning id",
         [p.id, fornecedor, nome, f.buffer, texto, req.usuario!.id]);
       ids.push(o.id);
@@ -510,9 +564,16 @@ export function rotasProcessos() {
   });
   r.delete("/processos/:id/orcamentos/:oid", exigePapel("requisitante", "contratacao"), async (req, res) => {
     const p = await processoDo(req);
-    const o = await q1("delete from orcamentos where id=$1 and processo_id=$2 returning fornecedor, nome", [Number(req.params.oid), p.id]);
-    if (!o) throw new ErroHttp(404, "Orçamento não encontrado.");
-    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.removido", detalhe: o });
+    const oid = z.coerce.number().int().positive().max(2147483647).parse(req.params.oid);
+    await tx(async (c) => {
+      await c.query("select id from processos where id=$1 for update", [p.id]);
+      const vinculos = await c.query("select 1 from solicitacoes_processo where processo_id=$1 and itens @> $2::jsonb limit 1",
+        [p.id, JSON.stringify([{ cotacoes: [{ orcamento_id: oid }] }])]);
+      if (vinculos.rowCount) throw new ErroHttp(409, "Retire o vínculo nos itens da Solicitação antes de remover este orçamento.");
+      const { rows: [o] } = await c.query("delete from orcamentos where id=$1 and processo_id=$2 returning fornecedor, nome", [oid, p.id]);
+      if (!o) throw new ErroHttp(404, "Orçamento não encontrado.");
+      await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.removido", detalhe: o }, c);
+    });
     res.json({ ok: true });
   });
 

@@ -1,4 +1,5 @@
 import mammoth from "mammoth";
+import readXlsxFile from "read-excel-file/node";
 import { ErroHttp } from "./erros.js";
 import { textoDePdf } from "./ia.js";
 
@@ -9,6 +10,17 @@ export async function extrairTexto(nome: string, buf: Buffer) {
   if (n.endsWith(".docx")) {
     const { value: html } = await mammoth.convertToHtml({ buffer: buf });
     texto = htmlParaTexto(html);
+  } else if (n.endsWith(".xlsx")) {
+    const planilhas = await readXlsxFile(buf);
+    let restantes = 1000;
+    texto = planilhas.flatMap((aba) => {
+      if (!restantes) return [];
+      const linhas = aba.data.slice(0, restantes);
+      restantes -= linhas.length;
+      return [`Planilha ${aba.sheet}`, ...linhas.map((linha) =>
+        "| " + linha.slice(0, 60).map((v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? "")).replace(/[|\r\n]+/g, " ").slice(0, 1000)).join(" | ") + " |",
+      )];
+    }).join("\n");
   } else if (n.endsWith(".pdf")) {
     texto = await textoDePdf(buf);
   } else if (/\.(txt|md|csv)$/.test(n)) {

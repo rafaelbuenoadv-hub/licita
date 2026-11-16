@@ -33,8 +33,39 @@ export const MODELO_SOLICITACAO = {
   ].join("\n"),
 };
 
-/** Item pedido na solicitação. Quantidade e valor unitário podem ficar em branco quando ainda não são conhecidos. */
-export interface ItemSolicitacao { descricao: string; unidade: string; quantidade: number | null; valor_unitario: number | null }
+export const CRITERIOS_PRECO = { media: "Média", mediana: "Mediana", menor: "Menor valor" };
+export type CriterioPreco = keyof typeof CRITERIOS_PRECO;
+export const FONTES_COTACAO = { fornecedor: "Orçamento de fornecedor", loja: "Loja na internet", pncp: "Valor do PNCP", outra: "Outras fontes" };
+export type FonteCotacao = keyof typeof FONTES_COTACAO;
+export interface CotacaoItem {
+  orcamento_id: number;
+  fornecedor: string;
+  valor_unitario: number | null;
+  fonte?: FonteCotacao;
+  link?: string;
+  consultado_em?: string;
+}
+export interface ItemSolicitacao {
+  descricao: string;
+  unidade: string;
+  quantidade: number | null;
+  valor_unitario: number | null;
+  cotacoes?: CotacaoItem[];
+  criterio?: CriterioPreco;
+}
+
+export function valorDasCotacoes(cotacoes: CotacaoItem[], criterio: CriterioPreco = "media") {
+  const valores = cotacoes.flatMap((c) => c.fornecedor.trim() && c.valor_unitario != null && c.valor_unitario > 0
+    ? [Math.round((c.valor_unitario + Number.EPSILON) * 100)] : []).sort((a, b) => a - b);
+  if (!valores.length) return null;
+  const meio = Math.floor(valores.length / 2);
+  if (criterio === "menor") return valores[0] / 100;
+  if (criterio === "mediana") return Math.round(valores.length % 2 ? valores[meio] : (valores[meio - 1] + valores[meio]) / 2) / 100;
+  return Math.round(valores.reduce((soma, v) => soma + v, 0) / valores.length) / 100;
+}
+
+export const normalizarCotacao = (texto: string) =>
+  texto.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ");
 export const LIMITE_SOLICITACAO = 30000;
 
 const real = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -50,17 +81,35 @@ export function quadroDeItens(itens: ItemSolicitacao[]) {
   if (!itens.length) return "";
   const cel = (t: string) => t.replace(/\s*\n\s*/g, " ").replace(/\|/g, "/").trim();
   const total = totalDosItens(itens);
+  const temCotacoes = itens.some((i) => i.cotacoes !== undefined);
+  const parcial = temCotacoes && itens.some((i) => totalDoItem(i) == null);
   return [
-    "| Item | Descrição | Un. | Qtd. | Valor unitário | Valor total |",
+    temCotacoes ? CABECALHO_COTACOES : CABECALHO_ANTERIOR,
     "|---|---|---|---|---|---|",
     ...itens.map((i, k) => `| ${k + 1} | ${cel(i.descricao)} | ${cel(i.unidade) || "—"} | ${i.quantidade == null ? "—" : numero(i.quantidade)} | ${i.valor_unitario == null ? "—" : real(i.valor_unitario)} | ${totalDoItem(i) == null ? "—" : real(totalDoItem(i)!)} |`),
-    ...(total == null ? [] : [`| | Total estimado | | | | ${real(total)} |`]),
+    ...(total == null ? [] : [`| | ${parcial ? "Subtotal dos itens com valor" : "Total estimado"} | | | | ${real(total)} |`]),
   ].join("\n");
 }
+const CABECALHO_ANTERIOR = "| Item | Descrição | Un. | Qtd. | Valor unitário | Valor total |";
+const CABECALHO_COTACOES = "| Item | Descrição | Un. | Qtd. | Valor unitário estimado | Valor total |";
 const TITULO_ITENS = "## Itens solicitados";
 /** Garante o quadro de itens no texto mesmo quando o modelo do órgão não tem o campo [[Itens]]: entra antes das assinaturas. */
 export function inserirItens(texto: string, itens: ItemSolicitacao[]) {
-  if (!itens.length || !texto.trim() || /\[\[\s*(?:preencher:\s*)?itens(?: solicitados)?\s*\]\]/i.test(texto) || texto.split("\n").some((l) => l.trim() === TITULO_ITENS)) return texto;
+  if (!texto.trim()) return texto;
+  const linhas = texto.split("\n");
+  const indice = linhas.findIndex((l) => [CABECALHO_ANTERIOR, CABECALHO_COTACOES].includes(l.trim()));
+  if (indice >= 0) {
+    let fim = indice + 1;
+    while (fim < linhas.length && linhas[fim].trimStart().startsWith("|")) fim++;
+    linhas.splice(indice, fim - indice, quadroDeItens(itens) || "[[Itens]]");
+    return linhas.join("\n");
+  }
+  if (!itens.length || /\[\[\s*(?:preencher:\s*)?itens(?: solicitados)?\s*\]\]/i.test(texto)) return texto;
+  const titulo = linhas.findIndex((l) => l.trim() === TITULO_ITENS);
+  if (titulo >= 0) {
+    linhas.splice(titulo + 1, 0, quadroDeItens(itens), "");
+    return linhas.join("\n");
+  }
   const assinatura = texto.search(/^\s*@ /m);
   const antes = assinatura < 0 ? texto.trimEnd() : texto.slice(0, assinatura).trimEnd();
   const depois = assinatura < 0 ? "" : texto.slice(assinatura).trimStart();

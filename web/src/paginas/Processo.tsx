@@ -210,7 +210,7 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
             </li>);
         })}</ul>
       </div>
-      {(e.id === "dfd" || e.id === "precos") && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} />}
+      {e.id === "precos" && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} irAosItens={() => irPara("dfd")} />}
       {e.id === "precos" && p.via === "dispensa" && <Fracionamento id={p.id} />}
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>
         <ul className="aten">{e.atencao.map((a: string) => <li key={a}>{a}</li>)}</ul></div>
@@ -236,15 +236,13 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
   );
 }
 
-/* Orçamentos recebidos: ficam na Solicitação e reaparecem na etapa de orçamento estimado. */
-function Orcamentos({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void }) {
+/* Consulta e comparação dos orçamentos do processo na etapa de preços. */
+function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void; irAosItens: () => void }) {
   const { eu, ia } = useEu();
   const pode = tem(eu, "requisitante", "contratacao") && p.situacao !== "cancelado";
-  const [busy, setBusy] = useState(false);
   const [lendo, setLendo] = useState<number[]>([]);
   const lista: any[] = p.orcamentos ?? [];
-  const comValor = lista.filter((o) => o.valor != null);
-  const legivel = (nome: string) => /\.(pdf|jpe?g|png|docx|txt|csv)$/i.test(nome);
+  const legivel = (nome: string) => /\.(pdf|jpe?g|png|docx|xlsx|txt|csv)$/i.test(nome);
   const alertas = compararOrcamentos(lista.map((o) => ({ id: o.id, nome: o.nome, dados: o.dados as DadosOrcamento | null })), new Date().toLocaleDateString("sv-SE"));
   /** Pede à IA a leitura de cada orçamento, um por vez, e mostra o que não pôde ser lido. */
   const ler = async (ids: number[]) => {
@@ -256,21 +254,6 @@ function Orcamentos({ p, recarregar, setAviso }: { p: any; recarregar: () => Pro
       finally { setLendo((l) => l.filter((x) => x !== id)); await recarregar(); }
     }
     if (falhas.length) setAviso({ t: `Não foi possível ler ${falhas.length === 1 ? "um orçamento" : `${falhas.length} orçamentos`}: ${falhas[0]}`, tipo: "bad" });
-  };
-  const enviar = async (arqs: File[]) => {
-    if (!arqs.length) return;
-    setBusy(true);
-    try {
-      const fd = new FormData();
-      for (const a of arqs) fd.append("arquivo", a);
-      const r = await api.post<{ ids: number[] }>(`/processos/${p.id}/orcamentos`, fd);
-      await recarregar();
-      const paraLer = ia.disponivel ? r.ids.filter((_, k) => legivel(arqs[k]?.name ?? "")) : [];
-      setAviso({ t: `${arqs.length === 1 ? `Orçamento "${arqs[0].name}" anexado.` : `${arqs.length} orçamentos anexados.`}${paraLer.length ? " A IA está lendo os dados; confira o resultado na lista." : ""}`, tipo: "ok" });
-      setBusy(false);
-      await ler(paraLer);
-    } catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
-    finally { setBusy(false); }
   };
   const remover = async (o: any) => {
     try { await api.del(`/processos/${p.id}/orcamentos/${o.id}`); await recarregar(); }
@@ -286,7 +269,7 @@ function Orcamentos({ p, recarregar, setAviso }: { p: any; recarregar: () => Pro
   const inclusao = (v: string) => v === "incluso" ? "incluído" : v === "nao_incluso" ? "não incluído" : "não informado";
   return (
     <div className="sec"><span className="lbl">Orçamentos</span>
-      <p className="small muted">Anexe aqui os orçamentos recebidos dos fornecedores (PDF, Word, planilha ou foto). Você pode escolher vários arquivos de uma vez. A IA lê fornecedor, itens e valores de PDF, foto, Word e texto; confira com o documento antes de usar.</p>
+      <p className="small muted">Consulte as propostas do processo e registre as cotações na Solicitação.</p>
       {lista.length === 0 ? <p className="muted">Nenhum orçamento anexado.</p> :
         <div className="tw"><table className="t">
           <thead><tr><th>Orçamento</th><th className="r">Valor (R$)</th><th /></tr></thead>
@@ -318,15 +301,9 @@ function Orcamentos({ p, recarregar, setAviso }: { p: any; recarregar: () => Pro
             </Fragment>);
           })}</tbody>
         </table></div>}
-      {comValor.length > 1 && <p className="small muted">{comValor.length} orçamentos com valor · menor: {brl(Math.min(...comValor.map((o) => o.valor)))} · média: {brl(comValor.reduce((s, o) => s + o.valor, 0) / comValor.length)}</p>}
       {alertas.length > 0 && <div role="status"><span className="lbl">Pontos de atenção na comparação</span>
         <ul className="pends">{alertas.map((a, k) => <li key={k} className="aviso"><span>{a.texto}</span></li>)}</ul></div>}
-      {pode && <div className="tools">
-        <label className="btn pri" htmlFor="o-arquivos">{busy ? "Enviando…" : "Anexar orçamentos"}</label>
-        <input id="o-arquivos" type="file" multiple hidden disabled={busy || lendo.length > 0} accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv"
-          onChange={(e) => { enviar([...(e.target.files ?? [])]); e.target.value = ""; }} />
-        <span className="small muted">Até 20 arquivos por vez, 20 MB cada. {ia.disponivel ? "O valor lido pela IA entra na lista quando o campo está vazio; o que você digitar prevalece." : "O valor de cada orçamento é informado na lista."}</span>
-      </div>}
+      <button className="btn sm" type="button" onClick={irAosItens}>Ir aos itens da Solicitação</button>
     </div>
   );
 }
