@@ -1086,3 +1086,39 @@ test("exclusão retira o processo das consultas e conserva o protocolo e a audit
   const posterior = await lic.post("/api/processos", dados);
   assert.notEqual(posterior.dados.protocolo, r.dados.protocolo);
 });
+
+test("Solicitação abre a trilha e o painel acompanha o DFD sem alterar o fluxo formal", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const painel = async () => (await lic.get("/api/painel")).dados.processos.por_etapa as { id: string; numero: number; etapa: string; total: number }[];
+  const antes = await painel();
+  assert.deepEqual(antes.slice(0, 3).map(({ id, numero }) => [id, numero]), [["solicitacao", 1], ["dfd", 2], ["etp", 3]]);
+  const r = await lic.post("/api/processos", { objeto: "Compra de materiais para a educação", tipo: "bens", via: "licitacao", ano: 2099 });
+  assert.equal(r.status, 201);
+  const caminho = `/api/processos/${r.dados.id}`;
+  const lista = async () => (await lic.get("/api/processos?ano=2099")).dados.find((p: { id: number }) => p.id === r.dados.id);
+  assert.equal((await lista()).trilha.atual.id, "solicitacao");
+  const inicio = (await lic.get(caminho)).dados;
+  assert.equal(inicio.trilha.atual.id, "solicitacao");
+  assert.equal(inicio.trilha.etapas[1].estado, "disponivel");
+  assert.equal(inicio.trilha.etapas[2].estado, "bloqueada");
+  assert.equal((await painel())[0].total, antes[0].total + 1);
+
+  const pedido = await lic.post(`${caminho}/solicitacoes`, {
+    chave_envio: randomUUID(), secretaria: "Educação", descricao: "Reposição de material de ensino.",
+  });
+  assert.equal(pedido.status, 201);
+  const seguir = (await lic.get(caminho)).dados;
+  assert.equal(seguir.trilha.atual.id, "dfd");
+  assert.equal(seguir.trilha.etapas[0].estado, "concluida");
+  assert.equal(seguir.etapa_atual, 0);
+  assert.equal((await lista()).trilha.atual.numero, 2);
+  const proximoPainel = await painel();
+  assert.equal(proximoPainel[0].total, antes[0].total);
+  assert.equal(proximoPainel[1].total, antes[1].total + 1);
+
+  const legado = await lic.post("/api/processos", { objeto: "Outro processo que já está no DFD", tipo: "bens", via: "licitacao", ano: 2099 });
+  assert.equal((await lic.post(`/api/processos/${legado.dados.id}/minutas/dfd`, { texto: "# DFD" })).status, 200);
+  const detalheLegado = (await lic.get(`/api/processos/${legado.dados.id}`)).dados;
+  assert.equal(detalheLegado.trilha.atual.id, "dfd");
+  assert.equal(detalheLegado.trilha.etapas[0].estado, "disponivel");
+});

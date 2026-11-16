@@ -367,6 +367,27 @@ export function atual(p: ProcessoBase, c: Checks) {
   return ETAPAS.length - 1;
 }
 export const concluido = (p: ProcessoBase, c: Checks) => ETAPAS.every((e) => feita(e, p, c));
+export const TRILHA_PROCESSO = [{ id: "solicitacao", nome: "Solicitação" }, ...ETAPAS]
+  .map(({ id, nome }, i) => ({ id, nome, numero: i + 1 }));
+
+type EstadoTrilha = "atual" | "concluida" | "disponivel" | "bloqueada";
+export type EtapaNaTrilha = (typeof TRILHA_PROCESSO)[number] & { estado: EstadoTrilha };
+export interface TrilhaProcesso { atual: EtapaNaTrilha; etapas: EtapaNaTrilha[] }
+
+export function trilhaDoProcesso(p: ProcessoBase, c: Checks, solicitacaoRegistrada: boolean, temMinutaDfd: boolean): TrilhaProcesso {
+  const formal = atual(p, c);
+  const comDfd = formal > 0 || temMinutaDfd || feitos(ETAPAS[0], p, c) > 0;
+  const indice = solicitacaoRegistrada || comDfd ? formal + 1 : 0;
+  const etapas = TRILHA_PROCESSO.map((etapa, i): EtapaNaTrilha => {
+    if (i === 0) return { ...etapa, estado: solicitacaoRegistrada ? "concluida" : indice === 0 ? "atual" : "disponivel" };
+    const formalIx = i - 1;
+    const estado = feita(ETAPAS[formalIx], p, c) ? "concluida"
+      : i === indice ? "atual" : liberada(formalIx, p, c) ? "disponivel" : "bloqueada";
+    return { ...etapa, estado };
+  });
+  return { atual: etapas[indice], etapas };
+}
+
 export const etapaPorId = (id: string) => ETAPAS.find((e) => e.id === id);
 export function etapaDoItem(itemId: string) {
   return ETAPAS.find((e) => e.itens.some((i) => i.id === itemId));

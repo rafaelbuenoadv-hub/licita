@@ -128,7 +128,7 @@ textarea.edit{min-height:460px;background:var(--paper);color:var(--paper-ink);fo
 .chatform textarea{min-height:44px;max-height:160px;flex:1;min-width:0}
 details.box>summary{padding:12px 16px;cursor:pointer;font-weight:600;font-family:var(--f-head)}
 @media (max-width:1180px){ .mesa{grid-template-columns:200px minmax(0,1fr)} .chat{grid-column:1/-1;position:static;max-height:none} .msgs{max-height:420px} }
-@media (max-width:720px){ .mesa{grid-template-columns:minmax(0,1fr)} .trilha{flex-direction:row;overflow-x:auto;gap:4px} .et{grid-template-columns:26px;min-width:44px;width:auto;justify-items:center} .et .tx{display:none} }
+@media (max-width:720px){ .mesa{grid-template-columns:minmax(0,1fr)} .trilha{flex-direction:row;overflow-x:auto;gap:4px} .et{grid-template-columns:26px minmax(0,1fr);min-width:126px;width:auto}.et .tx{display:block} }
 
 .titular{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px 12px;padding:8px 10px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0}
 .titular label{color:var(--ink)} .titular input[readonly]{background:var(--surface)} .titular>span{grid-column:1/-1}

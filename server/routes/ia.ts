@@ -11,7 +11,7 @@ import { ErroHttp } from "../erros.js";
 import { FORMATO_MINUTA, MODELO, gerarEstruturado, gerarTexto, iaDisponivel, traduzErroIA } from "../ia.js";
 import { extrairTexto } from "../extrair.js";
 import { checksDo, minutaVigente, nomeEnviado, processoDo, salvarMinuta, upload, type Processo } from "./processos.js";
-import { ETAPAS, TIPOS, VIAS, atual, etapaPorId, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../shared/etapas.js";
+import { ETAPAS, TIPOS, TRILHA_PROCESSO, VIAS, atual, etapaPorId, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../shared/etapas.js";
 import { fundamentosMinuta } from "../fundamentos-minuta.js";
 import { normasOficiais } from "../normas-oficiais.js";
 
@@ -85,10 +85,11 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   for (const a of apoios) l.push(`DOCUMENTO DE APOIO À SOLICITAÇÃO DE ${a.secretaria}: ${a.nome}`,
     a.texto ? corta(a.texto) : "Arquivo anexado à solicitação.");
   l.push(`Observações: ${p.obs || "nenhuma"}`, "", "ANDAMENTO");
-  l.push("1. Solicitação: pedidos, itens e orçamentos das secretarias");
+  const [inicio, ...formais] = TRILHA_PROCESSO;
+  l.push(`${inicio.numero}. ${inicio.nome}: ${solicitacoes.length} ${solicitacoes.length === 1 ? "pedido registrado" : "pedidos registrados"}`);
   ETAPAS.forEach((x, i) => {
     const its = itensDe(x, p);
-    l.push(`${i + 2}. ${x.nome}: ${its.filter((it) => c[it.id]).length} de ${its.length} itens conferidos`);
+    l.push(`${formais[i].numero}. ${x.nome}: ${its.filter((it) => c[it.id]).length} de ${its.length} itens conferidos`);
   });
   if (solicitacao) {
     l.push("", "ABA ABERTA: Solicitação", "Ajude a registrar os pedidos das secretarias, os itens e os orçamentos. O DFD tem uma etapa própria de minuta e conferência.");

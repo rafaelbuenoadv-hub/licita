@@ -16,7 +16,7 @@ import { lerTimbrado, timbradosDoOrgao } from "../timbrados.js";
 import { extrairTexto } from "../extrair.js";
 import { conferirEtapa, proximaEtapa, rascunhoEtp } from "../conferencia.js";
 import {
-  ETAPAS, aplicarPendencias, atual, concluido, etapaDoItem, etapaPorId, itensDe, liberada, podeMarcar,
+  ETAPAS, aplicarPendencias, atual, concluido, etapaDoItem, etapaPorId, itensDe, liberada, podeMarcar, trilhaDoProcesso,
   type Checks, type Tipo, type Via,
 } from "../../shared/etapas.js";
 
@@ -203,12 +203,14 @@ export function rotasProcessos() {
     const ano = req.query.ano ? Number(req.query.ano) : null;
     const rows = await q(
       `select p.id, p.protocolo, p.numero, p.procedimento, p.objeto, p.tipo, p.via, p.valor_estimado, p.ano, p.situacao, p.requisitante, p.areas_adicionais, p.atualizado_em,
-              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
+              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens,
+              exists(select 1 from solicitacoes_processo s where s.processo_id=p.id) as tem_solicitacao,
+              exists(select 1 from minutas m where m.processo_id=p.id and m.etapa='dfd') as tem_dfd
          from processos p where p.orgao_id = $1 and p.excluido_em is null and ($2::int is null or p.ano = $2) order by p.atualizado_em desc`,
       [req.usuario!.orgao_id, ano]);
-    res.json(rows.map(({ itens, ...p }) => {
+    res.json(rows.map(({ itens, tem_solicitacao, tem_dfd, ...p }) => {
       const c: Checks = Object.fromEntries((itens as string[]).map((i) => [i, true]));
-      return { ...p, etapa_atual: atual(p, c), concluido: concluido(p, c), feitas: ETAPAS.map((e) => itensDe(e, p).every((i) => c[i.id])) };
+      return { ...p, trilha: trilhaDoProcesso(p, c, tem_solicitacao, tem_dfd), etapa_atual: atual(p, c), concluido: concluido(p, c), feitas: ETAPAS.map((e) => itensDe(e, p).every((i) => c[i.id])) };
     }));
   });
 
@@ -257,6 +259,7 @@ export function rotasProcessos() {
     const c: Checks = Object.fromEntries(checagens.map((x) => [x.item, true]));
     res.json({
       ...p, checagens, minutas, anexos, orcamentos, solicitacoes, timbrados: timbradosDoOrgao(orgao), secretarias: secretarias.map((s) => s.secretaria), etapa_atual: atual(p, c), concluido: concluido(p, c),
+      trilha: trilhaDoProcesso(p, c, solicitacoes.length > 0, minutas.some((m) => m.etapa === "dfd")),
       numeracao: { liberada: numeracaoLiberada(p, c), sugestao: await sugestaoNumeracao(p) },
       pode: { editar: temPapel(req.usuario!, "requisitante", "contratacao"), numerar: temPapel(req.usuario!, "contratacao", "autoridade"), etapas: ETAPAS.filter((e) => podeMarcar(req.usuario!.papeis, e)).map((e) => e.id) },
     });

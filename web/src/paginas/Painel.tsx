@@ -27,8 +27,8 @@ export function Painel() {
       <section className="panel">
         <div className="pad-s row"><h2>Onde estão os processos</h2><span className="small muted">em preparo, por etapa</span></div>
         <div className="tw"><table className="t"><tbody>
-          {d.processos.por_etapa.map((e: any, i: number) => (
-            <tr key={i}><td className="mono muted" style={{ width: 30 }}>{i + 1}</td><td>{e.etapa}</td>
+          {d.processos.por_etapa.map((e: { id: string; numero: number; etapa: string; total: number }) => (
+            <tr key={e.id}><td className="mono muted" style={{ width: 30 }}>{e.numero}</td><td><Link to={`/processos?${new URLSearchParams({ etapa: e.id, ano: "", situacao: "preparacao" })}`}>{e.etapa}</Link></td>
               <td style={{ width: "50%" }}><span className="bar" aria-hidden>{Array.from({ length: Math.min(e.total, 20) }, (_, k) => <i key={k} className="cur" />)}</span></td>
               <td className="r">{e.total}</td></tr>))}
         </tbody></table></div>
@@ -61,7 +61,7 @@ export function Painel() {
           <div className="tw"><table className="t"><tbody>
             {d.processos.parados.map((p: any) => (
               <tr key={p.id} className="link" onClick={() => nav(`/processos/${p.id}`)}>
-                <td className="mono">{p.protocolo}</td><td>{p.objeto}</td><td>{p.etapa}</td><td className="r">{p.parado_dias} dias</td></tr>))}
+                <td className="mono">{p.protocolo}</td><td>{p.objeto}</td><td>{p.etapa_numero}. {p.etapa}</td><td className="r">{p.parado_dias} dias</td></tr>))}
           </tbody></table></div>}
       </section>
     </>

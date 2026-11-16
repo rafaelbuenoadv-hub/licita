@@ -3,7 +3,7 @@ import { q } from "../db.js";
 import { exigeLogin } from "../auth.js";
 import { calcular } from "./contratos.js";
 import { resumoFracionamento } from "./pca.js";
-import { ETAPAS, atual, type Checks } from "../../shared/etapas.js";
+import { TRILHA_PROCESSO, atual, trilhaDoProcesso, type Checks } from "../../shared/etapas.js";
 
 export function rotasPainel() {
   const r = Router();
@@ -12,14 +12,18 @@ export function rotasPainel() {
     const ano = new Date().getFullYear();
     const procs = await q(
       `select p.id, p.protocolo, p.numero, p.objeto, p.tipo, p.via, p.situacao, p.atualizado_em,
-              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
+              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens,
+              exists(select 1 from solicitacoes_processo s where s.processo_id=p.id) as tem_solicitacao,
+              exists(select 1 from minutas m where m.processo_id=p.id and m.etapa='dfd') as tem_dfd
          from processos p where p.orgao_id=$1 and p.excluido_em is null and p.situacao = 'preparacao' order by p.atualizado_em`, [orgao]);
-    const emPreparo = procs.map(({ itens, ...p }) => {
+    const emPreparo = procs.map(({ itens, tem_solicitacao, tem_dfd, ...p }) => {
       const c: Checks = Object.fromEntries((itens as string[]).map((i) => [i, true]));
-      const ix = atual(p, c);
-      return { ...p, etapa: ETAPAS[ix].nome, etapa_ix: ix, parado_dias: Math.floor((Date.now() - new Date(p.atualizado_em).getTime()) / 86400000) };
+      const { atual: etapa } = trilhaDoProcesso(p, c, tem_solicitacao, tem_dfd);
+      return { ...p, etapa: etapa.nome, etapa_ix: atual(p, c), etapa_id: etapa.id, etapa_numero: etapa.numero,
+        parado_dias: Math.floor((Date.now() - new Date(p.atualizado_em).getTime()) / 86400000) };
     });
-    const porEtapa = ETAPAS.map((e, i) => ({ etapa: e.nome, total: emPreparo.filter((p) => p.etapa_ix === i).length }));
+    const porEtapa = TRILHA_PROCESSO.map((e) => ({ id: e.id, etapa: e.nome, numero: e.numero,
+      total: emPreparo.filter((p) => p.etapa_id === e.id).length }));
 
     const cs = await q("select * from contratos where orgao_id=$1 and situacao='vigente'", [orgao]);
     const ids = cs.map((c) => c.id);
