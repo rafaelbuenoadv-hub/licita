@@ -113,8 +113,8 @@ table.t tr.link{cursor:pointer} table.t tr.link:hover td{background:var(--sunk)}
 .folha table{border-collapse:collapse;width:100%;font-size:14px}
 .folha th,.folha td{border:1px solid var(--paper-line);padding:4px 7px;vertical-align:top;text-align:left}
 .folha .quadro-itens th{overflow-wrap:normal}
-.folha .quadro-itens th:nth-child(2){min-width:14ch}
-.folha .quadro-itens th:nth-child(n+7){min-width:9ch}
+.folha .quadro-itens th:nth-child(2){min-width:24ch}
+.folha .quadro-itens th:nth-child(n+5){min-width:9ch}
 .folha .vazio{font-family:var(--f-body);font-size:14px;color:#666;text-align:center;margin-top:40px}
 textarea.edit{min-height:460px;background:var(--paper);color:var(--paper-ink);font-family:var(--f-mono);font-size:13px;line-height:1.5}
 .pend{display:flex;flex-direction:column;gap:12px;border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--bg)}
