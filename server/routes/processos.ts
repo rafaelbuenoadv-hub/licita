@@ -1,3 +1,5 @@
+import { MODELO_SOLICITACAO } from "../../shared/solicitacao.js";
+import { modeloSolicitacao, preencherSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesCadastro } from "../portarias.js";
 import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
 import { Router, type Request, type Response } from "express";
@@ -92,6 +94,14 @@ function enviarArquivo(res: Response, nome: string, arquivo: Buffer) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Content-Disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(nome)}`);
   res.send(arquivo);
+}
+
+async function timbradoDoProcesso(orgaoId: number, codigo: unknown) {
+  if (!codigo) return;
+  const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [orgaoId]);
+  const timbrado = await lerTimbrado(orgao, codigo);
+  if (!timbrado) throw new ErroHttp(404, "Timbrado não encontrado.");
+  return timbrado;
 }
 
 /** A numeração é liberada quando só falta a última etapa (autorização e publicação) ou tudo já foi concluído. */
@@ -199,6 +209,11 @@ export function rotasProcessos() {
     res.json({ ok: true });
   });
 
+  r.get("/processos/:id/solicitacoes/modelo", async (req, res) => {
+    const p = await processoDo(req);
+    res.json({ texto: await modeloSolicitacao(p.orgao_id) });
+  });
+
   r.post("/processos/:id/solicitacoes", exigePapel("requisitante", "contratacao"), upload.single("arquivo"), async (req, res) => {
     const p = await processoDo(req);
     const d = z.object({
@@ -217,6 +232,8 @@ export function rotasProcessos() {
     const texto = nome && arquivo && !/\.pdf$/i.test(nome)
       ? await extrairTexto(nome, arquivo).catch(() => "")
       : "";
+    const descricao = await preencherSolicitacao(p, d);
+    if (descricao.length > 10000) throw new ErroHttp(400, "A descrição preenchida ultrapassa 10 mil caracteres.");
     const resultado = await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and orgao_id=$2 for update", [p.id, p.orgao_id]);
       if (!processo) throw new ErroHttp(404, "Processo não encontrado.");
@@ -230,13 +247,52 @@ export function rotasProcessos() {
       const { rows: [nova] } = await c.query(
         `insert into solicitacoes_processo (processo_id, chave_envio, secretaria, referencia, descricao, nome_arquivo, arquivo, texto_arquivo, usuario_id)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
-        [p.id, d.chave_envio, d.secretaria, d.referencia, d.descricao, nome, arquivo, texto, req.usuario!.id],
+        [p.id, d.chave_envio, d.secretaria, d.referencia, descricao, nome, arquivo, texto, req.usuario!.id],
       );
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.incluida", detalhe: { id: nova.id, secretaria: d.secretaria } }, c);
       return { id: nova.id, nova: true };
     });
     res.status(resultado.nova ? 201 : 200).json({ id: resultado.id });
+  });
+
+  r.put("/processos/:id/solicitacoes/:sid", exigePapel("requisitante", "contratacao"), async (req, res) => {
+    const p = await processoDo(req);
+    const sid = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
+    const d = z.object({ anterior: z.string().max(10000), descricao: z.string().trim().max(10000) }).parse(req.body);
+    const s = await q1<{ secretaria: string; referencia: string }>(
+      "select secretaria, referencia from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
+    );
+    if (!s) throw new ErroHttp(404, "Solicitação não encontrada.");
+    const descricao = await preencherSolicitacao(p, { ...s, descricao: d.descricao });
+    if (descricao.length > 10000) throw new ErroHttp(400, "A descrição preenchida ultrapassa 10 mil caracteres.");
+    await tx(async (c) => {
+      const { rows: [processo] } = await c.query("select situacao from processos where id=$1 for update", [p.id]);
+      if (processo?.situacao !== "preparacao") throw new ErroHttp(409, "O processo deve estar em preparação para editar a solicitação.");
+      const { rows: [existente] } = await c.query<{ descricao: string; tem_arquivo: boolean }>(
+        "select descricao, arquivo is not null as tem_arquivo from solicitacoes_processo where processo_id=$1 and id=$2 for update", [p.id, sid],
+      );
+      if (!existente) throw new ErroHttp(404, "Solicitação não encontrada.");
+      if (existente.descricao !== d.anterior) throw new ErroHttp(409, "A solicitação mudou. Reabra para ver o texto atualizado.");
+      if (!descricao && !existente.tem_arquivo) throw new ErroHttp(400, "Preencha a descrição da solicitação.");
+      if (descricao === existente.descricao) return;
+      await c.query("update solicitacoes_processo set descricao=$1 where id=$2", [descricao, sid]);
+      await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
+      await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.alterada", detalhe: { id: sid } }, c);
+    });
+    res.json({ ok: true });
+  });
+
+  r.get("/processos/:id/solicitacoes/:sid/docx", async (req, res) => {
+    const p = await processoDo(req);
+    const sid = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
+    const s = await q1<{ descricao: string }>(
+      "select descricao from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
+    );
+    if (!s?.descricao) throw new ErroHttp(404, "Texto da solicitação não encontrado.");
+    const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
+    const arquivo = await minutaParaDocx(s.descricao, MODELO_SOLICITACAO.doc, timbrado);
+    enviarArquivo(res, `solicitacao-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.docx`, arquivo);
   });
 
   r.get("/processos/:id/solicitacoes/:sid/arquivo", async (req, res) => {
@@ -370,12 +426,7 @@ export function rotasProcessos() {
       ? await q1("select texto, versao from minutas where processo_id=$1 and etapa=$2 and versao=$3", [p.id, req.params.etapa, v])
       : await minutaVigente(p.id, String(req.params.etapa));
     if (!e || !m) throw new ErroHttp(404, "Minuta não encontrada.");
-    let timbrado;
-    if (req.query.timbrado) {
-      const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [p.orgao_id]);
-      timbrado = await lerTimbrado(orgao, req.query.timbrado);
-      if (!timbrado) throw new ErroHttp(404, "Timbrado não encontrado.");
-    }
+    const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
     const buf = await minutaParaDocx(m.texto, e.doc ?? e.nome, timbrado);
     const nome = `${e.nome} - ${p.numero ? `PA ${p.numero}` : `Protocolo ${p.protocolo}`} - v${m.versao}.docx`.replace(/[\\/:*?"<>|]/g, "-");
     const ascii = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7e]/g, "_");

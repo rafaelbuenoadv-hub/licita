@@ -338,6 +338,13 @@ test("Ibaiti pode baixar seus 11 timbrados e aplicá-los à minuta Word", async 
   assert.ok(minuta.dados.includes(Buffer.from("word/header1.xml")));
   assert.ok(minuta.dados.includes(Buffer.from("word/footer1.xml")));
   assert.equal((await admin.get(`${rota}/docx?timbrado=inexistente`)).status, 404);
+  const solicitacoes = `/api/processos/${id}/solicitacoes`;
+  const s = await admin.post(solicitacoes, { chave_envio: randomUUID(), secretaria: "Administração", descricao: "# SOLICITAÇÃO" });
+  assert.equal(s.status, 201);
+  const solicitacao = await admin.get(`${solicitacoes}/${s.dados.id}/docx?timbrado=semad`);
+  assert.equal(solicitacao.status, 200);
+  assert.ok(solicitacao.dados.includes(Buffer.from("word/header1.xml")));
+  assert.ok(solicitacao.dados.includes(Buffer.from("word/footer1.xml")));
 });
 
 test("anexo .docx tem o texto extraído (inclusive quadros)", async () => {
@@ -763,4 +770,42 @@ test("solicitação existente entra no processo pelo arquivo, com descrição op
   assert.equal(registro.descricao, "");
   assert.equal(registro.nome_arquivo, "memorando.pdf");
   assert.deepEqual((await lic.get(`${caminho}/${anexo.dados.id}/arquivo`)).dados, Buffer.from(original));
+});
+
+test("modelo da solicitação preenche o titular, guarda pendências e exporta a versão editada", async () => {
+  const admin = await new Cliente().entrar("admin@a.gov.br");
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+  const secretaria = "Serviços de Teste";
+  const titular = await admin.post("/api/admin/secretarios", { secretaria, nome: "Titular de Teste", portaria: "77/2026" });
+  assert.equal(titular.status, 201, JSON.stringify(titular.dados));
+  const modelo = "# PEDIDO\nProtocolo [[Protocolo]]\n[[Objeto]]\n[[Justificativa]]\n@ [[Nome do secretário]]\n@ Portaria de nomeação nº [[Portaria de nomeação]]";
+  const modelos = await admin.get("/api/modelos");
+  assert.ok(modelos.dados.some((m: { etapa: string }) => m.etapa === "solicitacao"));
+  assert.equal((await admin.put("/api/admin/modelos/solicitacao", { texto: modelo })).status, 200);
+  const p = await req.post("/api/processos", { objeto: "Compra de papel reciclado", tipo: "bens", via: "licitacao", ano: 2091 });
+  assert.equal(p.status, 201);
+  const processo = `/api/processos/${p.dados.id}`;
+  const caminho = `${processo}/solicitacoes`;
+  assert.deepEqual((await req.get(`${caminho}/modelo`)).dados, { texto: modelo });
+  assert.equal((await outro.get(`${caminho}/modelo`)).status, 404);
+  const s = await req.post(caminho, { chave_envio: randomUUID(), secretaria, descricao: modelo });
+  assert.equal(s.status, 201);
+  const detalhe = (await req.get(processo)).dados.solicitacoes[0];
+  assert.ok(detalhe.descricao.includes(p.dados.protocolo));
+  assert.match(detalhe.descricao, /Compra de papel reciclado/);
+  assert.match(detalhe.descricao, /Titular de Teste/);
+  assert.match(detalhe.descricao, /Portaria de nomeação nº 77\/2026/);
+  assert.match(detalhe.descricao, /\[\[Justificativa\]\]/);
+  const rota = `${caminho}/${s.dados.id}`;
+  const descricao = detalhe.descricao.replace("[[Justificativa]]", "Reposição do estoque.");
+  assert.equal((await outro.put(rota, { descricao, anterior: detalhe.descricao })).status, 404);
+  assert.equal((await req.put(rota, { descricao, anterior: detalhe.descricao })).status, 200);
+  assert.equal((await req.put(rota, { descricao: "Outro texto", anterior: detalhe.descricao })).status, 409);
+  assert.equal((await req.get(processo)).dados.solicitacoes[0].descricao, descricao);
+  const word = await req.get(`${rota}/docx`);
+  assert.match(word.tipo, /wordprocessingml/);
+  assert.equal(word.dados.subarray(0, 2).toString(), "PK");
+  assert.equal((await outro.get(`${rota}/docx`)).status, 404);
+  assert.equal((await admin.put("/api/admin/modelos/solicitacao", { texto: "" })).status, 200);
 });
