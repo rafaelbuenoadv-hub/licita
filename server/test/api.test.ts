@@ -1,6 +1,7 @@
 // Testes de ponta a ponta da API. Exigem um Postgres vazio em DATABASE_URL (ex.: banco licita_test).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { PDFDocument } from "pdf-lib";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -661,4 +662,57 @@ test("concluir e avançar: confere a solicitação, aponta o que falta e abre o 
   r = await admin.post(rota);
   assert.equal(r.dados.proxima.rascunho, false);
   assert.equal((await admin.get(`/api/processos/${id}/minutas/etp`)).dados.vigente.texto, "# ETP revisado pelo servidor");
+});
+
+test("revisão avulsa preserva PDFs, versões e evidências dentro do órgão", async () => {
+  const jur = await new Cliente().entrar("jur@a.gov.br");
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+  const dados = { numero: "17/2024", objeto: "Manutenção de escola", via: "dispensa" };
+  assert.equal((await req.post("/api/revisoes", dados)).status, 403);
+  const criada = await jur.post("/api/revisoes", dados);
+  assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  const caminho = `/api/revisoes/${criada.dados.id}`;
+  assert.equal((await lic.get(caminho)).dados.processo_id, null);
+  assert.equal((await outro.get(caminho)).status, 404);
+
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  const original = Buffer.from(await pdf.save());
+  const anexar = (conteudo: BlobPart) => {
+    const form = new FormData();
+    form.append("tipo", "autos");
+    form.append("arquivo", new Blob([conteudo], { type: "application/pdf" }), "autos.pdf");
+    return jur.post(`${caminho}/arquivos`, form);
+  };
+  assert.equal((await anexar("Arquivo inválido")).status, 415);
+  const anexo = await anexar(Uint8Array.from(original));
+  assert.equal(anexo.status, 201, JSON.stringify(anexo.dados));
+  assert.equal((await anexar(Uint8Array.from(original))).dados.id, anexo.dados.id);
+  const arquivo = `${caminho}/arquivos/${anexo.dados.id}`;
+  assert.deepEqual((await lic.get(arquivo)).dados, original);
+  assert.equal((await outro.get(arquivo)).status, 404);
+
+  const primeira = await jur.post(`${caminho}/minutas`, { tipo: "parecer", texto: "Primeira versão do parecer." });
+  const segunda = await jur.post(`${caminho}/minutas`, { tipo: "parecer", texto: "Segunda versão do parecer." });
+  assert.equal(primeira.status, 201);
+  assert.equal(segunda.status, 201);
+  assert.equal((await lic.get(`${caminho}/minutas/${primeira.dados.id}`)).dados.texto, "Primeira versão do parecer.");
+  const word = await lic.get(`${caminho}/minutas/${segunda.dados.id}?formato=docx`);
+  assert.match(word.tipo, /wordprocessingml/);
+  assert.equal(word.dados.subarray(0, 2).toString(), "PK");
+
+  const rec = { descricao: "Atualizar pesquisa de preços", referencia: "Parecer, item 2" };
+  assert.equal((await lic.post(`${caminho}/recomendacoes`, { ...rec, situacao: "atendida" })).status, 400);
+  assert.equal((await lic.post(`${caminho}/recomendacoes`, rec)).status, 201);
+  const detalhe = (await jur.get(caminho)).dados;
+  assert.equal(detalhe.arquivos.length, 1);
+  assert.equal(detalhe.arquivos[0].paginas, 1);
+  assert.deepEqual(detalhe.minutas.map((m: { id: number }) => m.id), [segunda.dados.id, primeira.dados.id]);
+  const item = `${caminho}/recomendacoes/${detalhe.recomendacoes[0].id}`;
+  const atendida = { ...rec, situacao: "atendida", ajuste: "Juntada pesquisa atualizada", evidencia: "Autos, p. 37" };
+  assert.equal((await outro.put(item, atendida)).status, 404);
+  assert.equal((await lic.put(item, atendida)).status, 200);
+  assert.equal((await jur.get(caminho)).dados.recomendacoes[0].evidencia, atendida.evidencia);
 });
