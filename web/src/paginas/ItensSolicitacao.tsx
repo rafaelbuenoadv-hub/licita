@@ -254,6 +254,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   });
 
   const descricoes = linhas.map((linha) => linha.descricao);
+  const colunasCotacoes = Math.max(1, ...linhas.map((linha) => linha.cotacoes.length));
 
   return <fieldset className="wide itens-sol" disabled={ocupado || !!anexando}>
     <legend>Itens</legend>
@@ -291,26 +292,37 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
       </div>
     </div>}
 
-    {linhas.map((linha, k) => {
-      const item = lidas.erro || lidas.itens.length !== linhas.length ? lerLinhas([linha]).itens[0] : lidas.itens[k];
-      const subtotal = item ? totalDoItem(item) : null;
-      return <div className="cotacao-item stack" key={k}>
-        <div className="row"><h4>Item {k + 1}</h4>
-          {linhas.length > 1 && <button type="button" className="lnk" aria-label={`Remover item ${k + 1}`}
-            onClick={() => setLinhas((lista) => lista.filter((_, i) => i !== k))}>Remover item</button>}</div>
-        <div className="form cotacao-dados">
-          <label>Descrição do item<input aria-label={`Descrição do item ${k + 1}`} maxLength={500} value={linha.descricao} onChange={(e) => alterar(k, { descricao: e.target.value })} /></label>
-          <label>Unidade<input aria-label={`Unidade do item ${k + 1}`} maxLength={30} value={linha.unidade} placeholder="un" onChange={(e) => alterar(k, { unidade: e.target.value })} /></label>
-          <label>Quantidade<input aria-label={`Quantidade do item ${k + 1}`} inputMode="decimal" value={linha.quantidade} onChange={(e) => alterar(k, { quantidade: e.target.value })} /></label>
-        </div>
-        <details open={!!linha.descricao.trim()}>
-          <summary>Cotações do item {k + 1}</summary>
-          <div className="stack">
-            {linha.cotacoes.map((c, j) => {
+    <div className="tw" tabIndex={0} aria-label="Tabela de itens e cotações">
+      <table className="t quadro-edicao-itens">
+        <thead><tr>
+          <th scope="col">Item</th><th scope="col">Descrição</th><th scope="col">Un.</th><th scope="col">Qtd.</th>
+          {Array.from({ length: colunasCotacoes }, (_, i) => <th scope="col" key={i}>Cotação {i + 1}</th>)}
+          <th scope="col">Valor estimado</th>
+        </tr></thead>
+        <tbody>{linhas.map((linha, k) => {
+          const item = lidas.erro || lidas.itens.length !== linhas.length ? lerLinhas([linha]).itens[0] : lidas.itens[k];
+          const subtotal = item ? totalDoItem(item) : null;
+          return <tr key={k}>
+            <th scope="row">{k + 1}</th>
+            <td className="edicao-item-descricao">
+              <textarea aria-label={`Descrição do item ${k + 1}`} rows={3} maxLength={500} value={linha.descricao}
+                onChange={(e) => alterar(k, { descricao: e.target.value })} />
+              <BuscaPncpItem descricao={linha.descricao} ocupado={ocupado || !!anexando} usar={(r) => usarPncp(k, r)} />
+              {linha.cotacoes.length < 20 && <button className="btn sm" type="button" onClick={() => alterar(k, { cotacoes: [...linha.cotacoes, cotacaoVazia()] })}>Adicionar fornecedor</button>}
+              {linhas.length > 1 && <button type="button" className="lnk small" aria-label={`Remover item ${k + 1}`}
+                onClick={() => setLinhas((lista) => lista.filter((_, i) => i !== k))}>Remover item</button>}
+            </td>
+            <td className="edicao-item-medida"><input aria-label={`Unidade do item ${k + 1}`} maxLength={30} value={linha.unidade} placeholder="un"
+              onChange={(e) => alterar(k, { unidade: e.target.value })} /></td>
+            <td className="edicao-item-medida"><input aria-label={`Quantidade do item ${k + 1}`} inputMode="decimal" value={linha.quantidade}
+              onChange={(e) => alterar(k, { quantidade: e.target.value })} /></td>
+            {Array.from({ length: colunasCotacoes }, (_, j) => {
+              const c = linha.cotacoes[j];
+              if (!c) return <td key={j}>—</td>;
               const orcamento = orcamentos.find((o) => o.id === c.orcamentoId);
               const precos = orcamento?.dados?.itens.filter((i) => precoLido(i.valor_unitario)) ?? [];
               const fornecedor = limparNomeFornecedor(c.fornecedor);
-              return <div className="cotacao-fornecedor cotacao-linha" key={j}>
+              return <td className="edicao-item-cotacao" key={j}>
                 <div className="cotacao-grade">
                   <label>{c.fonte && c.fonte !== "fornecedor" ? "Fonte" : `Fornecedor ${j + 1}`}
                     <input aria-label={`Nome do fornecedor ${j + 1} do item ${k + 1}`} maxLength={200} value={c.fornecedor}
@@ -369,23 +381,21 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
                   <span className="small muted">Confira o nome no orçamento e preencha o fornecedor.</span>
                   {ia && legivel(orcamento.nome) && <button type="button" className="lnk" onClick={() => relerFornecedor(k, j, orcamento)}>Ler fornecedor com IA</button>}
                 </div>}
-              </div>;
+              </td>;
             })}
-            {linha.cotacoes.length < 20 && <div><button className="btn sm" type="button" onClick={() => alterar(k, { cotacoes: [...linha.cotacoes, cotacaoVazia()] })}>Adicionar fornecedor</button></div>}
-          </div>
-        </details>
-        <BuscaPncpItem descricao={linha.descricao} ocupado={ocupado || !!anexando} usar={(r) => usarPncp(k, r)} />
-        <div className="cotacao-soma">
-          <label className="campo">Critério de preço
-            <select value={linha.criterio ?? "media"} onChange={(e) => alterar(k, { criterio: e.target.value as CriterioPreco })}>
-              {Object.entries(CRITERIOS_PRECO).map(([valor, rotulo]) => <option key={valor} value={valor}>{rotulo}</option>)}
-            </select>
-          </label>
-          <span><strong>{item?.cotacoes === undefined && item?.valor_unitario != null ? "Valor unitário anterior" : "Valor unitário estimado"}</strong> {brl(item?.valor_unitario)}</span>
-          <span><strong>Subtotal do item</strong> {brl(subtotal)}</span>
-        </div>
-      </div>;
-    })}
+            <td className="edicao-item-estimativa">
+              <label className="campo">Critério de preço
+                <select value={linha.criterio ?? "media"} onChange={(e) => alterar(k, { criterio: e.target.value as CriterioPreco })}>
+                  {Object.entries(CRITERIOS_PRECO).map(([valor, rotulo]) => <option key={valor} value={valor}>{rotulo}</option>)}
+                </select>
+              </label>
+              <p><strong>{brl(item?.valor_unitario)}</strong></p>
+              <p className="small muted">Subtotal do item {brl(subtotal)}</p>
+            </td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div>
     <div className="row">
       {linhas.length < 200 && <button type="button" className="btn sm" onClick={() => setLinhas((lista) => [...lista, linhaVazia()])}>Adicionar item</button>}
       <strong>{parcial && total != null ? "Subtotal dos itens com valor" : "Total estimado"} {brl(total)}</strong>

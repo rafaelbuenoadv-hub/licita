@@ -173,8 +173,11 @@ function quadrosDosItens(linhas: string[], itens: ItemSolicitacao[]) {
     const descricao = rotulos.findIndex((rotulo) => /^(?:descricao|especificacao|discriminacao)\b/.test(rotulo));
     const colunaDeItem = rotulos.findIndex((rotulo) => /^(?:item|numero|n[º°o.]|ordem)(?:\s|$)/.test(rotulo));
     const colunaDeCotacao = rotulos.some((rotulo) => /^(?:cotacao|orcamento|fornecedor|qtd|quantidade|valor unitario)\b/.test(rotulo));
-    const linhasComItem = descricao >= 0 && colunaDeItem >= 0 && colunaDeCotacao
-      ? linhas.slice(inicio + 1, fim).map(celulasDaLinha).filter((linha) => /^\d+\.?$/.test(linha[colunaDeItem] ?? ""))
+    const linhasComItem = descricao >= 0 && colunaDeCotacao
+      ? linhas.slice(inicio + 1, fim).map(celulasDaLinha).filter((linha) => {
+        if (colunaDeItem >= 0) return /^\d+\.?$/.test(linha[colunaDeItem] ?? "");
+        return !!linha[descricao] && !/^:?-{2,}:?$/.test(linha[descricao]) && !/^(?:sub)?total\b/.test(linha[descricao]);
+      })
       : [];
     const mesmosItens = linhasComItem.length > 0 && linhasComItem.every((linha) => descricoes.has(linha[descricao]));
     if (cabecalho === CABECALHO_ANTERIOR || cabecalho === CABECALHO_COTACOES
@@ -204,9 +207,9 @@ function limparMarcadoresDeItens(linhas: string[], indiceQuadro: number) {
 }
 
 /** Atualiza um único quadro de itens e preserva as demais tabelas e seções do documento. */
-export function inserirItens(texto: string, itens: ItemSolicitacao[], incluirPrecosCotados = false) {
+export function inserirItens(texto: string, itens: ItemSolicitacao[], modo: boolean | "marcador" = false) {
   if (!texto.trim()) return texto;
-  const quadro = quadroDeItens(itens, incluirPrecosCotados);
+  const quadro = modo === "marcador" ? "[[Itens]]" : quadroDeItens(itens, modo);
   const linhas = texto.split("\n");
   const quadros = quadrosDosItens(linhas, itens);
   if (quadros.length) {
@@ -221,7 +224,7 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[], incluirPre
     linhas.splice(primeiro.inicio, primeiro.fim - primeiro.inicio, quadro || "[[Itens]]");
     return quadro ? limparMarcadoresDeItens(linhas, primeiro.inicio) : linhas.join("\n");
   }
-  if (!itens.length) return texto;
+  if (!itens.length || modo === "marcador") return texto;
   const campo = linhas.findIndex((l) => CAMPO_ITENS.test(l));
   if (campo >= 0) {
     const [antes, depois] = linhas[campo].split(CAMPO_ITENS, 2);
