@@ -21,7 +21,7 @@ export interface LinhaItem {
   cotacoes: LinhaCotacao[];
 }
 const cotacaoVazia = (): LinhaCotacao => ({ orcamentoId: null, fornecedor: "", valor: "" });
-export const linhaVazia = (): LinhaItem => ({ descricao: "", unidade: "", quantidade: "", cotacoes: [cotacaoVazia(), cotacaoVazia()] });
+export const linhaVazia = (): LinhaItem => ({ descricao: "", unidade: "", quantidade: "", cotacoes: [cotacaoVazia()] });
 
 export function linhasDosItens(itens: ItemSolicitacao[], orcamentos: OrcamentoLido[]): LinhaItem[] {
   if (!itens.length) return [linhaVazia()];
@@ -32,7 +32,7 @@ export function linhasDosItens(itens: ItemSolicitacao[], orcamentos: OrcamentoLi
       valor: c.valor_unitario == null ? "" : String(c.valor_unitario).replace(".", ","),
       fonte: c.fonte, link: c.link, consultadoEm: c.consultado_em,
     }));
-    while (cotacoes.length < 2) cotacoes.push(cotacaoVazia());
+    if (!cotacoes.length) cotacoes.push(cotacaoVazia());
     return {
       descricao: item.descricao,
       unidade: item.unidade,
@@ -361,8 +361,8 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
                     </select>
                   </label>}
                 </div>
-                  {(linha.cotacoes.length > 2 || cotacaoPreenchida(c)) && <button type="button" className="lnk"
-                    onClick={() => alterar(k, { cotacoes: linha.cotacoes.length > 2 ? linha.cotacoes.filter((_, i) => i !== j)
+                  {(linha.cotacoes.length > 1 || cotacaoPreenchida(c)) && <button type="button" className="lnk"
+                    onClick={() => alterar(k, { cotacoes: linha.cotacoes.length > 1 ? linha.cotacoes.filter((_, i) => i !== j)
                       : linha.cotacoes.map((x, i) => i === j ? cotacaoVazia() : x) })}>Retirar cotação do item</button>}
                 </details>
                 {orcamento && !fornecedor && <div className="tools">
