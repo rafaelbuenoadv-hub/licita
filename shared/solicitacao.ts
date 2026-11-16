@@ -38,7 +38,7 @@ export type CriterioPreco = keyof typeof CRITERIOS_PRECO;
 export const FONTES_COTACAO = { fornecedor: "Orçamento de fornecedor", loja: "Loja na internet", pncp: "Valor do PNCP", outra: "Outras fontes" };
 export type FonteCotacao = keyof typeof FONTES_COTACAO;
 export interface CotacaoItem {
-  orcamento_id: number;
+  orcamento_id: number | null;
   fornecedor: string;
   valor_unitario: number | null;
   fonte?: FonteCotacao;
@@ -55,7 +55,7 @@ export interface ItemSolicitacao {
 }
 
 export function valorDasCotacoes(cotacoes: CotacaoItem[], criterio: CriterioPreco = "media") {
-  const valores = cotacoes.flatMap((c) => c.fornecedor.trim() && c.valor_unitario != null && c.valor_unitario > 0
+  const valores = cotacoes.flatMap((c) => c.orcamento_id != null && c.fornecedor.trim() && c.valor_unitario != null && c.valor_unitario > 0
     ? [Math.round((c.valor_unitario + Number.EPSILON) * 100)] : []).sort((a, b) => a - b);
   if (!valores.length) return null;
   const meio = Math.floor(valores.length / 2);

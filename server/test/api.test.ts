@@ -964,3 +964,37 @@ test("leitura de proposta separa os itens novos e evita lançar duas linhas no m
   assert.equal(valorDasCotacoes(fontes, "mediana"), 120);
   assert.equal(valorDasCotacoes(fontes, "menor"), 100);
 });
+
+test("preços digitados antes do anexo ficam salvos e entram no cálculo após o vínculo", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const criado = await lic.post("/api/processos", { objeto: "Aquisição de materiais de expediente", tipo: "bens", via: "licitacao", ano: 2095 });
+  assert.equal(criado.status, 201);
+  const processo = `/api/processos/${criado.dados.id}`;
+  const caminho = `${processo}/solicitacoes`;
+  const cotacoes = [
+    { orcamento_id: null, fornecedor: "Papelaria A", valor_unitario: 12.5 },
+    { orcamento_id: null, fornecedor: "Papelaria B", valor_unitario: 18 },
+  ];
+  const item = { descricao: "Resma de papel", unidade: "un", quantidade: 4, cotacoes };
+  const salva = await lic.post(caminho, {
+    chave_envio: randomUUID(), secretaria: "Administração", descricao: "# SOLICITAÇÃO\n[[Itens]]", itens: [item],
+  });
+  assert.equal(salva.status, 201, JSON.stringify(salva.dados));
+  const antes = (await lic.get(processo)).dados.solicitacoes[0];
+  assert.deepEqual(antes.itens[0].cotacoes, cotacoes);
+  assert.equal(antes.itens[0].valor_unitario, null);
+
+  const form = new FormData();
+  form.set("arquivo", new Blob(["Proposta A para resmas de papel"]), "proposta-a.txt");
+  const anexo = await lic.post(`${processo}/orcamentos?origem=solicitacao`, form);
+  assert.equal(anexo.status, 201);
+  const atualizada = await lic.put(`${caminho}/${salva.dados.id}`, {
+    anterior: antes.descricao, descricao: antes.descricao, itens_anteriores: antes.itens,
+    itens: [{ ...item, cotacoes: [{ ...cotacoes[0], orcamento_id: anexo.dados.ids[0] }, cotacoes[1]] }],
+  });
+  assert.equal(atualizada.status, 200, JSON.stringify(atualizada.dados));
+  const depois = (await lic.get(processo)).dados.solicitacoes[0];
+  assert.equal(depois.itens[0].valor_unitario, 12.5);
+  assert.equal(depois.itens[0].cotacoes[1].valor_unitario, 18);
+  assert.match(depois.descricao, /Total estimado .*R\$\s50,00/);
+});
