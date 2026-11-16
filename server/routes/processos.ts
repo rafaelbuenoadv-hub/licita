@@ -1,6 +1,6 @@
 import { anexosDaRequisicao, apoiosComTextoLocal, hashDoAnexo, incorporarApoios, nomeAnexoEnviado, parametrosApoios, receberAnexosSolicitacao, referenciasApoios, salvarApoios } from "../anexos-solicitacao.js";
 import { fornecedorNoTexto, limparNomeFornecedor, nomeDoArquivoSemExtensao, nomeFornecedorOrcamento, type OrcamentoLido } from "../../shared/orcamentos.js";
-import { LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao } from "../../shared/solicitacao.js";
+import { documentoDaSolicitacao, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao } from "../../shared/solicitacao.js";
 import { modeloSolicitacao, preencherSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesCadastro } from "../portarias.js";
 import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
@@ -433,12 +433,12 @@ export function rotasProcessos() {
     const exportar = formato === "pdf" ? minutaParaPdf : minutaParaDocx;
     const p = await processoDo(req);
     const sid = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
-    const s = await q1<{ descricao: string }>(
-      "select descricao from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
+    const s = await q1<{ descricao: string; itens: ItemSolicitacao[] }>(
+      "select descricao, itens from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
     );
     if (!s?.descricao) throw new ErroHttp(404, "Texto da solicitação não encontrado.");
     const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
-    const arquivo = await exportar(s.descricao, MODELO_SOLICITACAO.doc, timbrado);
+    const arquivo = await exportar(documentoDaSolicitacao(s.descricao, s.itens), MODELO_SOLICITACAO.doc, timbrado);
     enviarArquivo(res, `solicitacao-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.${formato}`, arquivo);
   });
 
