@@ -166,18 +166,18 @@ table.t tr.com-leitura td{border-bottom:0;padding-bottom:2px} .lido{margin:0} .l
 .cotacao-item h4{margin:0}
 .cotacao-item summary{cursor:pointer;margin:6px 0}
 .cotacao-fornecedor{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px}
-.cotacao-linha{display:grid;gap:8px}
-.cotacao-grade{display:grid;grid-template-columns:minmax(0,1fr) minmax(95px,140px) minmax(120px,170px);gap:10px;align-items:start}
-.cotacao-grade label,.cotacao-anexo{min-width:0}
-.cotacao-anexo{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding-top:17px}
+.quadro-edicao-itens :is(th,td){vertical-align:top}
+.quadro-edicao-itens .edicao-item-descricao{min-width:235px}
+.quadro-edicao-itens .edicao-item-medida{min-width:70px}
+.quadro-edicao-itens .edicao-item-cotacao{min-width:175px;background:var(--bg)}
+.quadro-edicao-itens .edicao-item-estimativa{min-width:155px}
+.cotacao-grade{display:grid;gap:6px}
+.cotacao-anexo{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0}
 .cotacao-anexo a{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cotacao-item .cotacao-detalhes summary{font-size:13px;margin:0 0 4px}
-@container (max-width:470px){.cotacao-grade{grid-template-columns:minmax(0,1fr) minmax(90px,130px)}.cotacao-anexo{grid-column:1/-1;padding-top:0}}
+.edicao-item-cotacao .cotacao-detalhes{margin-top:7px}
+.edicao-item-cotacao .cotacao-detalhes summary{font-size:13px;cursor:pointer}
 .cotacao-fornecedor input:not([type=file]),.cotacao-fornecedor select{background:var(--surface)}
-.cotacao-soma{border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px 20px;align-items:flex-end;flex-wrap:wrap}
-.cotacao-soma select{min-width:126px}
 .pncp-resultados{list-style:none;padding:0;margin:0;display:grid;gap:8px;max-height:430px;overflow:auto}
-@container (min-width:390px){.cotacao-dados{grid-template-columns:minmax(0,1fr) 90px 105px}}
 
 /* agente de contratação */
 .agente-icone{position:fixed;right:18px;bottom:18px;z-index:30;display:inline-flex;align-items:center;gap:8px;padding:11px 16px 11px 13px;border-radius:99px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:600;cursor:grab;box-shadow:0 8px 22px -10px #000a}

@@ -3,7 +3,7 @@ import { api, brl } from "../api";
 import { useEu } from "../main";
 import { Folha } from "../comp/Folha";
 import { aplicarPendencias, pendencias } from "../../../shared/etapas";
-import { camposDaSolicitacao, documentoDaSolicitacao, FONTES_COTACAO, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { camposDaSolicitacao, documentoDaSolicitacao, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
 
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
@@ -132,7 +132,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setLinhas(linhasDosItens(s.itens, processo.orcamentos));
     setArquivo(null);
     setApoios([]);
-    trocarTexto(s.descricao);
+    trocarTexto(inserirItens(s.descricao, s.itens, "marcador"));
     setModo("manual");
     setAviso(null);
     document.getElementById("form-solicitacao")?.scrollIntoView({ block: "start" });
@@ -233,7 +233,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       setProgresso("Analisando os documentos de apoio e os orçamentos dos itens…");
       if (edicao) dados.set("solicitacao_id", String(edicao.id));
       const r = await api.post<{ descricao: string; objeto: string; justificativa: string; itens: ItemSolicitacao[]; avisos: string[] }>(`${caminho}/ia`, dados);
-      trocarTexto(r.descricao);
+      trocarTexto(inserirItens(r.descricao, itens.length ? itens : r.itens ?? [], "marcador"));
       if (!objeto.trim() && r.objeto) setObjeto(r.objeto);
       if (!justificativa.trim() && r.justificativa) setJustificativa(r.justificativa);
       if (!itens.length && r.itens?.length) {
@@ -326,14 +326,14 @@ export function Solicitacoes({ processo, recarregar }: Props) {
               <span className="small muted">A IA usa os dados preenchidos, os anexos desta solicitação e os orçamentos vinculados aos itens. Essas fontes são enviadas ao provedor de IA para gerar o rascunho.</span>
             </> : <p className="note">IA indisponível no servidor. Você pode preencher e salvar a solicitação nesta tela.</p>}
           </div>}
-          {descricao.trim() && <div className="stack">
-            <h4>Prévia da solicitação</h4>
+          {descricao.trim() && <details className="panel box">
+            <summary>Prévia da solicitação</summary>
             <Folha texto={documentoDaSolicitacao(previa, itens)} />
-          </div>}
+          </details>}
           {faltantes.length > 0 && <div className="pend">
             <div className="row"><h4>Campos pendentes</h4>
               <button type="button" className="btn sm" disabled={!!ocupado || !Object.values(valores).some((v) => v.trim())}
-                onClick={() => trocarTexto(aplicarPendencias(descricao, valores).texto)}>Aplicar no texto</button>
+                onClick={() => trocarTexto(inserirItens(aplicarPendencias(base, valores).texto, itens, "marcador"))}>Aplicar no texto</button>
             </div>
             {faltantes.map((x) => {
               const [antes, depois] = x.trecho.split("▮");
@@ -361,22 +361,26 @@ export function Solicitacoes({ processo, recarregar }: Props) {
         <div className="tw">
           <table className="t">
             <thead><tr><th>Secretaria</th><th>Solicitação</th><th>Documento</th></tr></thead>
-            <tbody>{processo.solicitacoes.map((s) => (
-              <tr key={s.id}>
+            <tbody>{processo.solicitacoes.map((s) => {
+              const comprovantes = new Map<number, string>();
+              const fontes = new Map<string, string>();
+              for (const item of s.itens) for (const c of item.cotacoes ?? []) {
+                const orcamento = processo.orcamentos.find((o) => o.id === c.orcamento_id);
+                const fornecedor = limparNomeFornecedor(c.fornecedor) || nomeFornecedorOrcamento(orcamento) || "Fornecedor a identificar";
+                if (c.orcamento_id != null) comprovantes.set(c.orcamento_id, orcamento?.nome ?? fornecedor);
+                if (c.link) fontes.set(c.link, fornecedor);
+              }
+              return <tr key={s.id}>
                 <td>{s.secretaria}</td>
                 <td>{s.referencia && <strong>{s.referencia}</strong>}
                   {s.objeto && <div>{s.objeto}</div>}
                   {s.itens?.length > 0 && <div className="small muted">{s.itens.length} {s.itens.length === 1 ? "item" : "itens"}{totalDosItens(s.itens) != null ? ` · ${s.itens.some((i) => totalDoItem(i) == null) ? "subtotal dos itens com valor" : "total estimado"} ${brl(totalDosItens(s.itens))}` : ""}</div>}
                   {s.descricao && <details><summary>Ver solicitação</summary><Folha texto={documentoDaSolicitacao(s.descricao, s.itens)} /></details>}
-                  {s.itens.some((item) => item.cotacoes?.length) && <details><summary>Cotações por item</summary>
-                    <ul>{s.itens.filter((item) => item.cotacoes?.length).map((item, i) => <li key={i}>{item.descricao}
-                      <ul>{item.cotacoes?.map((c, j) => <li key={c.orcamento_id != null ? `orcamento-${c.orcamento_id}` : `manual-${j}`}>
-                        {c.orcamento_id != null ? <a href={`/api/processos/${processo.id}/orcamentos/${c.orcamento_id}/arquivo`}>{limparNomeFornecedor(c.fornecedor) || nomeFornecedorOrcamento(processo.orcamentos.find((o) => o.id === c.orcamento_id)) || "Fornecedor a identificar"}</a>
-                          : <>{c.fornecedor} · Anexo pendente</>} · {brl(c.valor_unitario)}
-                        {c.fonte && c.fonte !== "fornecedor" && <> · {FONTES_COTACAO[c.fonte]}</>}
-                        {c.link && <> · <a href={c.link} target="_blank" rel="noreferrer">Abrir fonte</a></>}
-                      </li>)}</ul>
-                    </li>)}</ul>
+                  {(comprovantes.size > 0 || fontes.size > 0) && <details><summary>Comprovantes e fontes das cotações</summary>
+                    <ul>
+                      {[...comprovantes].map(([id, nome]) => <li key={id}><a href={`/api/processos/${processo.id}/orcamentos/${id}/arquivo`}>{nome}</a></li>)}
+                      {[...fontes].map(([link, fornecedor]) => <li key={link}><a href={link} target="_blank" rel="noreferrer">{fornecedor} · Abrir fonte</a></li>)}
+                    </ul>
                   </details>}
                   <div className="tools">
                     {podeAdicionar && <button type="button" className="btn sm" disabled={!!ocupado || !!modo} onClick={() => editar(s)}>Editar</button>}
@@ -391,8 +395,8 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                   {s.apoios.map((a) => <div key={a.id}><a href={`/api${caminho}/${s.id}/apoios/${a.id}`} download>{a.nome}</a></div>)}
                   {!s.nome_arquivo && !s.apoios.length && "—"}
                 </td>
-              </tr>
-            ))}</tbody>
+              </tr>;
+            })}</tbody>
           </table>
         </div>
       )}

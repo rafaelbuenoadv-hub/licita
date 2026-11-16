@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { PDFDocument } from "pdf-lib";
 import { buscarPncp } from "../routes/pncp.js";
 import { destinosDoOrcamento } from "../../shared/importar-orcamento.js";
-import { documentoDaSolicitacao, quantidadeColunasCotacoes, valorDasCotacoes } from "../../shared/solicitacao.js";
+import { documentoDaSolicitacao, inserirItens, quantidadeColunasCotacoes, valorDasCotacoes } from "../../shared/solicitacao.js";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -1098,6 +1098,8 @@ test("o documento reúne quadros repetidos dos mesmos itens e preserva as outras
     "", "## Itens solicitados",
     "| Item | Descrição | Un. | Qtd. | Valor unitário estimado | Valor total |",
     "|---|---|---|---|---|---|", "| 1 | Limpeza de ar condicionado | SERV | 60 | R$ 350,00 | R$ 21.000,00 |",
+    "", "## Itens solicitados",
+    "| Descrição | Quantidade | Cotação 1 |", "|---|---|---|", "| Limpeza de ar condicionado | 60 | R$ 350,00 |",
     "", "## Itens solicitados", "[[Itens]]", "## Cronograma", "| Etapa | Prazo |", "|---|---|", "| Execução | 30 dias |",
   ].join("\n");
   const documento = documentoDaSolicitacao(texto, [item]);
@@ -1105,6 +1107,10 @@ test("o documento reúne quadros repetidos dos mesmos itens e preserva as outras
   assert.equal(documento.match(/## Itens solicitados/g)?.length, 1);
   assert.match(documento, /Cotação 1\u2028HS Serviços LTDA \| Média \|\n[^\n]+\n\| 1 \| Limpeza de ar condicionado/);
   assert.doesNotMatch(documento, /\[\[Itens\]\]/);
+  const paraEditar = inserirItens(texto, [item], "marcador");
+  assert.equal(paraEditar.match(/\[\[Itens\]\]/g)?.length, 1);
+  assert.doesNotMatch(paraEditar, /Limpeza de ar condicionado/);
+  assert.match(paraEditar, /\| Execução \| 30 dias \|/);
   const marcadores = documentoDaSolicitacao("# Pedido\n[[Itens]]\n\n[[Itens]]", [item]);
   assert.equal(marcadores.match(/Limpeza de ar condicionado/g)?.length, 1);
   assert.doesNotMatch(marcadores, /\[\[Itens\]\]/);
