@@ -293,8 +293,9 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                   {s.descricao && <details><summary>Ver solicitação</summary><Folha texto={s.descricao} /></details>}
                   {s.itens.some((item) => item.cotacoes?.length) && <details><summary>Cotações por item</summary>
                     <ul>{s.itens.filter((item) => item.cotacoes?.length).map((item, i) => <li key={i}>{item.descricao}
-                      <ul>{item.cotacoes?.map((c) => <li key={c.orcamento_id}>
-                        <a href={`/api/processos/${processo.id}/orcamentos/${c.orcamento_id}/arquivo`}>{c.fornecedor || "Orçamento anexado"}</a> · {brl(c.valor_unitario)}
+                      <ul>{item.cotacoes?.map((c, j) => <li key={c.orcamento_id != null ? `orcamento-${c.orcamento_id}` : `manual-${j}`}>
+                        {c.orcamento_id != null ? <a href={`/api/processos/${processo.id}/orcamentos/${c.orcamento_id}/arquivo`}>{c.fornecedor || "Orçamento anexado"}</a>
+                          : <>{c.fornecedor} · Anexo pendente</>} · {brl(c.valor_unitario)}
                         {c.fonte && c.fonte !== "fornecedor" && <> · {FONTES_COTACAO[c.fonte]}</>}
                         {c.link && <> · <a href={c.link} target="_blank" rel="noreferrer">Abrir fonte</a></>}
                       </li>)}</ul>

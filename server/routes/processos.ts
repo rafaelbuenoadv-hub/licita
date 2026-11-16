@@ -138,7 +138,7 @@ const itensSolicitacao = z.array(z.object({
   valor_unitario: z.number().nonnegative().max(1e12).nullable().default(null),
   criterio: z.enum(["media", "mediana", "menor"]).optional(),
   cotacoes: z.array(z.object({
-    orcamento_id: idOrcamento,
+    orcamento_id: idOrcamento.nullable(),
     fornecedor: z.string().trim().max(200),
     valor_unitario: z.number().positive().max(1e12).nullable(),
     fonte: z.enum(["fornecedor", "loja", "pncp", "outra"]).optional(),
@@ -155,10 +155,11 @@ function calcularItens(itens: ItemSolicitacao[]) {
     for (const cotacao of item.cotacoes) {
       const nome = normalizarCotacao(cotacao.fornecedor);
       if (cotacao.valor_unitario != null && !nome) throw new ErroHttp(400, `Informe o fornecedor da cotação do item ${indice + 1}.`);
-      if (anexos.has(cotacao.orcamento_id) || (nome && fornecedores.has(nome))) {
+      const anexo = cotacao.orcamento_id;
+      if ((anexo != null && anexos.has(anexo)) || (nome && fornecedores.has(nome))) {
         throw new ErroHttp(400, `Use uma única cotação por fornecedor no item ${indice + 1}.`);
       }
-      anexos.add(cotacao.orcamento_id);
+      if (anexo != null) anexos.add(anexo);
       if (nome) fornecedores.add(nome);
     }
     return { ...item, valor_unitario: valorDasCotacoes(item.cotacoes, item.criterio) };
@@ -166,7 +167,8 @@ function calcularItens(itens: ItemSolicitacao[]) {
 }
 
 async function conferirOrcamentos(c: PoolClient, processo: number, itens: ItemSolicitacao[]) {
-  const ids = [...new Set(itens.flatMap((item) => (item.cotacoes ?? []).map((cotacao) => cotacao.orcamento_id)))];
+  const ids = [...new Set(itens.flatMap((item) => (item.cotacoes ?? [])
+    .flatMap(({ orcamento_id }) => orcamento_id == null ? [] : [orcamento_id])))];
   if (!ids.length) return;
   const encontrados = await c.query("select id from orcamentos where processo_id=$1 and id=any($2::int[])", [processo, ids]);
   if (encontrados.rowCount !== ids.length) throw new ErroHttp(400, "Selecione orçamentos anexados a este processo.");
