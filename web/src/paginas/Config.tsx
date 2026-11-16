@@ -13,6 +13,7 @@ export function Config() {
       <TrocarSenha />
       {admin && <Orgao />}
       {admin && <Usuarios />}
+      <Autoridades podeEditar={admin} />
       <Modelos podeEditar={tem(eu, "admin", "contratacao")} />
       <Limites podeEditar={admin} />
     </>
@@ -168,6 +169,75 @@ function Limites({ podeEditar }: { podeEditar: boolean }) {
           </div>
           <Msg m={m} /><div><button className="btn pri">Salvar limite</button></div>
         </form>}
+      </div>
+    </details>
+  );
+}
+
+/* ---------- secretários e responsáveis ---------- */
+const autVazia = { unidade: "", sigla: "", titular: "", cargo: "", ato: "", publicacao: "", link: "", email: "", telefone: "", obs: "", ativo: true };
+function Autoridades({ podeEditar }: { podeEditar: boolean }) {
+  const [lista, setLista] = useState<any[] | null>(null);
+  const [f, setF] = useState<any>(null);
+  const [m, setM] = useState<any>(null);
+  const carregar = () => api.get("/autoridades").then(setLista).catch((e) => setM({ t: e.message, tipo: "bad" }));
+  useEffect(() => { carregar(); }, []);
+  const c = (k: string) => ({ id: "a-" + k, value: f[k], onChange: (e: any) => setF({ ...f, [k]: e.target.value }) });
+  const salvar = async (ev: FormEvent) => {
+    ev.preventDefault();
+    try {
+      if (f.id) await api.put(`/admin/autoridades/${f.id}`, f); else await api.post("/admin/autoridades", f);
+      setF(null); await carregar(); setM({ t: "Cadastro salvo.", tipo: "ok" });
+    } catch (e: any) { setM({ t: e.message, tipo: "bad" }); }
+  };
+  const remover = async () => {
+    try { await api.del(`/admin/autoridades/${f.id}`); setF(null); await carregar(); setM({ t: "Cadastro removido.", tipo: "ok" }); }
+    catch (e: any) { setM({ t: e.message, tipo: "bad" }); }
+  };
+  const importar = async () => {
+    try { const r = await api.post("/admin/autoridades/importar-ibaiti"); await carregar(); setM({ t: r.incluidos ? `${r.incluidos} cadastros incluídos a partir do Diário Oficial de Ibaiti.` : "Todos os secretários de Ibaiti já estavam cadastrados.", tipo: "ok" }); }
+    catch (e: any) { setM({ t: e.message, tipo: "bad" }); }
+  };
+  return (
+    <details className="panel box" open><summary>Secretários e responsáveis</summary>
+      <div className="pad stack">
+        <p className="small muted">Titular de cada secretaria ou setor e a portaria de nomeação. A IA usa este cadastro nas assinaturas e designações das minutas, e as secretarias aparecem como sugestão em "Área requisitante". Confira a portaria no link antes de citar em documento oficial.</p>
+        <Msg m={m} />
+        {lista === null ? <p className="muted">Carregando…</p> : lista.length === 0 ? <p className="muted">Nenhum secretário cadastrado.</p> :
+          <div className="tw"><table className="t">
+            <thead><tr><th>Secretaria ou setor</th><th>Titular</th><th>Ato de nomeação</th><th>Contato</th><th /></tr></thead>
+            <tbody>{lista.map((a) => (
+              <tr key={a.id} style={a.ativo ? undefined : { opacity: 0.55 }}>
+                <td style={{ minWidth: 200 }}>{a.unidade}{a.sigla && <span className="small muted"> ({a.sigla})</span>}{!a.ativo && <div className="small muted">Inativo</div>}</td>
+                <td style={{ minWidth: 170 }}><b>{a.titular}</b><div className="small muted">{a.cargo}</div></td>
+                <td style={{ minWidth: 200 }}>{a.link ? <a href={a.link} target="_blank" rel="noopener noreferrer">{a.ato || "Ver ato"}</a> : a.ato || "—"}
+                  {a.publicacao && <div className="small muted">{a.publicacao}</div>}{a.obs && <div className="small muted">{a.obs}</div>}</td>
+                <td className="small">{a.email}{a.telefone && <div>{a.telefone}</div>}</td>
+                <td className="r">{podeEditar && <button className="lnk" onClick={() => { setF({ ...a }); setM(null); }}>Editar</button>}</td></tr>))}</tbody>
+          </table></div>}
+        {podeEditar && !f && <div className="tools">
+          <button className="btn pri" onClick={() => { setF({ ...autVazia }); setM(null); }}>Novo cadastro</button>
+          <button className="btn" onClick={importar}>Importar secretários de Ibaiti</button>
+        </div>}
+        {podeEditar && f && (
+          <form className="stack" onSubmit={salvar}>
+            <h3>{f.id ? "Editar cadastro" : "Novo cadastro"}</h3>
+            <div className="form">
+              <label className="wide">Secretaria ou setor<input {...c("unidade")} required minLength={2} maxLength={300} /></label>
+              <label>Sigla<input {...c("sigla")} maxLength={30} /></label>
+              <label>Titular<input {...c("titular")} required minLength={2} maxLength={200} /></label>
+              <label className="wide">Cargo<input {...c("cargo")} required minLength={2} maxLength={300} /></label>
+              <label>Ato de nomeação<input {...c("ato")} placeholder="ex.: Portaria nº 609, de 01/07/2026" maxLength={200} /></label>
+              <label>Publicação<input {...c("publicacao")} placeholder="ex.: Diário Oficial, edição nº 3145, de 01/07/2026" maxLength={300} /></label>
+              <label className="wide">Link do ato<input {...c("link")} type="url" placeholder="https://" maxLength={500} /></label>
+              <label>E-mail<input {...c("email")} maxLength={200} /></label>
+              <label>Telefone<input {...c("telefone")} maxLength={60} /></label>
+              <label className="wide">Observações<textarea {...c("obs")} maxLength={2000} /></label>
+              <label style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><input type="checkbox" checked={f.ativo} onChange={(e) => setF({ ...f, ativo: e.target.checked })} /> Em exercício (aparece para a IA e nas sugestões)</label>
+            </div>
+            <div className="tools"><button className="btn pri">Salvar</button><button type="button" className="btn" onClick={() => setF(null)}>Cancelar</button>
+              {f.id && <button type="button" className="btn danger sm" onClick={remover}>Remover cadastro</button>}</div>
+          </form>)}
       </div>
     </details>
   );

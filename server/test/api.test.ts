@@ -7,6 +7,7 @@ import { pool, q1 } from "../db.js";
 import { migrar } from "../migrate.js";
 import { hashSenha } from "../auth.js";
 import { criarApp } from "../app.js";
+import { semearIbaiti } from "../routes/autoridades.js";
 import { ETAPAS, itensDe } from "../../shared/etapas.js";
 
 let base = "";
@@ -343,4 +344,45 @@ test("mensagens entre usuários do mesmo órgão", async () => {
   assert.equal((await lic.get("/api/mensagens/nao-lidas")).dados.total, 0);
   assert.ok((await req.get("/api/mensagens?caixa=enviadas")).dados.find((m: any) => m.para_nome === "lic").lida_em);
   assert.equal((await jur.get("/api/mensagens/nao-lidas")).dados.total, 1);
+});
+
+test("cadastro de secretários: todos consultam, admin mantém, Ibaiti é carregado sem duplicar", async () => {
+  const adm = await new Cliente().entrar("admin@a.gov.br");
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const b = await new Cliente().entrar("admin@b.gov.br");
+  assert.equal((await new Cliente().get("/api/autoridades")).status, 401);
+  assert.deepEqual((await req.get("/api/autoridades")).dados, []);
+  const novo = { unidade: "Secretaria Municipal de Obras", titular: "Fulano de Tal", cargo: "Secretário Municipal de Obras", ato: "Portaria nº 1, de 02/01/2026" };
+  assert.equal((await req.post("/api/admin/autoridades", novo)).status, 403);
+  assert.equal((await adm.post("/api/admin/autoridades", { ...novo, titular: "" })).status, 400);
+  assert.equal((await adm.post("/api/admin/autoridades", { ...novo, link: "javascript:alert(1)" })).status, 400);
+  const c = await adm.post("/api/admin/autoridades", novo);
+  assert.equal(c.status, 201, JSON.stringify(c.dados));
+  assert.equal((await req.get("/api/autoridades")).dados[0].titular, "Fulano de Tal");
+  assert.equal((await b.get("/api/autoridades")).dados.length, 0);
+  assert.equal((await b.put(`/api/admin/autoridades/${c.dados.id}`, novo)).status, 404);
+  assert.equal((await b.req("DELETE", `/api/admin/autoridades/${c.dados.id}`)).status, 404);
+  assert.equal((await adm.put(`/api/admin/autoridades/${c.dados.id}`, { ...novo, titular: "Beltrana", ativo: false })).status, 200);
+  const l = (await req.get("/api/autoridades")).dados;
+  assert.deepEqual([l[0].titular, l[0].ativo], ["Beltrana", false]);
+
+  // Importação da lista de Ibaiti: inclui uma vez e não repete.
+  assert.equal((await req.post("/api/admin/autoridades/importar-ibaiti")).status, 403);
+  const imp = await adm.post("/api/admin/autoridades/importar-ibaiti");
+  assert.equal(imp.dados.incluidos, 15);
+  assert.equal((await adm.post("/api/admin/autoridades/importar-ibaiti")).dados.incluidos, 0);
+  const todos = (await req.get("/api/autoridades")).dados;
+  assert.equal(todos.length, 16);
+  const plan = todos.find((x: any) => x.sigla === "SEMPO");
+  assert.equal(plan.ato, "Portaria nº 353, de 03/11/2025");
+  assert.match(plan.link, /^https:\/\/www\.ibaiti\.pr\.gov\.br\/diario-oficial-eletronico\/download-busca\/\d+\/$/);
+  assert.ok(todos.every((x: any) => !/\d{3}\.\d{3}\.\d{3}-\d{2}/.test(JSON.stringify(x))), "cadastro não guarda CPF");
+  assert.equal((await adm.req("DELETE", `/api/admin/autoridades/${c.dados.id}`)).status, 200);
+
+  // Na subida do servidor, só órgão de Ibaiti ainda sem cadastro recebe a lista.
+  const ib = (await q1("insert into orgaos (nome) values ('Município de Ibaiti') returning id"))!.id;
+  await semearIbaiti();
+  await semearIbaiti();
+  assert.equal((await q1("select count(*)::int as n from autoridades where orgao_id=$1", [ib]))!.n, 15);
+  assert.equal((await b.get("/api/autoridades")).dados.length, 0);
 });

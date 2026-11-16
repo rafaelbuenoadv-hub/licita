@@ -35,7 +35,11 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   l.push(`Tipo de objeto: ${TIPOS[p.tipo]}`, `Forma de contratação: ${VIAS[p.via]}`, `Valor estimado: ${moeda(p.valor_estimado)}`);
   l.push(`Exercício: ${p.ano}`, `Natureza/ramo (para fracionamento): ${p.classe || "não informada"}`);
   l.push(`Regulamentos locais do órgão: ${orgao?.normas || "não informados"}`, `Regulamentos citados neste processo: ${p.normas || "nenhum"}`);
-  l.push(`Observações: ${p.obs || "nenhuma"}`, "", "ANDAMENTO");
+  l.push(`Observações: ${p.obs || "nenhuma"}`);
+  const auts = await q("select unidade, sigla, titular, cargo, ato, obs from autoridades where orgao_id=$1 and ativo order by unidade", [p.orgao_id]);
+  if (auts.length) l.push("", "SECRETÁRIOS E RESPONSÁVEIS DO ÓRGÃO (use nas assinaturas e designações; o ato de nomeação é o indicado)",
+    ...auts.map((a) => `- ${a.unidade}${a.sigla ? ` (${a.sigla})` : ""}: ${a.titular}, ${a.cargo}${a.ato ? ` — ${a.ato}` : ""}${a.obs ? ` — ${a.obs}` : ""}`));
+  l.push("", "ANDAMENTO");
   ETAPAS.forEach((x, i) => {
     const its = itensDe(x, p);
     l.push(`${i + 1}. ${x.nome}: ${its.filter((it) => c[it.id]).length} de ${its.length} itens conferidos`);

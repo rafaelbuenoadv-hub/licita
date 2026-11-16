@@ -15,11 +15,18 @@ export function paraApi(d: DadosProc) {
   return { requisitante: d.requisitante, objeto: d.objeto, tipo: d.tipo, via: d.via, valor_estimado: v, classe: d.classe, ano: Number(d.ano), pca_item_id: d.pca_item_id ? Number(d.pca_item_id) : null, normas: d.normas, obs: d.obs };
 }
 
+/** Sugestões para a área requisitante: as secretarias cadastradas em Configurações. */
+function Unidades() {
+  const [u, setU] = useState<string[]>([]);
+  useEffect(() => { api.get("/autoridades").then((l: any[]) => setU([...new Set(l.filter((x) => x.ativo).map((x) => x.unidade as string))])).catch(() => {}); }, []);
+  return <datalist id="unidades-orgao">{u.map((x) => <option key={x} value={x} />)}</datalist>;
+}
+
 export function CamposProcesso({ d, set, pca }: { d: DadosProc; set: (d: DadosProc) => void; pca: any[] }) {
   const c = (k: keyof DadosProc) => ({ id: "p-" + k, value: d[k], onChange: (e: any) => set({ ...d, [k]: e.target.value }) });
   return (
     <div className="form">
-      <label>Área requisitante<input {...c("requisitante")} /></label>
+      <label>Área requisitante<input {...c("requisitante")} list="unidades-orgao" /><Unidades /></label>
       <label>Exercício<input {...c("ano")} inputMode="numeric" /></label>
       <label>Tipo de objeto<select {...c("tipo")}>{Object.entries(TIPOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
       <label>Forma de contratação<select {...c("via")}>{Object.entries(VIAS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>

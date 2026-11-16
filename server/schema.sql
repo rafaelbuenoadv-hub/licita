@@ -216,6 +216,25 @@ create table if not exists orcamentos (
 );
 create index if not exists orcamentos_proc on orcamentos(processo_id);
 
+-- Secretários e responsáveis do órgão, com o ato de nomeação (portaria e publicação no diário oficial).
+create table if not exists autoridades (
+  id serial primary key,
+  orgao_id int not null references orgaos(id) on delete cascade,
+  unidade text not null,                      -- secretaria ou setor
+  sigla text not null default '',
+  titular text not null,
+  cargo text not null,
+  ato text not null default '',               -- ex.: Portaria nº 609, de 01/07/2026
+  publicacao text not null default '',        -- edição e data do diário oficial
+  link text not null default '',
+  email text not null default '',
+  telefone text not null default '',
+  obs text not null default '',
+  ativo boolean not null default true,
+  atualizado_em timestamptz not null default now()
+);
+create index if not exists autoridades_orgao on autoridades(orgao_id);
+
 -- Caixa de mensagens entre usuários do mesmo órgão: uma linha por destinatário.
 create table if not exists mensagens (
   id bigserial primary key,
