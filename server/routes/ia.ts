@@ -1,4 +1,4 @@
-import { ASSINATURA_SOLICITACAO, LIMITE_SOLICITACAO } from "../../shared/solicitacao.js";
+import { ASSINATURA_SOLICITACAO, LIMITE_SOLICITACAO, MODELO_SOLICITACAO } from "../../shared/solicitacao.js";
 import { compararOrcamentos, type DadosOrcamento } from "../../shared/orcamentos.js";
 import { modeloSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso } from "../portarias.js";
@@ -22,8 +22,9 @@ function corta(t: string) {
 const moeda = (v: number | null) => (v == null ? "não informado" : v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }));
 
 /** Monta o contexto do processo para a IA: dados, andamento, etapa, modelo do órgão, peças e anexos. */
-async function contexto(req: Request, p: Processo, etapaId: string, opts: { incluirMinutaAtual: boolean }) {
-  const e = etapaPorId(etapaId);
+async function contexto(req: Request, p: Processo, etapaId: string, opts: { incluirMinutaAtual: boolean; permitirSolicitacao?: boolean }) {
+  const solicitacao = opts.permitirSolicitacao && etapaId === MODELO_SOLICITACAO.id;
+  const e = etapaPorId(solicitacao ? "dfd" : etapaId);
   if (!e) throw new ErroHttp(404, "Etapa inexistente.");
   const c = await checksDo(p.id);
   const orgao = await q1<{ nome: string; cnpj: string | null; municipio: string | null; uf: string | null; normas: string }>(
@@ -38,7 +39,8 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   );
   const cadastro = await secretariosDoProcesso(p);
   const { secretarios } = cadastro;
-  const modelo = (await q1("select texto from modelos where orgao_id=$1 and etapa=$2", [p.orgao_id, e.id]))?.texto ?? e.modelo;
+  const modelo = solicitacao ? await modeloSolicitacao(p.orgao_id)
+    : (await q1("select texto from modelos where orgao_id=$1 and etapa=$2", [p.orgao_id, e.id]))?.texto ?? e.modelo;
   const minutas = await q(
     `select distinct on (etapa) etapa, texto from minutas where processo_id=$1 order by etapa, versao desc`, [p.id]);
   const anexos = await q("select nome, texto from anexos where processo_id=$1 order by id", [p.id]);
@@ -70,7 +72,7 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   const areasDoProcesso = new Set([...areas, ...solicitacoes.map((s) => s.secretaria)].map((a) => a.trim().toLowerCase()).filter(Boolean));
   l.push("", fundamentosMinuta({ etapa: e.id, via: p.via, objeto: p.objeto, areas: areasDoProcesso.size, orgao }));
   if (solicitacoes.length) {
-    l.push("", "SOLICITAÇÕES DE OUTRAS SECRETARIAS NO MESMO PROCESSO");
+    l.push("", "SOLICITAÇÕES DAS SECRETARIAS NO MESMO PROCESSO");
     for (const s of solicitacoes) {
       l.push(`- ${s.secretaria}${s.referencia ? ` (${s.referencia})` : ""}: ${s.descricao}`);
       if (s.texto_arquivo) l.push(corta(s.texto_arquivo));
@@ -81,14 +83,19 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
     const its = itensDe(x, p);
     l.push(`${i + 1}. ${x.nome}: ${its.filter((it) => c[it.id]).length} de ${its.length} itens conferidos`);
   });
-  l.push("", `ETAPA ABERTA: ${e.nome}${e.doc ? ` — documento: ${e.doc}` : ""}`, e.oque, "", "CHECKLIST DA ETAPA");
-  itensDe(e, p).forEach((i) => l.push(`${c[i.id] ? "[x]" : "[ ]"} ${i.texto}${i.base ? ` (${i.base})` : ""}`));
-  l.push("", "PONTOS DE ATENÇÃO (erros que costumam voltar do jurídico)", ...e.atencao.map((a) => `- ${a}`));
+  if (solicitacao) {
+    l.push("", "ABA ABERTA: Solicitação", "Ajude a registrar os pedidos das secretarias, os itens e os orçamentos. O DFD tem uma etapa própria de minuta e conferência.");
+  } else {
+    l.push("", `ETAPA ABERTA: ${e.nome}${e.doc ? ` — documento: ${e.doc}` : ""}`, e.oque, "", "CHECKLIST DA ETAPA");
+    itensDe(e, p).forEach((i) => l.push(`${c[i.id] ? "[x]" : "[ ]"} ${i.texto}${i.base ? ` (${i.base})` : ""}`));
+    l.push("", "PONTOS DE ATENÇÃO (erros que costumam voltar do jurídico)", ...e.atencao.map((a) => `- ${a}`));
+  }
   if (modelo) l.push("", "MODELO DO DOCUMENTO (padrão de layout do órgão)", modelo);
   for (const m of minutas) {
-    if (m.etapa === e.id && !opts.incluirMinutaAtual) continue;
+    const atual = !solicitacao && m.etapa === e.id;
+    if (atual && !opts.incluirMinutaAtual) continue;
     const nome = etapaPorId(m.etapa)?.doc ?? m.etapa;
-    l.push("", m.etapa === e.id ? `MINUTA ATUAL DESTA ETAPA (${nome})` : `OUTRA PEÇA DO PROCESSO: ${nome}`, corta(m.texto));
+    l.push("", atual ? `MINUTA ATUAL DESTA ETAPA (${nome})` : `OUTRA PEÇA DO PROCESSO: ${nome}`, corta(m.texto));
   }
   for (const a of anexos) l.push("", `DOCUMENTO DE APOIO ANEXADO: ${a.nome}`, corta(a.texto));
   const orcs = await q("select id, fornecedor, valor, nome, texto, dados from orcamentos where processo_id=$1 order by id", [p.id]);
@@ -136,7 +143,7 @@ export function rotasIA() {
       mensagens: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(60000) })).min(1).max(40),
     }).parse(req.body);
     if (d.mensagens[0].role !== "user" || d.mensagens.at(-1)!.role !== "user") throw new ErroHttp(400, "A conversa deve começar e terminar com uma mensagem do usuário.");
-    const ctx = await contexto(req, p, d.etapa, { incluirMinutaAtual: true });
+    const ctx = await contexto(req, p, d.etapa, { incluirMinutaAtual: true, permitirSolicitacao: true });
     const f = abreFluxo(req, res);
     try {
       const out = await gerarTexto({
