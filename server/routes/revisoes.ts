@@ -6,6 +6,7 @@ import { z } from "zod";
 import { exigePapel } from "../auth.js";
 import { auditar, q, q1, tx } from "../db.js";
 import { minutaParaDocx } from "../docx.js";
+import { minutaParaPdf } from "../pdf.js";
 import { ErroHttp } from "../erros.js";
 import { fundamentosMinuta } from "../fundamentos-minuta.js";
 import { FORMATO_MINUTA, gerarEstruturado, gerarTexto, iaDisponivel, traduzErroIA } from "../ia.js";
@@ -148,9 +149,11 @@ export function rotasRevisoes() {
       "select tipo, texto from revisao_minutas where id=$1 and revisao_id=$2", [id.parse(req.params.minuta), revisao.id],
     );
     if (!minuta) throw new ErroHttp(404, "Minuta não encontrada.");
-    if (req.query.formato === "docx") {
+    const { formato } = req.query;
+    if (formato === "docx" || formato === "pdf") {
       const nome = TIPOS_REVISAO[minuta.tipo];
-      res.attachment(`${nome}.docx`).send(await minutaParaDocx(minuta.texto, nome));
+      const exportar = formato === "pdf" ? minutaParaPdf : minutaParaDocx;
+      res.attachment(`${nome}.${formato}`).send(await exportar(minuta.texto, nome));
       return;
     }
     res.json(minuta);

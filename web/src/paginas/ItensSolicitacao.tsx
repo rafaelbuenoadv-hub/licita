@@ -7,6 +7,7 @@ import { destinosDoOrcamento } from "../../../shared/importar-orcamento";
 import type { ResultadoPncp } from "../../../shared/pncp";
 import { createPncpEvidence, pncpProcedure } from "../comp/comprovantePncp";
 import { BuscaPncpItem } from "./BuscaPncpItem";
+import { BuscaPncpLote } from "./BuscaPncpLote";
 
 interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string }
 type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[] };
@@ -252,8 +253,11 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     setAviso("Referência do PNCP lançada e comprovante anexado.");
   });
 
+  const descricoes = linhas.map((linha) => linha.descricao);
+
   return <fieldset className="wide itens-sol" disabled={ocupado || !!anexando}>
     <legend>Itens</legend>
+    <BuscaPncpLote key={JSON.stringify(descricoes)} descricoes={descricoes} ocupado={ocupado || !!anexando} usar={usarPncp} />
     <div className="tools">
       <button className="btn pri" type="button" disabled={!ia || !!anexando || ocupado} onClick={() => seletorImportacao.current?.click()}>
         {anexando === "importar" ? "Lendo orçamento…" : "Anexar e ler orçamento"}</button>

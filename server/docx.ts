@@ -38,7 +38,7 @@ function tabela(linhas: string[][]) {
 }
 
 type ImagemTimbrado = { dados: Buffer; proporcao: number };
-type Timbrado = { cabecalho: ImagemTimbrado; rodape: ImagemTimbrado };
+export type Timbrado = { cabecalho: ImagemTimbrado; rodape: ImagemTimbrado };
 
 function imagemTimbrado(imagem: ImagemTimbrado, largura: number) {
   return new Paragraph({

@@ -381,6 +381,54 @@ test("a IA combina anexos salvos e novos para sugerir os campos da solicitação
   assert.match(contexto, /quantidades.txt\nLevantamento: 12 luminárias/);
 });
 
+test("a minuta usa os orçamentos vinculados e os preços calculados para esta solicitação", async () => {
+  const processo = await api("POST", "/api/processos", { objeto: "Aquisição de luminárias", tipo: "bens", via: "licitacao", ano: 2026 });
+  assert.equal(processo.status, 201);
+  const caminho = `/api/processos/${(await processo.json()).id}`;
+  const rota = `${caminho}/solicitacoes`;
+  const enviarCotacao = async (nome: string, texto: string) => {
+    const form = new FormData();
+    form.append("arquivo", new Blob([texto]), nome);
+    const r = await api("POST", `${caminho}/orcamentos?origem=solicitacao`, form);
+    assert.equal(r.status, 201);
+    return (await r.json()).ids[0] as number;
+  };
+  const id = await enviarCotacao("luminarias.txt", "Fornecedor: Luz do Sul. Luminárias a R$ 30,00 por unidade. Prazo de entrega de 15 dias.");
+  const segunda = await enviarCotacao("segunda-proposta.txt", "Luminárias a R$ 50,00 por unidade.");
+  await enviarCotacao("outra-secretaria.txt", "COTAÇÃO ÚNICA DA OUTRA SECRETARIA");
+  const itens = [{ descricao: "Luminária", unidade: "un", quantidade: 12, valor_unitario: 999, cotacoes: [
+    { orcamento_id: id, fornecedor: "Luz do Sul", valor_unitario: 30 },
+    { orcamento_id: segunda, fornecedor: "Outra empresa", valor_unitario: 50 },
+  ] }];
+  const form = new FormData();
+  form.set("secretaria", "Educação");
+  form.set("itens", JSON.stringify(itens));
+  form.append("apoios", new Blob(["Levantamento escolar de 12 luminárias."]), "levantamento.txt");
+
+  respostaEstruturada = { descricao: "# SOLICITAÇÃO\n[[Itens]]" };
+  const rascunho = await api("POST", `${rota}/ia`, form);
+  assert.equal(rascunho.status, 200, await rascunho.clone().text());
+  let contexto = pedidos.at(-1)!.body.messages[0].content;
+  assert.match(contexto, /levantamento.txt\nLevantamento escolar de 12 luminárias/);
+  assert.match(contexto, /luminarias.txt[^\n]+\nFornecedor: Luz do Sul[^\n]+Prazo de entrega de 15 dias/);
+  assert.match(contexto, /"valor_unitario":40/);
+  assert.match(contexto, /"total_estimado":480/);
+  assert.doesNotMatch(contexto, /999|COTAÇÃO ÚNICA DA OUTRA SECRETARIA/);
+
+  const salva = await api("POST", rota, { chave_envio: crypto.randomUUID(), secretaria: "Educação", descricao: "Reposição de iluminação", itens });
+  assert.equal(salva.status, 201, await salva.clone().text());
+  const gerada = await api("POST", `${rota}/ia`, { secretaria: "Educação", solicitacao_id: (await salva.json()).id });
+  assert.equal(gerada.status, 200, await gerada.clone().text());
+  contexto = pedidos.at(-1)!.body.messages[0].content;
+  assert.match(contexto, /luminarias.txt/);
+  assert.match(contexto, /"total_estimado":480/);
+
+  const invalida = await api("POST", `${rota}/ia`, { secretaria: "Educação", itens: [{ ...itens[0], cotacoes: [
+    { orcamento_id: 2147483647, fornecedor: "Fornecedor sem vínculo", valor_unitario: 12 },
+  ] }] });
+  assert.equal(invalida.status, 409);
+});
+
 test("uma solicitação reúne mais de cinco documentos e a IA consulta os novos e os salvos", async () => {
   const processo = await api("POST", "/api/processos", { objeto: "Aquisição de material escolar", tipo: "bens", via: "licitacao", ano: 2026 });
   assert.equal(processo.status, 201);

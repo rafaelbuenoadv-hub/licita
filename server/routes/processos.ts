@@ -12,6 +12,7 @@ import { q, q1, tx, auditar } from "../db.js";
 import { exigeLogin, exigePapel, temPapel } from "../auth.js";
 import { ErroHttp } from "../erros.js";
 import { minutaParaDocx } from "../docx.js";
+import { minutaParaPdf } from "../pdf.js";
 import { lerTimbrado, timbradosDoOrgao } from "../timbrados.js";
 import { extrairTexto } from "../extrair.js";
 import { conferirEtapa, proximaEtapa, rascunhoEtp } from "../conferencia.js";
@@ -150,7 +151,12 @@ const itensSolicitacao = z.array(z.object({
   })).max(20).optional(),
 })).max(200);
 
-function calcularItens(itens: ItemSolicitacao[]) {
+export const itensSolicitacaoOpcionais = z.preprocess((valor) => {
+  if (typeof valor !== "string") return valor;
+  try { return JSON.parse(valor); } catch { return null; }
+}, itensSolicitacao.optional());
+
+export function calcularItens(itens: ItemSolicitacao[]) {
   return itens.map((item, indice) => {
     if (!item.cotacoes) return item;
     const fornecedores = new Set<string>();
@@ -384,16 +390,12 @@ export function rotasProcessos() {
     const p = await processoDo(req);
     const sid = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
     const { apoios } = anexosDaRequisicao(req);
-    const comoItens = z.preprocess((v) => {
-      if (typeof v !== "string") return v;
-      try { return JSON.parse(v); } catch { return null; }
-    }, itensSolicitacao.optional());
     const d = z.object({
       ...referenciasApoios,
       anterior: z.string().max(LIMITE_SOLICITACAO),
       descricao: z.string().trim().max(LIMITE_SOLICITACAO),
-      itens: comoItens,
-      itens_anteriores: comoItens,
+      itens: itensSolicitacaoOpcionais,
+      itens_anteriores: itensSolicitacaoOpcionais,
     }).refine((dados) => dados.itens === undefined || dados.itens_anteriores !== undefined, "Reabra a solicitação antes de editar os itens.").parse(req.body);
     const s = await q1<{ secretaria: string; referencia: string; objeto_solicitacao: string; justificativa: string }>(
       "select secretaria, referencia, objeto as objeto_solicitacao, justificativa from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
@@ -426,7 +428,9 @@ export function rotasProcessos() {
     res.json({ ok: true });
   });
 
-  r.get("/processos/:id/solicitacoes/:sid/docx", async (req, res) => {
+  r.get(["/processos/:id/solicitacoes/:sid/docx", "/processos/:id/solicitacoes/:sid/pdf"], async (req, res) => {
+    const formato = /\/pdf\/?$/i.test(req.path) ? "pdf" : "docx";
+    const exportar = formato === "pdf" ? minutaParaPdf : minutaParaDocx;
     const p = await processoDo(req);
     const sid = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
     const s = await q1<{ descricao: string }>(
@@ -434,8 +438,8 @@ export function rotasProcessos() {
     );
     if (!s?.descricao) throw new ErroHttp(404, "Texto da solicitação não encontrado.");
     const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
-    const arquivo = await minutaParaDocx(s.descricao, MODELO_SOLICITACAO.doc, timbrado);
-    enviarArquivo(res, `solicitacao-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.docx`, arquivo);
+    const arquivo = await exportar(s.descricao, MODELO_SOLICITACAO.doc, timbrado);
+    enviarArquivo(res, `solicitacao-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.${formato}`, arquivo);
   });
 
   r.get("/processos/:id/solicitacoes/:sid/arquivo", async (req, res) => {
@@ -574,7 +578,9 @@ export function rotasProcessos() {
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "minuta.pendencias", detalhe: { etapa: e.id, versao: r1.versao, aplicados } });
     res.json({ ...r1, aplicados });
   });
-  r.get("/processos/:id/minutas/:etapa/docx", async (req, res) => {
+  r.get(["/processos/:id/minutas/:etapa/docx", "/processos/:id/minutas/:etapa/pdf"], async (req, res) => {
+    const formato = /\/pdf\/?$/i.test(req.path) ? "pdf" : "docx";
+    const exportar = formato === "pdf" ? minutaParaPdf : minutaParaDocx;
     const p = await processoDo(req);
     const e = etapaPorId(String(req.params.etapa));
     const v = req.query.versao ? Number(req.query.versao) : null;
@@ -583,12 +589,9 @@ export function rotasProcessos() {
       : await minutaVigente(p.id, String(req.params.etapa));
     if (!e || !m) throw new ErroHttp(404, "Minuta não encontrada.");
     const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
-    const buf = await minutaParaDocx(m.texto, e.doc ?? e.nome, timbrado);
-    const nome = `${e.nome} - ${p.numero ? `PA ${p.numero}` : `Protocolo ${p.protocolo}`} - v${m.versao}.docx`.replace(/[\\/:*?"<>|]/g, "-");
-    const ascii = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7e]/g, "_");
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-    res.setHeader("Content-Disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(nome)}`);
-    res.send(buf);
+    const buf = await exportar(m.texto, e.doc ?? e.nome, timbrado);
+    const nome = `${e.nome} - ${p.numero ? `PA ${p.numero}` : `Protocolo ${p.protocolo}`} - v${m.versao}.${formato}`.replace(/[\\/:*?"<>|]/g, "-");
+    enviarArquivo(res, nome, buf);
   });
 
   // Documentos de apoio: guarda o texto extraído para a IA consultar.

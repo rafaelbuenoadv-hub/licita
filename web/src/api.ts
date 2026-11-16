@@ -2,12 +2,12 @@ export class ErroApi extends Error {
   constructor(public status: number, msg: string) { super(msg); }
 }
 
-async function req<T>(metodo: string, url: string, corpo?: unknown): Promise<T> {
+async function req<T>(metodo: string, url: string, corpo?: unknown, signal?: AbortSignal): Promise<T> {
   const h: Record<string, string> = { "x-licita": "1" };
   let body: BodyInit | undefined;
   if (corpo instanceof FormData) body = corpo;
   else if (corpo !== undefined) { h["content-type"] = "application/json"; body = JSON.stringify(corpo); }
-  const r = await fetch("/api" + url, { method: metodo, headers: h, body, credentials: "same-origin" });
+  const r = await fetch("/api" + url, { method: metodo, headers: h, body, signal, credentials: "same-origin" });
   const dados = r.headers.get("content-type")?.includes("json") ? await r.json() : null;
   if (!r.ok) {
     if (r.status === 401 && !url.startsWith("/auth/")) window.dispatchEvent(new Event("licita:sair"));
@@ -16,7 +16,7 @@ async function req<T>(metodo: string, url: string, corpo?: unknown): Promise<T> 
   return dados as T;
 }
 export const api = {
-  get: <T = any>(u: string) => req<T>("GET", u),
+  get: <T = any>(u: string, sinal?: AbortSignal) => req<T>("GET", u, undefined, sinal),
   post: <T = any>(u: string, c?: unknown) => req<T>("POST", u, c ?? {}),
   put: <T = any>(u: string, c?: unknown) => req<T>("PUT", u, c ?? {}),
   del: <T = any>(u: string) => req<T>("DELETE", u),
