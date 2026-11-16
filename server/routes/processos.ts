@@ -1,4 +1,4 @@
-import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesPortaria } from "../portarias.js";
+import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesCadastro } from "../portarias.js";
 import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
@@ -291,7 +291,7 @@ export function rotasProcessos() {
         where m.processo_id=$1 and m.etapa=$2 order by m.versao desc`, [p.id, req.params.etapa]);
     const dfd = req.params.etapa === "dfd";
     const cadastro = dfd || vig ? await secretariosDoProcesso(p) : undefined;
-    const sugestoes_cadastro = vig && cadastro ? sugestoesPortaria(vig.texto, cadastro) : [];
+    const sugestoes_cadastro = vig && cadastro ? sugestoesCadastro(vig.texto, cadastro) : [];
     const texto = vig?.texto ?? "";
     const titulares_dfd = dfd && cadastro ? {
       pode_inserir: inserirTitularesDfd(texto, cadastro) !== texto,

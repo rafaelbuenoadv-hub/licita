@@ -574,3 +574,37 @@ test("abertura do processo: área requisitante traz o secretário e a portaria d
   assert.ok(!(await outro.get("/api/secretarios")).dados.some((s: any) => s.nome === "Denise da Silva Lima"));
   assert.equal((await outro.post("/api/secretarios/titulares", { areas: ["Educação"] })).dados[0].titular, null);
 });
+
+test("minutas: nome do secretário e portaria entram sozinhos em qualquer peça, só quando o titular é inequívoco", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const base = { objeto: "Contratação de teste com titular único", tipo: "bens", via: "licitacao", ano: 2028 };
+  const { dados: { id } } = await admin.post("/api/processos", { ...base, requisitante: "SEDUC" });
+  const rota = `/api/processos/${id}/minutas/dfd`;
+  const texto = [
+    "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA",
+    "Titular: [[PREENCHER: nome do secretário]] — Portaria nº [[portaria de nomeação]]",
+    "Fiscal: [[nome do fiscal do contrato]]",
+    "Outra pasta: [[nome do secretário municipal de administração]]",
+    "Autoridade: [[nome da autoridade competente]]",
+    "",
+    "@ [[nome do titular da área requisitante]]",
+    "@ Secretário(a) Municipal de Educação",
+    "@ Portaria de nomeação nº [[número]]",
+  ].join("\n");
+  assert.equal((await admin.post(rota, { texto })).status, 200);
+  const salvo = (await admin.get(rota)).dados.vigente.texto as string;
+  assert.match(salvo, /Titular: Denise da Silva Lima — Portaria nº 008\/2025/);
+  assert.match(salvo, /@ Denise da Silva Lima\n@ Secretário\(a\) Municipal de Educação\n@ Portaria de nomeação nº 008\/2025/);
+  // O que não é o titular da área requisitante continua pendente.
+  assert.ok(salvo.includes("[[nome do fiscal do contrato]]"));
+  assert.ok(salvo.includes("[[nome do secretário municipal de administração]]"));
+  assert.ok(salvo.includes("[[nome da autoridade competente]]"));
+
+  // Com duas áreas, o pedido genérico fica pendente; o que cita a secretaria é preenchido.
+  const dois = (await admin.post("/api/processos", { ...base, requisitante: "SEDUC", areas_adicionais: ["Finanças"] })).dados.id;
+  const rota2 = `/api/processos/${dois}/minutas/dfd`;
+  assert.equal((await admin.post(rota2, { texto: "A: [[nome do secretário]]\nB: [[nome do secretário — Finanças]]\nC: [[nome da secretária de Educação]]" })).status, 200);
+  const v = (await admin.get(rota2)).dados;
+  assert.equal(v.vigente.texto, "A: [[nome do secretário]]\nB: Luiz Carlos Bernardi Gelinski\nC: Denise da Silva Lima");
+  assert.deepEqual(v.sugestoes_cadastro, []);
+});

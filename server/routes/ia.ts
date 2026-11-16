@@ -51,7 +51,7 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   l.push(`Exercício: ${p.ano}`, `Natureza/ramo (para fracionamento): ${p.classe || "não informada"}`);
   l.push(`Regulamentos locais do órgão: ${orgao?.normas || "não informados"}`, `Regulamentos citados neste processo: ${p.normas || "nenhum"}`);
   if (secretarios.length) {
-    l.push("SECRETÁRIOS DAS ÁREAS REQUISITANTES — use o ato somente para a nomeação desse titular. Para atos desconhecidos ou ambíguos, use [[portaria de nomeação — nome ou secretaria]].");
+    l.push("SECRETÁRIOS DAS ÁREAS REQUISITANTES — dados do cadastro oficial do órgão. Em toda peça que identifique o titular de uma área requisitante ou traga a assinatura dele, escreva o nome e a portaria de nomeação exatamente como constam abaixo, sem deixar esses dados como campo pendente. Na assinatura do titular, use três linhas: o nome; \"Secretário(a) Municipal de\" seguido da secretaria; \"Portaria de nomeação nº\" seguido do número. Use o ato somente para a nomeação desse titular. Para atos desconhecidos ou ambíguos, e para a portaria que constar como \"a confirmar\", use [[portaria de nomeação — nome ou secretaria]].");
     for (const s of secretarios) l.push(`- ${s.secretaria}: ${s.nome} · ${s.portaria ? `Portaria nº ${s.portaria}` : "portaria a confirmar"}`);
   }
   if (itemPca) {

@@ -93,8 +93,33 @@ export function sugestoesPortaria(texto: string, { secretarios, todosIdentificad
   });
 }
 
+/** Campos pendentes que pedem o nome do secretário da área requisitante: preenche só quando o titular é inequívoco. */
+export function sugestoesTitular(texto: string, { secretarios, todosIdentificados }: CadastroProcesso) {
+  return pendencias(texto).flatMap(({ i, rotulo, trecho }) => {
+    const campo = normalizar(rotulo);
+    const ref = ` ${campo} ${normalizar(trecho.replace("▮", ""))} `;
+    if (!/\bnome\b/.test(campo) || !/\b(secretari[oa]|titular)\b/.test(campo)) return [];
+    if (/\b(portaria|fiscal|gestor|agente|pregoeiro|comissao|equipe|autoridade|prefeit[oa]|procurador|ordenador|substitut[oa]|contratad[oa]|fornecedor|empresa|representante|tecnic[oa])\b/.test(campo)) return [];
+    const menciona = secretarios.filter((s) => ref.includes(` ${area(s.secretaria)} `));
+    // Sem secretaria citada, só vale o pedido genérico ("nome do secretário", "nome do titular da área requisitante").
+    const generico = /^(?:preencher )?nome(?: completo)? d[oa] (?:secretari[oa](?: municipal)?|titular)(?: (?:d[aeo] )?(?:area|pasta|secretaria|unidade)? ?(?:requisitante|demandante|solicitante))?$/.test(campo);
+    const candidatos = menciona.length ? menciona : todosIdentificados && generico ? secretarios : [];
+    if (candidatos.length !== 1) return [];
+    const s = candidatos[0];
+    return [{ i, valor: s.nome, fonte: `Cadastro de secretários · ${s.secretaria}`, falta: "" }];
+  });
+}
+
+/** Tudo o que o cadastro de secretários resolve na minuta: nome do titular e portaria de nomeação. */
+export const sugestoesCadastro = (texto: string, cadastro: CadastroProcesso) =>
+  [...sugestoesTitular(texto, cadastro), ...sugestoesPortaria(texto, cadastro)].sort((a, b) => a.i - b.i);
+
 export function preencherPortarias(texto: string, cadastro: CadastroProcesso) {
-  return aplicarPendencias(texto, Object.fromEntries(sugestoesPortaria(texto, cadastro).map((s) => [s.i, s.valor]))).texto;
+  const aplicar = (t: string, sugestoes: { i: number; valor: string }[]) =>
+    sugestoes.length ? aplicarPendencias(t, Object.fromEntries(sugestoes.map((s) => [s.i, s.valor]))).texto : t;
+  // Primeiro o nome: com ele escrito na linha, a portaria ao lado passa a ter titular certo.
+  const comNomes = aplicar(texto, sugestoesTitular(texto, cadastro));
+  return aplicar(comNomes, sugestoesPortaria(comNomes, cadastro));
 }
 
 const tituloDfd = "## Titulares das áreas requisitantes";
