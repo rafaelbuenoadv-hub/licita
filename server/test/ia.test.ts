@@ -214,3 +214,73 @@ test("IA redige a solicitação usando o PDF e aguarda o salvamento pelo usuári
   assert.match(pedidos[antes + 1].body.messages[0].content, /MODELO DA SOLICITAÇÃO/);
   assert.deepEqual((await (await api("GET", `/api/processos/${id}`)).json()).solicitacoes, []);
 });
+
+test("leitura de orçamento: envia o arquivo à IA, guarda os dados e não sobrescreve valor digitado", async () => {
+  const novo = await api("POST", "/api/processos", { objeto: "Aquisição de cadeiras escolares", tipo: "bens", via: "dispensa", ano: 2026 });
+  const { id } = (await novo.json()) as { id: number };
+  const fd = new FormData();
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  fd.append("arquivo", new Blob([png]), "foto do orçamento.png");
+  fd.append("arquivo", new Blob(["Proposta comercial: 30 cadeiras a R$ 300,00"]), "proposta.txt");
+  fd.append("arquivo", new Blob(["PK"]), "planilha.xlsx");
+  const env = await api("POST", `/api/processos/${id}/orcamentos`, fd);
+  assert.equal(env.status, 201);
+  const [foto, txt, xlsx] = ((await env.json()) as { ids: number[] }).ids;
+
+  const lido = { fornecedor: "Móveis Escolares Ltda", cnpj: "12.345.678/0001-90", data: "2026-11-10", validade: "10/12/2026",
+    itens: [{ descricao: "Cadeira escolar", unidade: "un", quantidade: 30, valor_unitario: 300, valor_total: 9000 }],
+    valor_total: 9000, frete: "incluso", instalacao: "nao_informado", prazo_entrega: "15 dias", observacoes: null };
+  respostaEstruturada = lido;
+  const r = await api("POST", `/api/processos/${id}/orcamentos/${foto}/ler`, {});
+  assert.equal(r.status, 200);
+  const j: any = await r.json();
+  assert.equal(j.valor, 9000);
+  assert.equal(j.dados.validade, null, "data fora do formato AAAA-MM-DD é descartada");
+  // A foto vai como imagem, junto da instrução.
+  const conteudo = pedidos.at(-1)!.body.messages[0].content;
+  assert.deepEqual(conteudo[0].source, { type: "base64", media_type: "image/png", data: png.toString("base64") });
+  assert.match(conteudo[1].text, /Não calcule nem deduza valor/);
+
+  // Valor digitado antes prevalece sobre o lido; texto vai como texto.
+  assert.equal((await api("PUT", `/api/processos/${id}/orcamentos/${txt}`, { valor: 8500 })).status, 200);
+  respostaEstruturada = { ...lido, fornecedor: "Outra Empresa ME", cnpj: "98.765.432/0001-10", validade: "2026-12-10", frete: "nao_incluso" };
+  const r2: any = await (await api("POST", `/api/processos/${id}/orcamentos/${txt}/ler`, {})).json();
+  assert.equal(r2.valor, 8500);
+  assert.match(pedidos.at(-1)!.body.messages[0].content, /TEXTO\nProposta comercial: 30 cadeiras/);
+  // Planilha não é lida; orçamento de outro processo não é encontrado.
+  assert.equal((await api("POST", `/api/processos/${id}/orcamentos/${xlsx}/ler`, {})).status, 415);
+  assert.equal((await api("POST", `/api/processos/${id}/orcamentos/999999/ler`, {})).status, 404);
+
+  const det: any = await (await api("GET", `/api/processos/${id}`)).json();
+  const o = det.orcamentos.find((x: any) => x.id === foto);
+  assert.equal(o.fornecedor, "Móveis Escolares Ltda");
+  assert.equal(o.dados.itens[0].valor_total, 9000);
+  assert.ok(o.lido_em);
+  assert.equal(det.orcamentos.find((x: any) => x.id === xlsx).dados, null);
+
+  // A comparação aponta o frete incluído em uma proposta e não na outra.
+  const { compararOrcamentos } = await import("../../shared/orcamentos.js");
+  const alertas = compararOrcamentos(det.orcamentos, "2026-11-16");
+  assert.equal(alertas.length, 1);
+  assert.match(alertas[0].texto, /frete está incluído em Móveis Escolares Ltda, mas não em Outra Empresa ME/);
+});
+
+test("comparação de orçamentos aponta soma divergente, validade vencida, dados ausentes e fornecedor repetido", async () => {
+  const { compararOrcamentos } = await import("../../shared/orcamentos.js");
+  const base = { fornecedor: "A Ltda", cnpj: "11.111.111/0001-11", data: "2026-11-01", validade: "2026-12-01", valor_total: 100, frete: "nao_informado", instalacao: "nao_informado", prazo_entrega: null, observacoes: null,
+    itens: [{ descricao: "X", unidade: "un", quantidade: 2, valor_unitario: 50, valor_total: null }] };
+  assert.deepEqual(compararOrcamentos([{ id: 1, nome: "a.pdf", dados: base as any }, { id: 2, nome: "sem leitura.xlsx", dados: null }], "2026-11-16"), []);
+  const textos = compararOrcamentos([
+    { id: 1, nome: "a.pdf", dados: { ...base, valor_total: 120, validade: "2026-11-10" } as any },
+    { id: 2, nome: "b.pdf", dados: { ...base, cnpj: "11111111000111", data: null, itens: [...base.itens, ...base.itens] } as any },
+    { id: 3, nome: "c.pdf", dados: { ...base, fornecedor: null, cnpj: null, instalacao: "incluso" } as any },
+    { id: 4, nome: "d.pdf", dados: { ...base, fornecedor: "D ME", cnpj: "22.222.222/0001-22", instalacao: "nao_incluso" } as any },
+  ], "2026-11-16").map((a: { texto: string }) => a.texto);
+  assert.ok(textos.some((t: string) => /instalação ou montagem em c\.pdf, mas não em D ME/.test(t)));
+  assert.ok(textos.some((t: string) => /não têm o mesmo número de itens/.test(t)));
+  assert.ok(textos.some((t: string) => /A Ltda: a soma dos itens \(R\$\s100,00\) difere do total informado \(R\$\s120,00\)/.test(t)));
+  assert.ok(textos.some((t: string) => /a validade da proposta venceu em 10\/11\/2026/.test(t)));
+  assert.ok(textos.some((t: string) => /A Ltda: o orçamento não traz data/.test(t)));
+  assert.ok(textos.some((t: string) => /c\.pdf: o orçamento não traz CNPJ/.test(t)));
+  assert.ok(textos.some((t: string) => /Há 2 orçamentos do mesmo fornecedor \(A Ltda\)/.test(t)));
+});

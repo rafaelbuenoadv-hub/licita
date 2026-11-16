@@ -137,6 +137,8 @@ details.box>summary{padding:12px 16px;cursor:pointer;font-weight:600;font-family
 .pends li{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:8px 10px;border-left:3px solid var(--bad);background:var(--bad-soft);margin-top:6px;border-radius:0 6px 6px 0}
 .pends li.aviso{border-left-color:var(--warn);background:var(--warn-soft)} .pends li>span{min-width:0;overflow-wrap:anywhere}
 
+table.t tr.com-leitura td{border-bottom:0;padding-bottom:2px} .lido{margin:0} .lido>summary{cursor:pointer;font-size:13.5px;color:var(--accent)} .lido table.t{font-size:13px;margin-top:6px}
+
 /* mensagens */
 .lateral a .conta{margin-left:8px;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--accent);color:var(--accent-ink)}
 .caixa{display:grid;grid-template-columns:minmax(260px,380px) minmax(0,1fr);gap:16px;align-items:start}

@@ -433,6 +433,9 @@ create table if not exists orcamentos (
   criado_em timestamptz not null default now()
 );
 create index if not exists orcamentos_proc on orcamentos(processo_id);
+-- Leitura do orçamento pela IA: fornecedor, itens, valores e condições, para conferência do servidor.
+alter table orcamentos add column if not exists dados jsonb;
+alter table orcamentos add column if not exists lido_em timestamptz;
 
 -- Caixa de mensagens entre usuários do mesmo órgão: uma linha por destinatário.
 create table if not exists mensagens (

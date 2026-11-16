@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { compararOrcamentos, type DadosOrcamento } from "../../../shared/orcamentos";
 import { Link, useParams } from "react-router-dom";
 import { api, brl, dataBR, dataHora, fluxo, fmtNum, numBR } from "../api";
 import { Folha } from "../comp/Folha";
@@ -10,7 +11,7 @@ import { Solicitacoes } from "./Solicitacoes";
 const ACOES: Record<string, string> = {
   "processo.criado": "abriu o processo", "processo.alterado": "alterou os dados", "processo.situacao": "mudou a situação", "processo.numerado": "gerou o nº do processo e do procedimento", "etapa.concluida": "conferiu e concluiu a etapa",
   "item.marcado": "conferiu item", "item.desmarcado": "desmarcou item", "minuta.salva": "salvou minuta", "minuta.ia": "gerou minuta com IA",
-  "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
+  "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.lido": "pediu a leitura de orçamento à IA", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
   "minuta.titulares": "incluiu os titulares no DFD",
   "solicitacao.incluida": "adicionou solicitação de secretaria", "solicitacao.alterada": "editou solicitação de secretaria",
   "ia.sugestoes": "pediu sugestões à IA", "contrato.criado": "registrou contrato",
@@ -237,20 +238,37 @@ function Etapa({ p, e, ix, checks, recarregar, setAviso, irPara }: any) {
 
 /* Orçamentos recebidos: ficam na Solicitação e reaparecem na etapa de orçamento estimado. */
 function Orcamentos({ p, recarregar, setAviso }: { p: any; recarregar: () => Promise<any>; setAviso: (a: any) => void }) {
-  const { eu } = useEu();
+  const { eu, ia } = useEu();
   const pode = tem(eu, "requisitante", "contratacao") && p.situacao !== "cancelado";
   const [busy, setBusy] = useState(false);
+  const [lendo, setLendo] = useState<number[]>([]);
   const lista: any[] = p.orcamentos ?? [];
   const comValor = lista.filter((o) => o.valor != null);
+  const legivel = (nome: string) => /\.(pdf|jpe?g|png|docx|txt|csv)$/i.test(nome);
+  const alertas = compararOrcamentos(lista.map((o) => ({ id: o.id, nome: o.nome, dados: o.dados as DadosOrcamento | null })), new Date().toLocaleDateString("sv-SE"));
+  /** Pede à IA a leitura de cada orçamento, um por vez, e mostra o que não pôde ser lido. */
+  const ler = async (ids: number[]) => {
+    const falhas: string[] = [];
+    for (const id of ids) {
+      setLendo((l) => [...l, id]);
+      try { await api.post(`/processos/${p.id}/orcamentos/${id}/ler`); }
+      catch (e: any) { falhas.push(e.message); }
+      finally { setLendo((l) => l.filter((x) => x !== id)); await recarregar(); }
+    }
+    if (falhas.length) setAviso({ t: `Não foi possível ler ${falhas.length === 1 ? "um orçamento" : `${falhas.length} orçamentos`}: ${falhas[0]}`, tipo: "bad" });
+  };
   const enviar = async (arqs: File[]) => {
     if (!arqs.length) return;
     setBusy(true);
     try {
       const fd = new FormData();
       for (const a of arqs) fd.append("arquivo", a);
-      await api.post(`/processos/${p.id}/orcamentos`, fd);
+      const r = await api.post<{ ids: number[] }>(`/processos/${p.id}/orcamentos`, fd);
       await recarregar();
-      setAviso({ t: arqs.length === 1 ? `Orçamento "${arqs[0].name}" anexado.` : `${arqs.length} orçamentos anexados.`, tipo: "ok" });
+      const paraLer = ia.disponivel ? r.ids.filter((_, k) => legivel(arqs[k]?.name ?? "")) : [];
+      setAviso({ t: `${arqs.length === 1 ? `Orçamento "${arqs[0].name}" anexado.` : `${arqs.length} orçamentos anexados.`}${paraLer.length ? " A IA está lendo os dados; confira o resultado na lista." : ""}`, tipo: "ok" });
+      setBusy(false);
+      await ler(paraLer);
     } catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
     finally { setBusy(false); }
   };
@@ -265,28 +283,49 @@ function Orcamentos({ p, recarregar, setAviso }: { p: any; recarregar: () => Pro
     try { await api.put(`/processos/${p.id}/orcamentos/${o.id}`, { valor: v }); await recarregar(); }
     catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
   };
+  const inclusao = (v: string) => v === "incluso" ? "incluído" : v === "nao_incluso" ? "não incluído" : "não informado";
   return (
     <div className="sec"><span className="lbl">Orçamentos</span>
-      <p className="small muted">Anexe aqui os orçamentos recebidos dos fornecedores (PDF, Word, planilha ou foto). Você pode escolher vários arquivos de uma vez; cada um fica identificado pelo nome do arquivo. A IA consulta os que têm texto legível.</p>
+      <p className="small muted">Anexe aqui os orçamentos recebidos dos fornecedores (PDF, Word, planilha ou foto). Você pode escolher vários arquivos de uma vez. A IA lê fornecedor, itens e valores de PDF, foto, Word e texto; confira com o documento antes de usar.</p>
       {lista.length === 0 ? <p className="muted">Nenhum orçamento anexado.</p> :
         <div className="tw"><table className="t">
           <thead><tr><th>Orçamento</th><th className="r">Valor (R$)</th><th /></tr></thead>
-          <tbody>{lista.map((o) => (
-            <tr key={o.id}>
+          <tbody>{lista.map((o) => {
+            const d = o.dados as DadosOrcamento | null;
+            return (<Fragment key={o.id}>
+            <tr className={d ? "com-leitura" : ""}>
               <td><a href={`/api/processos/${p.id}/orcamentos/${o.id}/arquivo`} download>{o.nome}</a>
-                <div className="small muted">{o.usuario ?? "—"} · {dataHora(o.criado_em)}</div></td>
+                <div className="small muted">{o.usuario ?? "—"} · {dataHora(o.criado_em)}</div>
+                {lendo.includes(o.id) && <div className="small" role="status">A IA está lendo este orçamento…</div>}</td>
               <td className="r" style={{ width: 150 }}>{pode
                 ? <input key={`${o.id}-${o.valor}`} aria-label={`Valor do orçamento ${o.nome}`} defaultValue={fmtNum(o.valor)} placeholder="informar" inputMode="decimal" style={{ textAlign: "right" }}
                     onBlur={(e) => gravarValor(o, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
                 : brl(o.valor)}</td>
-              <td className="r">{pode && <button className="lnk" onClick={() => remover(o)}>Remover</button>}</td></tr>))}</tbody>
+              <td className="r">{pode && <div className="stack" style={{ gap: 4, alignItems: "flex-end" }}>
+                {ia.disponivel && legivel(o.nome) && <button className="lnk" disabled={lendo.length > 0} onClick={() => ler([o.id])}>{d ? "Ler de novo" : "Ler com IA"}</button>}
+                <button className="lnk" onClick={() => remover(o)}>Remover</button></div>}</td></tr>
+            {d && <tr><td colSpan={3}>
+                <details className="lido">
+                  <summary>{d.fornecedor ?? "Fornecedor não identificado"}{d.cnpj ? ` · ${d.cnpj}` : ""}{d.data ? ` · ${dataBR(d.data)}` : ""} · {d.itens.length} {d.itens.length === 1 ? "item" : "itens"}</summary>
+                  <p className="small muted">Lido pela IA em {dataHora(o.lido_em)}. Validade: {d.validade ? dataBR(d.validade) : "não consta"} · Frete: {inclusao(d.frete)} · Instalação: {inclusao(d.instalacao)}{d.prazo_entrega ? ` · Entrega: ${d.prazo_entrega}` : ""}</p>
+                  {d.itens.length > 0 && <div className="tw"><table className="t">
+                    <thead><tr><th>Item</th><th className="r">Qtd.</th><th>Un.</th><th className="r">Unitário</th><th className="r">Total</th></tr></thead>
+                    <tbody>{d.itens.map((it, k) => <tr key={k}><td>{it.descricao}</td><td className="r">{it.quantidade ?? "—"}</td><td>{it.unidade ?? "—"}</td><td className="r">{brl(it.valor_unitario)}</td><td className="r">{brl(it.valor_total)}</td></tr>)}</tbody>
+                    <tfoot><tr><td colSpan={4} className="r"><b>Total da proposta</b></td><td className="r"><b>{brl(d.valor_total)}</b></td></tr></tfoot>
+                  </table></div>}
+                  {d.observacoes && <p className="small">{d.observacoes}</p>}
+                </details></td></tr>}
+            </Fragment>);
+          })}</tbody>
         </table></div>}
       {comValor.length > 1 && <p className="small muted">{comValor.length} orçamentos com valor · menor: {brl(Math.min(...comValor.map((o) => o.valor)))} · média: {brl(comValor.reduce((s, o) => s + o.valor, 0) / comValor.length)}</p>}
+      {alertas.length > 0 && <div role="status"><span className="lbl">Pontos de atenção na comparação</span>
+        <ul className="pends">{alertas.map((a, k) => <li key={k} className="aviso"><span>{a.texto}</span></li>)}</ul></div>}
       {pode && <div className="tools">
         <label className="btn pri" htmlFor="o-arquivos">{busy ? "Enviando…" : "Anexar orçamentos"}</label>
-        <input id="o-arquivos" type="file" multiple hidden disabled={busy} accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv"
+        <input id="o-arquivos" type="file" multiple hidden disabled={busy || lendo.length > 0} accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv"
           onChange={(e) => { enviar([...(e.target.files ?? [])]); e.target.value = ""; }} />
-        <span className="small muted">Até 20 arquivos por vez, 20 MB cada. O valor de cada orçamento é informado depois, na lista.</span>
+        <span className="small muted">Até 20 arquivos por vez, 20 MB cada. {ia.disponivel ? "O valor lido pela IA entra na lista quando o campo está vazio; o que você digitar prevalece." : "O valor de cada orçamento é informado na lista."}</span>
       </div>}
     </div>
   );

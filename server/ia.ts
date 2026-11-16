@@ -80,7 +80,7 @@ export async function gerarTexto(opts: {
 }
 
 /** Resposta em JSON validado por um esquema zod (saída estruturada). */
-export async function gerarEstruturado<S extends z.ZodType>(esquema: S, conteudo: string, effort: Effort = "high", sinal?: AbortSignal): Promise<z.infer<S>> {
+export async function gerarEstruturado<S extends z.ZodType>(esquema: S, conteudo: string | Anthropic.Beta.BetaContentBlockParam[], effort: Effort = "high", sinal?: AbortSignal): Promise<z.infer<S>> {
   const r = await cliente().beta.messages.parse({
     model: MODELO,
     max_tokens: 16000,

@@ -179,7 +179,7 @@ export function rotasProcessos() {
       `select distinct on (etapa) etapa, versao, origem, criado_em from minutas where processo_id = $1 order by etapa, versao desc`, [p.id]);
     const anexos = await q("select id, nome, length(texto) as caracteres, criado_em from anexos where processo_id = $1 order by id", [p.id]);
     const orcamentos = await q(
-      `select o.id, o.fornecedor, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, u.nome as usuario
+      `select o.id, o.fornecedor, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, o.dados, o.lido_em, u.nome as usuario
          from orcamentos o left join usuarios u on u.id = o.usuario_id where o.processo_id = $1 order by o.id`, [p.id]);
     const solicitacoes = await q(
       "select id, secretaria, referencia, descricao, nome_arquivo from solicitacoes_processo where processo_id=$1 order by id", [p.id],
