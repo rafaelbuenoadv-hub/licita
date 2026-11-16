@@ -186,3 +186,27 @@ test("IA de revisão lê todas as páginas e analisa parecer no mesmo PDF dos au
   assert.deepEqual(detalhe.minutas, []);
   assert.deepEqual(detalhe.recomendacoes, []);
 });
+
+test("IA redige a solicitação usando o PDF e aguarda o salvamento pelo usuário", async () => {
+  const r = await api("POST", "/api/processos", { objeto: "Manutenção de climatização", tipo: "servicos", via: "licitacao", ano: 2026 });
+  assert.equal(r.status, 201);
+  const id = (await r.json()).id;
+  const caminho = `/api/processos/${id}/solicitacoes`;
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  const dados = new FormData();
+  dados.set("secretaria", "Secretaria de Educação");
+  dados.set("descricao", "Priorizar a escola municipal.");
+  dados.set("arquivo", new Blob([Uint8Array.from(await pdf.save())], { type: "application/pdf" }), "pedido.pdf");
+  textoStream = "Manutenção preventiva de 8 aparelhos.";
+  respostaEstruturada = { descricao: "Solicito a manutenção preventiva de 8 aparelhos de climatização da escola municipal." };
+  const antes = pedidos.length;
+  const gerada = await api("POST", `${caminho}/ia`, dados);
+  assert.equal(gerada.status, 200);
+  assert.deepEqual(await gerada.json(), respostaEstruturada);
+  assert.match(pedidos[antes].body.messages[0].content[0].source.data, /^JVBER/);
+  assert.match(pedidos[antes + 1].body.messages[0].content, /Secretaria de Educação/);
+  assert.match(pedidos[antes + 1].body.messages[0].content, /8 aparelhos/);
+  assert.match(pedidos[antes + 1].body.messages[0].content, /Priorizar a escola municipal/);
+  assert.deepEqual((await (await api("GET", `/api/processos/${id}`)).json()).solicitacoes, []);
+});
