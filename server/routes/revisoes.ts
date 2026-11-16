@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { Router, type Request } from "express";
+import { Router, type Request, type RequestHandler } from "express";
 import multer from "multer";
+import type { PoolClient } from "pg";
 import { z } from "zod";
 import { exigePapel } from "../auth.js";
 import { auditar, q, q1, tx } from "../db.js";
@@ -35,6 +36,33 @@ type Revisao = { id: number; orgao_id: number; processo_id: number | null; numer
 type Arquivo = { id: number; tipo: z.infer<typeof tipoPdf>; nome: string; paginas: number };
 type TipoMinuta = z.infer<typeof tipoMinuta>;
 
+const recebePdf: RequestHandler = (req, res, next) => {
+  upload.single("arquivo")(req, res, (erro: unknown) => {
+    if (erro instanceof multer.MulterError) return next(new ErroHttp(400, "Envie um PDF de até 20 MB por vez."));
+    next(erro);
+  });
+};
+
+async function prepararArquivo(file: Express.Multer.File, tipo: Arquivo["tipo"]) {
+  return {
+    tipo,
+    nome: nomeEnviado(file).slice(0, 240),
+    paginas: (await lerPdf(file.buffer)).getPageCount(),
+    hash: createHash("sha256").update(file.buffer).digest("hex"),
+    buffer: file.buffer,
+  };
+}
+
+async function gravarArquivo(c: PoolClient, revisao: number, usuario: NonNullable<Request["usuario"]>, pdf: Awaited<ReturnType<typeof prepararArquivo>>) {
+  const { tipo, nome, paginas, hash, buffer } = pdf;
+  const { rows: [salvo] } = await c.query<{ id: number }>(
+    "insert into revisao_arquivos (revisao_id, tipo, nome, paginas, sha256, arquivo) values ($1,$2,$3,$4,$5,$6) returning id",
+    [revisao, tipo, nome, paginas, hash, buffer],
+  );
+  await auditar({ orgao: usuario.orgao_id, usuario: usuario.id, acao: "revisao.pdf_anexado", detalhe: { revisao, arquivo: salvo.id, tipo, paginas } }, c);
+  return salvo;
+}
+
 async function revisaoDo(req: Request) {
   const r = await q1<Revisao>("select * from revisoes where id=$1 and orgao_id=$2", [id.parse(req.params.id), req.usuario!.orgao_id]);
   if (!r) throw new ErroHttp(404, "Revisão não encontrada.");
@@ -58,12 +86,13 @@ export function rotasRevisoes() {
     res.json(await q("select id, numero, objeto, via, processo_id, criado_em from revisoes where orgao_id=$1 order by id desc", [req.usuario!.orgao_id]));
   });
 
-  r.post("/revisoes", async (req, res) => {
+  r.post("/revisoes", recebePdf, async (req, res) => {
     const d = z.object({
       numero: z.string().trim().min(1).max(120), objeto: z.string().trim().min(5).max(2000),
       via: vias.default("a_confirmar"), processo_id: id.nullable().default(null),
     }).parse(req.body);
     const usuario = req.usuario!;
+    const pdf = req.file ? await prepararArquivo(req.file, tipoPdf.parse(req.body.tipo)) : null;
     const registro = await tx(async (c) => {
       if (d.processo_id) {
         const p = await c.query("select id from processos where id=$1 and orgao_id=$2", [d.processo_id, usuario.orgao_id]);
@@ -74,6 +103,7 @@ export function rotasRevisoes() {
         [usuario.orgao_id, d.processo_id, d.numero, d.objeto, d.via],
       );
       await auditar({ orgao: usuario.orgao_id, usuario: usuario.id, processo: d.processo_id, acao: "revisao.aberta", detalhe: { revisao: nova.id } }, c);
+      if (pdf) await gravarArquivo(c, nova.id, usuario, pdf);
       return nova;
     });
     res.status(201).json(registro);
@@ -89,29 +119,16 @@ export function rotasRevisoes() {
     res.json({ ...revisao, arquivos, minutas, recomendacoes });
   });
 
-  r.post("/revisoes/:id/arquivos", (req, res, next) => {
-    upload.single("arquivo")(req, res, (erro: unknown) => {
-      if (erro instanceof multer.MulterError) return next(new ErroHttp(400, "Envie um PDF de até 20 MB por vez."));
-      next(erro);
-    });
-  }, async (req, res) => {
+  r.post("/revisoes/:id/arquivos", recebePdf, async (req, res) => {
     const revisao = await revisaoDo(req);
-    const tipo = tipoPdf.parse(req.body?.tipo);
     if (!req.file) throw new ErroHttp(400, "Selecione um PDF.");
-    const { buffer } = req.file;
-    const paginas = (await lerPdf(buffer)).getPageCount();
-    const nome = nomeEnviado(req.file).slice(0, 240);
-    const sha256 = createHash("sha256").update(buffer).digest("hex");
+    const pdf = await prepararArquivo(req.file, tipoPdf.parse(req.body?.tipo));
     const arquivo = await tx(async (c) => {
       await c.query("select id from revisoes where id=$1 for update", [revisao.id]);
-      const { rows: [existente] } = await c.query("select id from revisao_arquivos where revisao_id=$1 and tipo=$2 and sha256=$3", [revisao.id, tipo, sha256]);
-      if (existente) return existente;
-      const { rows: [salvo] } = await c.query(
-        "insert into revisao_arquivos (revisao_id, tipo, nome, paginas, sha256, arquivo) values ($1,$2,$3,$4,$5,$6) returning id",
-        [revisao.id, tipo, nome, paginas, sha256, buffer],
+      const { rows: [existente] } = await c.query<{ id: number }>(
+        "select id from revisao_arquivos where revisao_id=$1 and tipo=$2 and sha256=$3", [revisao.id, pdf.tipo, pdf.hash],
       );
-      await auditar({ orgao: revisao.orgao_id, usuario: req.usuario!.id, acao: "revisao.pdf_anexado", detalhe: { revisao: revisao.id, arquivo: salvo.id, tipo, paginas } }, c);
-      return salvo;
+      return existente ?? await gravarArquivo(c, revisao.id, req.usuario!, pdf);
     });
     res.status(201).json(arquivo);
   });

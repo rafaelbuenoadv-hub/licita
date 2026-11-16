@@ -37,6 +37,9 @@ function ListaRevisoes() {
   const [processos, setProcessos] = useState<Processo[]>([]);
   const [aberto, setAberto] = useState(false);
   const [form, setForm] = useState({ numero: "", objeto: "", via: "a_confirmar" as Via, processo_id: "" });
+  const [arquivo, setArquivo] = useState<File | null>(null);
+  const [tipoPdf, setTipoPdf] = useState<TipoPdf>("autos");
+  const seletorPdf = useRef<HTMLInputElement>(null);
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState("");
   const navegar = useNavigate();
@@ -53,7 +56,19 @@ function ListaRevisoes() {
     setOcupado(true);
     setErro("");
     try {
-      const r = await api.post<{ id: number }>("/revisoes", { ...form, processo_id: form.processo_id ? Number(form.processo_id) : null });
+      const dados = { ...form, processo_id: form.processo_id ? Number(form.processo_id) : null };
+      let corpo: typeof dados | FormData = dados;
+      if (arquivo) {
+        const anexo = new FormData();
+        anexo.set("numero", dados.numero);
+        anexo.set("objeto", dados.objeto);
+        anexo.set("via", dados.via);
+        if (dados.processo_id) anexo.set("processo_id", String(dados.processo_id));
+        anexo.set("tipo", tipoPdf);
+        anexo.set("arquivo", arquivo);
+        corpo = anexo;
+      }
+      const r = await api.post<{ id: number }>("/revisoes", corpo);
       navegar(`/revisoes/${r.id}`);
     } catch (e) { setErro(erroTexto(e)); }
     finally { setOcupado(false); }
@@ -61,7 +76,7 @@ function ListaRevisoes() {
 
   return <>
     <div className="row"><h1>Revisão de processos</h1>
-      <button className="btn pri" type="button" onClick={() => setAberto(!aberto)}>{aberto ? "Fechar formulário" : "Nova revisão"}</button></div>
+      <button className="btn pri" type="button" disabled={ocupado} onClick={() => setAberto(!aberto)}>{aberto ? "Fechar formulário" : "Nova revisão"}</button></div>
     {erro && <p className="note bad" role="alert">{erro}</p>}
     {aberto && <form className="panel pad stack" onSubmit={criar}>
       <div className="form">
@@ -79,7 +94,26 @@ function ListaRevisoes() {
           {Object.entries(vias).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
         <label className="wide">Objeto<textarea value={form.objeto} required minLength={5} maxLength={2000} onChange={(e) => setForm({ ...form, objeto: e.target.value })} /></label>
       </div>
-      <div><button className="btn pri" disabled={ocupado}>Abrir revisão</button></div>
+      <div className="stack">
+        <div className="tools">
+          <input ref={seletorPdf} hidden type="file" accept="application/pdf,.pdf" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} />
+          <button type="button" className="btn" disabled={ocupado} onClick={() => seletorPdf.current?.click()}>{arquivo ? "Trocar PDF" : "Anexar PDF"}</button>
+          {arquivo && <>
+            <span className="small" style={{ overflowWrap: "anywhere" }}>{arquivo.name}</span>
+            <button type="button" className="lnk" disabled={ocupado} onClick={() => {
+              setArquivo(null);
+              if (seletorPdf.current) seletorPdf.current.value = "";
+            }}>Remover</button>
+          </>}
+        </div>
+        {arquivo && <div className="form"><label>Tipo de documento
+          <select value={tipoPdf} disabled={ocupado} onChange={(e) => setTipoPdf(e.target.value as TipoPdf)}>
+            {Object.entries(TIPOS_PDF).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label></div>}
+        <span className="small muted">Opcional. Até 20 MB por PDF. Você pode juntar outros documentos depois de abrir a revisão.</span>
+      </div>
+      <div><button className="btn pri" disabled={ocupado}>{ocupado ? "Abrindo revisão…" : "Abrir revisão"}</button></div>
     </form>}
     {lista === null && !erro && <p className="muted">Carregando revisões…</p>}
     {lista?.length === 0 && <p className="muted">Nenhuma revisão cadastrada.</p>}
