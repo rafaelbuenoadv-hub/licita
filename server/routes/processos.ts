@@ -201,6 +201,12 @@ async function conferirOrcamentos(c: PoolClient, processo: number, itens: ItemSo
   }
 }
 
+/**
+ * Texto recebido em formulário com arquivos (multipart): o navegador troca as quebras de linha por "\r\n".
+ * Sem normalizar, a comparação com o texto salvo acusava "A solicitação mudou" em toda edição.
+ */
+const textoDoFormulario = z.string().transform((t) => t.replace(/\r\n?/g, "\n"));
+
 export function rotasProcessos() {
   const r = Router();
   r.use("/processos", exigeLogin);
@@ -338,7 +344,7 @@ export function rotasProcessos() {
       ...referenciasApoios,
       secretaria: z.string().trim().min(2).max(200),
       referencia: z.string().trim().max(120).default(""),
-      descricao: z.string().trim().max(LIMITE_SOLICITACAO).default(""),
+      descricao: textoDoFormulario.pipe(z.string().trim().max(LIMITE_SOLICITACAO)).default(""),
       objeto_solicitacao: z.string().trim().max(4000).default(""),
       justificativa: z.string().trim().max(8000).default(""),
       itens: z.preprocess((v) => {
@@ -392,8 +398,8 @@ export function rotasProcessos() {
     const { apoios } = anexosDaRequisicao(req);
     const d = z.object({
       ...referenciasApoios,
-      anterior: z.string().max(LIMITE_SOLICITACAO),
-      descricao: z.string().trim().max(LIMITE_SOLICITACAO),
+      anterior: textoDoFormulario.pipe(z.string().max(LIMITE_SOLICITACAO)),
+      descricao: textoDoFormulario.pipe(z.string().trim().max(LIMITE_SOLICITACAO)),
       itens: itensSolicitacaoOpcionais,
       itens_anteriores: itensSolicitacaoOpcionais,
     }).refine((dados) => dados.itens === undefined || dados.itens_anteriores !== undefined, "Reabra a solicitação antes de editar os itens.").parse(req.body);

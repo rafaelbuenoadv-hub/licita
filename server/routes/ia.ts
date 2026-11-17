@@ -264,7 +264,7 @@ export function rotasIA() {
       solicitacao_id: z.coerce.number().int().positive().max(2147483647).optional(),
       secretaria: z.string().trim().min(2).max(200),
       referencia: z.string().trim().max(120).default(""),
-      descricao: z.string().trim().max(LIMITE_SOLICITACAO).default(""),
+      descricao: z.string().transform((t) => t.replace(/\r\n?/g, "\n")).pipe(z.string().trim().max(LIMITE_SOLICITACAO)).default(""),
       objeto_solicitacao: z.string().trim().max(4000).default(""),
       justificativa: z.string().trim().max(8000).default(""),
       itens: itensSolicitacaoOpcionais,

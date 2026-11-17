@@ -3,14 +3,15 @@ import { api, brl, numBR } from "../api";
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type DadosOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { CRITERIOS_PRECO, FONTES_COTACAO, valorDasCotacoes, normalizarCotacao, totalDoItem, totalDosItens, type CriterioPreco, type FonteCotacao, type CotacaoItem, type ItemSolicitacao } from "../../../shared/solicitacao";
 
-import { destinosDoOrcamento } from "../../../shared/importar-orcamento";
+import { destinosDoOrcamento, itensRepetidos } from "../../../shared/importar-orcamento";
 import type { ResultadoPncp } from "../../../shared/pncp";
 import { createPncpEvidence, pncpProcedure } from "../comp/comprovantePncp";
 import { BuscaPncpItem } from "./BuscaPncpItem";
 import { BuscaPncpLote } from "./BuscaPncpLote";
 
 interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string }
-type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[] };
+// escolhas: destino definido à mão na conferência (índice do item, ou null para lançar como item novo).
+type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[]; escolhas?: Record<number, number | null> };
 const cotacaoPreenchida = (c: LinhaCotacao) => c.orcamentoId != null || !!c.fornecedor.trim() || !!c.valor.trim();
 export interface LinhaItem {
   descricao: string;
@@ -117,11 +118,15 @@ function colunasDosDados(linhas: LinhaItem[]): Coluna[] {
 let sequenciaColuna = 0;
 const colunaNova = (): Coluna => ({ chave: `p${++sequenciaColuna}`, fornecedor: "", orcamentoId: null, fonte: "fornecedor" });
 const pendente = (c: Coluna) => c.chave.startsWith("p");
-/** Preço da proposta lida cuja descrição (e unidade, quando houver) é igual à do item. */
-function precoDaProposta(linha: LinhaItem, dados?: DadosOrcamento | null) {
-  const exatos = dados?.itens.filter((i) => normalizarCotacao(i.descricao) === normalizarCotacao(linha.descricao)
-    && (!linha.unidade.trim() || (i.unidade && normalizarCotacao(i.unidade) === normalizarCotacao(linha.unidade))));
-  return exatos?.length === 1 ? precoLido(exatos[0].valor_unitario) : "";
+/** Preço que a proposta lida dá para cada item, conciliando descrições escritas de outro jeito pelo fornecedor. */
+function precosDaProposta(linhas: LinhaItem[], dados?: DadosOrcamento | null) {
+  const precos = new Map<number, string>();
+  if (!dados?.itens.length) return precos;
+  destinosDoOrcamento(linhas, dados.itens).forEach((d, i) => {
+    const preco = precoLido(dados.itens[i].valor_unitario);
+    if (d.indice != null && !d.ambigua && preco) precos.set(d.indice, preco);
+  });
+  return precos;
 }
 
 export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, recarregar, ia, ocupado, setCotando }: {
@@ -179,7 +184,9 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     } finally { await recarregar(); }
   });
 
-  const destinos = leitura ? destinosDoOrcamento(linhas, leitura.dados.itens) : [];
+  const automaticos = leitura ? destinosDoOrcamento(linhas, leitura.dados.itens) : [];
+  const destinos = automaticos.map((d, k) => (leitura?.escolhas && k in leitura.escolhas
+    ? { indice: leitura.escolhas[k], ambigua: false, aproximado: false } : d));
   const aplicarLeitura = () => {
     if (!leitura) return;
     const fornecedor = limparNomeFornecedor(leitura.dados.fornecedor);
@@ -259,10 +266,11 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   const vincularOrcamento = (col: Coluna, id: number, dados: DadosOrcamento | null | undefined, nome: string) => {
     const novo = { orcamentoId: id, fornecedor: limparNomeFornecedor(col.fornecedor) || nome, fonte: "fornecedor" as FonteCotacao, link: "", consultadoEm: col.consultadoEm || dataConsulta() };
     let preenchidos = 0;
-    const resultado = linhas.map((l) => {
+    const precos = precosDaProposta(linhas, dados);
+    const resultado = linhas.map((l, k) => {
       const j = indiceNaLinha(l, col);
-      if (j >= 0) return { ...l, cotacoes: l.cotacoes.map((c, n) => (n === j ? { ...c, ...novo, valor: c.valor || precoDaProposta(l, dados) } : c)) };
-      const preco = precoDaProposta(l, dados);
+      if (j >= 0) return { ...l, cotacoes: l.cotacoes.map((c, n) => (n === j ? { ...c, ...novo, valor: c.valor || precos.get(k) || "" } : c)) };
+      const preco = precos.get(k);
       if (!preco || l.cotacoes.some((c) => c.orcamentoId === id)) return l;
       preenchidos++;
       return { ...l, cotacoes: [...l.cotacoes.filter(cotacaoPreenchida), { ...novo, valor: preco }] };
@@ -283,7 +291,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     }
     const n = vincularOrcamento(col, id, dados, limparNomeFornecedor(dados?.fornecedor) || fornecedor);
     await recarregar();
-    if (dados) setAviso(n ? `Orçamento anexado. A IA preencheu o preço de ${n} ${n === 1 ? "item" : "itens"} com descrição igual à da proposta. Confira e complete os demais.` : "Orçamento anexado. Nenhum item da proposta tem descrição igual à dos itens: informe os preços na coluna.");
+    if (dados) setAviso(n ? `Orçamento anexado. A IA leu a proposta e lançou o preço de ${n} ${n === 1 ? "item" : "itens"}, conciliando com os itens já cadastrados. Confira e complete os demais.` : "Orçamento anexado. Não foi possível ligar as linhas da proposta aos itens: informe os preços na coluna ou use \"Anexar e ler orçamento\" para conferir linha a linha.");
   });
   const relerFornecedor = (col: Coluna, orcamento: OrcamentoLido) => executar(`fornecedor-${orcamento.id}`, async () => {
     const dados = await lerOrcamento(orcamento.id);
@@ -310,6 +318,24 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     setAviso("Referência do PNCP lançada e comprovante anexado.");
   });
 
+  // Itens lançados duas vezes (o mesmo item, cada vez com o preço de um fornecedor): juntar numa linha só.
+  const repetidos = itensRepetidos(linhas.map((l) => ({
+    descricao: l.descricao, unidade: l.unidade, quantidade: l.quantidade,
+    fornecedores: l.cotacoes.filter(cotacaoPreenchida).map((c) => chaveDe(c)),
+  })));
+  const [conferirRepetidos, setConferirRepetidos] = useState(false);
+  const juntarRepetidos = () => {
+    const absorvidos = new Set(repetidos.map((r) => r.item));
+    const resultado = linhas.map((l, k) => {
+      const vindos = repetidos.filter((r) => r.juntarEm === k).map((r) => linhas[r.item]);
+      if (!vindos.length) return l;
+      return { ...l, quantidade: l.quantidade || vindos[0].quantidade,
+        cotacoes: [...l.cotacoes.filter(cotacaoPreenchida), ...vindos.flatMap((v) => v.cotacoes.filter(cotacaoPreenchida))] };
+    }).filter((_, k) => !absorvidos.has(k));
+    setLinhas(resultado);
+    setConferirRepetidos(false);
+    setAviso(`${absorvidos.size} ${absorvidos.size === 1 ? "item repetido foi juntado" : "itens repetidos foram juntados"}: os preços ficaram lado a lado, na coluna de cada fornecedor. Confira e salve a solicitação.`);
+  };
   const descricoes = linhas.map((linha) => linha.descricao);
 
   return <fieldset className="wide itens-sol" disabled={ocupado || !!anexando}>
@@ -339,7 +365,14 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
           <td><input type="checkbox" aria-label={`Usar linha ${k + 1} da proposta`} checked={leitura.usar[k] && !destinos[k].ambigua}
             disabled={destinos[k].ambigua} onChange={(e) => setLeitura({ ...leitura, usar: leitura.usar.map((v, n) => n === k ? e.target.checked : v) })} /></td>
           <td>{i.descricao}</td><td>{i.unidade || "—"}</td><td>{i.quantidade ?? "—"}</td><td>{brl(i.valor_unitario)}</td>
-          <td>{destinos[k].ambigua ? "Vincular manualmente" : destinos[k].indice == null ? "Novo item" : `Item ${destinos[k].indice! + 1}`}</td>
+          <td><select aria-label={`Lançar a linha ${k + 1} da proposta em`} value={destinos[k].ambigua ? "" : destinos[k].indice == null ? "novo" : String(destinos[k].indice)}
+            onChange={(e) => setLeitura({ ...leitura, escolhas: { ...leitura.escolhas, [k]: e.target.value === "novo" ? null : Number(e.target.value) },
+              usar: leitura.usar.map((v, n) => (n === k ? true : v)) })}>
+            {destinos[k].ambigua && <option value="" disabled>Escolha o item</option>}
+            <option value="novo">Novo item</option>
+            {linhas.map((l, n) => l.descricao.trim() && <option key={n} value={n}>Item {n + 1} · {l.descricao.slice(0, 60)}</option>)}
+          </select>
+          {"aproximado" in destinos[k] && destinos[k].aproximado && <div className="small muted">Descrição parecida: confira</div>}</td>
         </tr>)}</tbody>
       </table></div>
       <div className="tools">
@@ -348,6 +381,25 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
       </div>
     </div>}
 
+    {repetidos.length > 0 && <div className="note stack" role="status" style={{ gap: 8 }}>
+      <div className="row"><span><strong>{repetidos.length} {repetidos.length === 1 ? "item parece repetido" : "itens parecem repetidos"}</strong>: o mesmo item lançado de novo com o preço de outro fornecedor.</span>
+        <button type="button" className="btn sm" onClick={() => setConferirRepetidos(!conferirRepetidos)}>{conferirRepetidos ? "Fechar" : "Conferir e juntar"}</button></div>
+      {conferirRepetidos && <>
+        <div className="tw"><table className="t">
+          <thead><tr><th>Item repetido</th><th>Junta-se ao item</th><th>Preços levados</th></tr></thead>
+          <tbody>{repetidos.map((r) => {
+            const de = linhas[r.item], para = linhas[r.juntarEm];
+            return <tr key={r.item}>
+              <td><b>{r.item + 1}</b> · {de.descricao}</td>
+              <td><b>{r.juntarEm + 1}</b> · {para.descricao}{de.quantidade.trim() && para.quantidade.trim() && de.quantidade.trim() !== para.quantidade.trim() && <div className="small" style={{ color: "var(--bad)" }}>Quantidades diferentes ({para.quantidade} e {de.quantidade}): fica {para.quantidade}.</div>}</td>
+              <td className="small">{de.cotacoes.filter(cotacaoPreenchida).map((c) => `${limparNomeFornecedor(c.fornecedor) || "Fornecedor"}: ${c.valor ? `R$ ${c.valor}` : "—"}`).join("; ")}</td>
+            </tr>;
+          })}</tbody>
+        </table></div>
+        <div className="tools"><button type="button" className="btn pri" onClick={juntarRepetidos}>Juntar {repetidos.length} {repetidos.length === 1 ? "item" : "itens"}</button>
+          <span className="small">Confira a lista: só junte itens que são de fato o mesmo.</span></div>
+      </>}
+    </div>}
     <div className="tw" tabIndex={0} aria-label="Tabela de itens e cotações">
       <table className="t quadro-edicao-itens">
         <thead><tr>

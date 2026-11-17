@@ -3,7 +3,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "pdf-lib";
 import { buscarPncp } from "../routes/pncp.js";
-import { destinosDoOrcamento } from "../../shared/importar-orcamento.js";
+import { destinosDoOrcamento, itensRepetidos } from "../../shared/importar-orcamento.js";
 import { documentoDaSolicitacao, inserirItens, quantidadeColunasCotacoes, valorDasCotacoes } from "../../shared/solicitacao.js";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
@@ -1240,4 +1240,61 @@ test("Solicitação abre a trilha e o painel acompanha o DFD sem alterar o fluxo
   const detalheLegado = (await lic.get(`/api/processos/${legado.dados.id}`)).dados;
   assert.equal(detalheLegado.trilha.atual.id, "dfd");
   assert.equal(detalheLegado.trilha.etapas[0].estado, "disponivel");
+});
+
+test("conciliação: a mesma linha escrita de outro jeito pelo fornecedor cai no item certo, sem duplicar", () => {
+  const nossos = [
+    ["Limpeza de ar condicionado - higienização com desmonte e lavagem completo - 36.000 btus a 60.000 btus", "SERV", "60"],
+    ["Limpeza de ar condicionado - higienização com desmonte e lavagem completo - 24.000 btus e 30.000 btus", "SERV", "350"],
+    ["Instalação de ar condicionado completo - 36.000 btus a 60.000 btus", "SERV", "20"],
+    ["Desinstalação (remoção) de ar condicionado piso teto 30.000 btus e 60.000 btus", "SERV", "10"],
+    ["Desinstalação (remoção) de ar condicionado piso teto 36.000 btus e 60.000 btus", "SERV", "40"],
+    ["Tubo de cobre para ar condicionado (obs.: bitola 3/8)", "M", "1.250"],
+    ["Material para isolamento térmico (obs.: bitola 3/8)", "M", "1.250"],
+  ].map(([descricao, unidade, quantidade]) => ({ descricao, unidade, quantidade }));
+  const proposta = [
+    ["MATERIAL PARA ISOLAMENTO TÉRMICO (cód. 42366)", "M", 1250],
+    ["DESINSTALAÇÃO DE AR CONDICIONADO — Remoção tipo piso teto 36.000 e 60.000 BTUs (cód. 42364)", "SERV", 40],
+    ["LIMPEZA DE AR CONDICIONADO — Higienização com desmonte e lavagem completa — 24.000 e 30.000 BTUs (cód. 42361)", "SERV", 350],
+    ["INSTALAÇÃO DE AR CONDICIONADO — Instalação completa — 36.000 a 60.000 BTUs (cód. 42362)", "SERV", 20],
+    ["LIMPEZA DE AR CONDICIONADO — Higienização com desmonte e lavagem completa — 36.000 a 60.000 BTUs (cód. 42361)", "SERV", 60],
+    ["DESINSTALAÇÃO DE AR CONDICIONADO — Remoção tipo piso teto 30.000 e 60.000 BTUs (cód. 42364)", "SERV", 10],
+    ["TUBO DE COBRE para ar-condicionado (cód. 42365) — observação do fornecedor: \"BITOLA\", sem indicar qual", "M", 1250],
+    ["Caixa de som amplificada", "UN", 2],
+  ].map(([descricao, unidade, quantidade]) => ({ descricao: String(descricao), unidade: String(unidade), quantidade: Number(quantidade), valor_unitario: 1, valor_total: 1 }));
+  assert.deepEqual(destinosDoOrcamento(nossos, proposta).map((d) => d.indice), [6, 4, 1, 2, 0, 3, 5, null]);
+
+  // Itens já duplicados na solicitação: cada repetido junta-se ao original de outro fornecedor.
+  const lista = [
+    ...nossos.map((i) => ({ ...i, fornecedores: ["HS Serviços LTDA"] })),
+    ...proposta.slice(0, 7).map((i) => ({ ...i, fornecedores: ["FH CONSTRUÇÕES CIVIS LTDA"] })),
+  ];
+  assert.deepEqual(itensRepetidos(lista).map((r) => [r.item, r.juntarEm]), [[7, 6], [8, 4], [9, 1], [10, 2], [11, 0], [12, 3], [13, 5]]);
+  // Do mesmo fornecedor, ou com unidade diferente, não junta.
+  assert.deepEqual(itensRepetidos([{ ...lista[0] }, { ...lista[11], fornecedores: ["HS Serviços LTDA"] }]), []);
+  assert.deepEqual(itensRepetidos([{ ...lista[0] }, { ...lista[11], unidade: "UN" }]), []);
+});
+
+test("editar solicitação pelo formulário com arquivos (quebras de linha \\r\\n) não acusa alteração de outra pessoa", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de material de limpeza", tipo: "bens", via: "licitacao", ano: 2026 });
+  const caminho = `/api/processos/${id}/solicitacoes`;
+  const itens = [{ descricao: "Detergente", unidade: "un", quantidade: 10, cotacoes: [{ orcamento_id: null, fornecedor: "Loja A", valor_unitario: 3 }] }];
+  const criada = await lic.post(caminho, { chave_envio: randomUUID(), secretaria: "Educação", descricao: "# PEDIDO\nLinha 1\nLinha 2\n[[Itens]]", itens });
+  assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  const s = (await lic.get(`/api/processos/${id}`)).dados.solicitacoes[0];
+  const enviar = (texto: string, novos: unknown) => {
+    const fd = new FormData();
+    fd.set("anterior", s.descricao.replace(/\n/g, "\r\n"));
+    fd.set("descricao", texto.replace(/\n/g, "\r\n"));
+    fd.set("itens_anteriores", JSON.stringify(s.itens));
+    fd.set("itens", JSON.stringify(novos));
+    return lic.req("PUT", `${caminho}/${s.id}`, fd);
+  };
+  const r = await enviar("# PEDIDO\nLinha 1\nLinha 2 revisada\n[[Itens]]", [{ ...itens[0], cotacoes: [...itens[0].cotacoes, { orcamento_id: null, fornecedor: "Loja B", valor_unitario: 4 }] }]);
+  assert.equal(r.status, 200, JSON.stringify(r.dados));
+  const depois = (await lic.get(`/api/processos/${id}`)).dados.solicitacoes[0];
+  assert.ok(!depois.descricao.includes("\r"));
+  assert.match(depois.descricao, /Linha 2 revisada/);
+  assert.equal(depois.itens[0].cotacoes.length, 2);
 });
