@@ -97,6 +97,33 @@ function incluirCotacao(linha: LinhaItem, nova: LinhaCotacao) {
 }
 const precoLido = (v: number | null) => v != null && v > 0 && v <= 1e12 ? String(v).replace(".", ",") : "";
 
+/**
+ * Coluna de cotação: um fornecedor (ou referência) com nome, anexo e fonte informados uma vez para todos os itens.
+ * Os dados continuam guardados por item (cada item tem a sua lista de cotações); a coluna junta as cotações
+ * do mesmo orçamento anexado ou, sem anexo, do mesmo nome de fornecedor.
+ */
+interface Coluna { chave: string; fornecedor: string; orcamentoId: number | null; fonte?: FonteCotacao; link?: string; consultadoEm?: string }
+const chaveDe = (c: { orcamentoId: number | null; fornecedor: string }) =>
+  c.orcamentoId != null ? `o${c.orcamentoId}` : `n${normalizarCotacao(limparNomeFornecedor(c.fornecedor))}`;
+function colunasDosDados(linhas: LinhaItem[]): Coluna[] {
+  const vistas = new Map<string, Coluna>();
+  for (const l of linhas) for (const c of l.cotacoes) {
+    if (!cotacaoPreenchida(c)) continue;
+    const chave = chaveDe(c);
+    if (!vistas.has(chave)) vistas.set(chave, { chave, fornecedor: c.fornecedor, orcamentoId: c.orcamentoId, fonte: c.fonte, link: c.link, consultadoEm: c.consultadoEm });
+  }
+  return [...vistas.values()];
+}
+let sequenciaColuna = 0;
+const colunaNova = (): Coluna => ({ chave: `p${++sequenciaColuna}`, fornecedor: "", orcamentoId: null, fonte: "fornecedor" });
+const pendente = (c: Coluna) => c.chave.startsWith("p");
+/** Preço da proposta lida cuja descrição (e unidade, quando houver) é igual à do item. */
+function precoDaProposta(linha: LinhaItem, dados?: DadosOrcamento | null) {
+  const exatos = dados?.itens.filter((i) => normalizarCotacao(i.descricao) === normalizarCotacao(linha.descricao)
+    && (!linha.unidade.trim() || (i.unidade && normalizarCotacao(i.unidade) === normalizarCotacao(linha.unidade))));
+  return exatos?.length === 1 ? precoLido(exatos[0].valor_unitario) : "";
+}
+
 export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, recarregar, ia, ocupado, setCotando }: {
   processoId: number;
   linhas: LinhaItem[];
@@ -111,32 +138,14 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   const seletorImportacao = useRef<HTMLInputElement>(null);
   const [aviso, setAviso] = useState("");
   const [leitura, setLeitura] = useState<LeituraOrcamento | null>(null);
+  // Colunas ainda sem preço lançado (fornecedor recém-adicionado): ficam só na tela até receberem um preço.
+  const [pendentes, setPendentes] = useState<Coluna[]>(() => (colunasDosDados(linhas).length ? [] : [colunaNova()]));
   const lidas = lerLinhas(linhas);
   const total = totalDosItens(lidas.itens);
   const parcial = !!lidas.erro || lidas.itens.some((item) => totalDoItem(item) == null);
   const caminho = `/processos/${processoId}/orcamentos`;
   const alterar = (k: number, dados: Partial<LinhaItem>) =>
     setLinhas((lista) => lista.map((l, i) => i === k ? { ...l, ...dados } : l));
-  const alterarCotacao = (k: number, j: number, dados: Partial<LinhaCotacao>) =>
-    setLinhas((lista) => lista.map((l, i) => i === k ? { ...l,
-      cotacoes: l.cotacoes.map((c, n) => n === j ? { ...c, ...dados } : c),
-    } : l));
-
-  const selecionar = (k: number, j: number, id: number | null, dados?: DadosOrcamento | null, nome = "") => {
-    const anterior = linhas[k].cotacoes[j];
-    const item = linhas[k];
-    const exatos = dados?.itens.filter((i) => normalizarCotacao(i.descricao) === normalizarCotacao(item.descricao)
-      && (!item.unidade.trim() || (i.unidade && normalizarCotacao(i.unidade) === normalizarCotacao(item.unidade))));
-    const manterDigitado = anterior.orcamentoId == null || id == null;
-    const valorIdentificado = exatos?.length === 1 ? precoLido(exatos[0].valor_unitario) : "";
-    alterarCotacao(k, j, {
-      orcamentoId: id,
-      fornecedor: (manterDigitado && limparNomeFornecedor(anterior.fornecedor)) || nome || limparNomeFornecedor(dados?.fornecedor),
-      valor: (manterDigitado && anterior.valor.trim()) || valorIdentificado,
-      fonte: anterior.fonte === "pncp" ? "fornecedor" : anterior.fonte,
-      link: anterior.fonte === "pncp" ? "" : anterior.link,
-    });
-  };
 
   const enviar = async (arquivo: File) => {
     if (!arquivo.size || arquivo.size > 20 * 1024 * 1024) throw new Error("Selecione um arquivo de orçamento de até 20 MB.");
@@ -157,17 +166,6 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     catch (e) { setAviso(e instanceof Error ? e.message : "Não foi possível registrar o orçamento."); }
     finally { setAnexando(""); setCotando(false); }
   };
-
-  const anexar = (k: number, j: number, arquivo: File) => executar(`${k}-${j}`, async () => {
-    const { id, fornecedor } = await enviar(arquivo);
-    let dados: DadosOrcamento | null = null;
-    if (ia && legivel(arquivo.name)) {
-      try { dados = await lerOrcamento(id); }
-      catch { setAviso("Orçamento anexado. Confira o fornecedor e informe o preço unitário."); }
-    }
-    selecionar(k, j, id, dados, limparNomeFornecedor(dados?.fornecedor) || fornecedor);
-    await recarregar();
-  });
 
   const importar = (arquivo: File) => executar("importar", async () => {
     if (!legivel(arquivo.name)) throw new Error("Para importar os itens, envie PDF, Word, XLSX, foto ou texto.");
@@ -228,10 +226,69 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     setAviso(`${aplicadas} de ${leitura.usar.filter(Boolean).length} linhas selecionadas lançadas. Confira os dados antes de salvar.`);
   };
 
-  const relerFornecedor = (k: number, j: number, orcamento: OrcamentoLido) => executar(`fornecedor-${orcamento.id}`, async () => {
+  const dadosColunas = colunasDosDados(linhas);
+  const colunas = [...dadosColunas, ...pendentes.filter((p) => !dadosColunas.some((d) => d.chave === chaveDe(p) && (p.fornecedor.trim() || p.orcamentoId != null)))];
+  const indiceNaLinha = (l: LinhaItem, col: Coluna) => (pendente(col) ? -1 : l.cotacoes.findIndex((c) => cotacaoPreenchida(c) && chaveDe(c) === col.chave));
+
+  /** Altera nome, anexo ou fonte da coluna em todos os itens que têm preço dela. */
+  const alterarColuna = (col: Coluna, dados: Partial<Omit<Coluna, "chave">>) => {
+    if (pendente(col)) { setPendentes((lista) => lista.map((p) => (p.chave === col.chave ? { ...p, ...dados } : p))); return; }
+    setLinhas((lista) => lista.map((l) => {
+      const j = indiceNaLinha(l, col);
+      return j < 0 ? l : { ...l, cotacoes: l.cotacoes.map((c, n) => (n === j ? { ...c, ...dados } : c)) };
+    }));
+  };
+  /** Preço de um item na coluna: cria a cotação no item, altera, ou retira quando o preço é apagado. */
+  const alterarPreco = (k: number, col: Coluna, valor: string) => {
+    setLinhas((lista) => lista.map((l, i) => {
+      if (i !== k) return l;
+      const j = indiceNaLinha(l, col);
+      if (j >= 0) return { ...l, cotacoes: valor.trim() ? l.cotacoes.map((c, n) => (n === j ? { ...c, valor } : c)) : l.cotacoes.filter((_, n) => n !== j) };
+      if (!valor.trim()) return l;
+      return { ...l, cotacoes: [...l.cotacoes.filter(cotacaoPreenchida), {
+        orcamentoId: col.orcamentoId, fornecedor: col.fornecedor, valor, fonte: col.fonte, link: col.link, consultadoEm: col.consultadoEm || dataConsulta(),
+      }] };
+    }));
+    if (pendente(col) && valor.trim()) setPendentes((lista) => lista.filter((p) => p.chave !== col.chave));
+  };
+  const removerColuna = (col: Coluna) => {
+    if (pendente(col)) { setPendentes((lista) => lista.filter((p) => p.chave !== col.chave)); return; }
+    setLinhas((lista) => lista.map((l) => ({ ...l, cotacoes: l.cotacoes.filter((c) => !(cotacaoPreenchida(c) && chaveDe(c) === col.chave)) })));
+  };
+  /** Vincula um orçamento à coluna e preenche os preços dos itens que aparecem iguais na proposta lida. */
+  const vincularOrcamento = (col: Coluna, id: number, dados: DadosOrcamento | null | undefined, nome: string) => {
+    const novo = { orcamentoId: id, fornecedor: limparNomeFornecedor(col.fornecedor) || nome, fonte: "fornecedor" as FonteCotacao, link: "", consultadoEm: col.consultadoEm || dataConsulta() };
+    let preenchidos = 0;
+    const resultado = linhas.map((l) => {
+      const j = indiceNaLinha(l, col);
+      if (j >= 0) return { ...l, cotacoes: l.cotacoes.map((c, n) => (n === j ? { ...c, ...novo, valor: c.valor || precoDaProposta(l, dados) } : c)) };
+      const preco = precoDaProposta(l, dados);
+      if (!preco || l.cotacoes.some((c) => c.orcamentoId === id)) return l;
+      preenchidos++;
+      return { ...l, cotacoes: [...l.cotacoes.filter(cotacaoPreenchida), { ...novo, valor: preco }] };
+    });
+    setLinhas(resultado);
+    if (pendente(col)) {
+      if (resultado.some((l) => l.cotacoes.some((c) => c.orcamentoId === id))) setPendentes((lista) => lista.filter((p) => p.chave !== col.chave));
+      else setPendentes((lista) => lista.map((p) => (p.chave === col.chave ? { ...p, ...novo } : p)));
+    }
+    return preenchidos;
+  };
+  const anexarNaColuna = (i: number, col: Coluna, arquivo: File) => executar(`col-${i}`, async () => {
+    const { id, fornecedor } = await enviar(arquivo);
+    let dados: DadosOrcamento | null = null;
+    if (ia && legivel(arquivo.name)) {
+      try { dados = await lerOrcamento(id); }
+      catch { setAviso("Orçamento anexado. Confira o fornecedor e informe os preços."); }
+    }
+    const n = vincularOrcamento(col, id, dados, limparNomeFornecedor(dados?.fornecedor) || fornecedor);
+    await recarregar();
+    if (dados) setAviso(n ? `Orçamento anexado. A IA preencheu o preço de ${n} ${n === 1 ? "item" : "itens"} com descrição igual à da proposta. Confira e complete os demais.` : "Orçamento anexado. Nenhum item da proposta tem descrição igual à dos itens: informe os preços na coluna.");
+  });
+  const relerFornecedor = (col: Coluna, orcamento: OrcamentoLido) => executar(`fornecedor-${orcamento.id}`, async () => {
     const dados = await lerOrcamento(orcamento.id);
     const fornecedor = limparNomeFornecedor(dados.fornecedor);
-    if (fornecedor) alterarCotacao(k, j, { fornecedor });
+    if (fornecedor) alterarColuna(col, { fornecedor });
     else setAviso("O fornecedor não foi identificado no arquivo. Confira a proposta e informe o nome.");
     await recarregar();
   });
@@ -254,7 +311,6 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   });
 
   const descricoes = linhas.map((linha) => linha.descricao);
-  const colunasCotacoes = Math.max(1, ...linhas.map((linha) => linha.cotacoes.length));
 
   return <fieldset className="wide itens-sol" disabled={ocupado || !!anexando}>
     <legend>Itens</legend>
@@ -296,7 +352,51 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
       <table className="t quadro-edicao-itens">
         <thead><tr>
           <th scope="col">Item</th><th scope="col">Descrição</th><th scope="col">Un.</th><th scope="col">Qtd.</th>
-          {Array.from({ length: colunasCotacoes }, (_, i) => <th scope="col" key={i}>Cotação {i + 1}</th>)}
+          {colunas.map((col, i) => {
+            const orcamento = orcamentos.find((o) => o.id === col.orcamentoId);
+            const nome = limparNomeFornecedor(col.fornecedor);
+            return <th scope="col" key={i} className="col-cotacao">
+              <span className="lbl">Cotação {i + 1}</span>
+              <input aria-label={`Fornecedor da cotação ${i + 1}`} maxLength={200} value={col.fornecedor}
+                placeholder={col.orcamentoId && !nome ? "Identifique o fornecedor" : col.fonte && col.fonte !== "fornecedor" ? "Fonte da referência" : "Nome do fornecedor"}
+                onChange={(e) => alterarColuna(col, { fornecedor: e.target.value })} />
+              <div className="cotacao-anexo">
+                {col.orcamentoId ? <a title={orcamento?.nome} href={`/api${caminho}/${col.orcamentoId}/arquivo`}>{orcamento?.nome ?? "Baixar orçamento"}</a>
+                  : <span className="small aviso-anexo">Sem orçamento anexado</span>}
+                <button className="btn sm" type="button" onClick={() => document.getElementById(`coluna-arquivo-${i}`)?.click()}>
+                  {anexando === `col-${i}` ? "Anexando…" : col.orcamentoId ? "Trocar" : "Anexar"}</button>
+                <input hidden id={`coluna-arquivo-${i}`} type="file" accept={formatos} onChange={(e) => {
+                  const arquivo = e.target.files?.[0];
+                  e.target.value = "";
+                  if (arquivo) void anexarNaColuna(i, col, arquivo);
+                }} />
+              </div>
+              {orcamento && !nome && ia && legivel(orcamento.nome) && <button type="button" className="lnk small" onClick={() => relerFornecedor(col, orcamento)}>Ler fornecedor com IA</button>}
+              <details className="cotacao-detalhes">
+                <summary>Opções</summary>
+                <div className="stack" style={{ gap: 6 }}>
+                  <label>Fonte<select value={col.fonte ?? "fornecedor"} onChange={(e) => alterarColuna(col, { fonte: e.target.value as FonteCotacao })}>
+                    {Object.entries(FONTES_COTACAO).filter(([fonte]) => fonte !== "pncp" || col.fonte === "pncp").map(([fonte, rotulo]) => <option key={fonte} value={fonte}>{rotulo}</option>)}
+                  </select></label>
+                  <label>Data da consulta<input type="date" value={col.consultadoEm ?? ""} onChange={(e) => alterarColuna(col, { consultadoEm: e.target.value })} /></label>
+                  {col.fonte && col.fonte !== "fornecedor" && <label>Link da referência
+                    <input type="url" value={col.link ?? ""} onChange={(e) => alterarColuna(col, { link: e.target.value })} /></label>}
+                  {orcamentos.length > 0 && <label>Usar orçamento já anexado
+                    <select aria-label={`Orçamento da cotação ${i + 1}`} value={col.orcamentoId ?? ""} onChange={(e) => {
+                      const o = orcamentos.find((x) => String(x.id) === e.target.value);
+                      if (o) vincularOrcamento(col, o.id, o.dados, nomeFornecedorOrcamento(o));
+                      else alterarColuna(col, { orcamentoId: null });
+                    }}>
+                      <option value="">Nenhum</option>
+                      {orcamentos.map((o) => <option key={o.id} value={o.id}
+                        disabled={colunas.some((x) => x !== col && x.orcamentoId === o.id)}>{[nomeFornecedorOrcamento(o), o.nome].filter(Boolean).join(" · ")}</option>)}
+                    </select>
+                  </label>}
+                  {(colunas.length > 1 || !pendente(col)) && <button type="button" className="lnk small" onClick={() => removerColuna(col)}>Retirar esta cotação de todos os itens</button>}
+                </div>
+              </details>
+            </th>;
+          })}
           <th scope="col">Valor estimado</th>
         </tr></thead>
         <tbody>{linhas.map((linha, k) => {
@@ -308,7 +408,6 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
               <textarea aria-label={`Descrição do item ${k + 1}`} rows={3} maxLength={500} value={linha.descricao}
                 onChange={(e) => alterar(k, { descricao: e.target.value })} />
               <BuscaPncpItem descricao={linha.descricao} ocupado={ocupado || !!anexando} usar={(r) => usarPncp(k, r)} />
-              {linha.cotacoes.length < 20 && <button className="btn sm" type="button" onClick={() => alterar(k, { cotacoes: [...linha.cotacoes, cotacaoVazia()] })}>Adicionar fornecedor</button>}
               {linhas.length > 1 && <button type="button" className="lnk small" aria-label={`Remover item ${k + 1}`}
                 onClick={() => setLinhas((lista) => lista.filter((_, i) => i !== k))}>Remover item</button>}
             </td>
@@ -316,91 +415,32 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
               onChange={(e) => alterar(k, { unidade: e.target.value })} /></td>
             <td className="edicao-item-medida"><input aria-label={`Quantidade do item ${k + 1}`} inputMode="decimal" value={linha.quantidade}
               onChange={(e) => alterar(k, { quantidade: e.target.value })} /></td>
-            {Array.from({ length: colunasCotacoes }, (_, j) => {
-              const c = linha.cotacoes[j];
-              if (!c) return <td key={j}>—</td>;
-              const orcamento = orcamentos.find((o) => o.id === c.orcamentoId);
-              const precos = orcamento?.dados?.itens.filter((i) => precoLido(i.valor_unitario)) ?? [];
-              const fornecedor = limparNomeFornecedor(c.fornecedor);
-              return <td className="edicao-item-cotacao" key={j}>
-                <div className="cotacao-grade">
-                  <label>{c.fonte && c.fonte !== "fornecedor" ? "Fonte" : `Fornecedor ${j + 1}`}
-                    <input aria-label={`Nome do fornecedor ${j + 1} do item ${k + 1}`} maxLength={200} value={c.fornecedor}
-                      placeholder={c.orcamentoId && !fornecedor ? "Identifique o fornecedor" : "Nome do fornecedor"}
-                      onChange={(e) => alterarCotacao(k, j, { fornecedor: e.target.value })} />
-                  </label>
-                  <label>Preço unitário (R$)<input aria-label={`Preço unitário do fornecedor ${j + 1} do item ${k + 1}`}
-                    inputMode="decimal" value={c.valor} onChange={(e) => alterarCotacao(k, j, { valor: e.target.value })} /></label>
-                  <div className="cotacao-anexo">
-                    <button className="btn sm" type="button" onClick={() => document.getElementById(`cotacao-arquivo-${k}-${j}`)?.click()}>
-                      {anexando === `${k}-${j}` ? "Anexando…" : c.orcamentoId ? "Trocar anexo" : "Anexar orçamento"}</button>
-                    <input hidden id={`cotacao-arquivo-${k}-${j}`} type="file" accept={formatos} onChange={(e) => {
-                      const arquivo = e.target.files?.[0];
-                      e.target.value = "";
-                      if (arquivo) void anexar(k, j, arquivo);
-                    }} />
-                    {c.orcamentoId ? <a title={orcamento?.nome} href={`/api${caminho}/${c.orcamentoId}/arquivo`}>{orcamento?.nome ?? "Baixar orçamento"}</a>
-                      : c.valor.trim() && <span className="small muted">Anexo pendente</span>}
-                  </div>
-                </div>
-                <details className="cotacao-detalhes">
-                  <summary>Fonte, data e opções</summary>
-                  <div className="form">
-                  <label>Fonte do orçamento<select value={c.fonte ?? "fornecedor"} onChange={(e) => alterarCotacao(k, j, { fonte: e.target.value as FonteCotacao })}>
-                    {Object.entries(FONTES_COTACAO).filter(([fonte]) => fonte !== "pncp" || c.fonte === "pncp").map(([fonte, nome]) => <option key={fonte} value={fonte}>{nome}</option>)}
-                  </select></label>
-                  <label>Data da consulta<input type="date" value={c.consultadoEm ?? ""} onChange={(e) => alterarCotacao(k, j, { consultadoEm: e.target.value })} /></label>
-                  {c.fonte && c.fonte !== "fornecedor" && <label className="wide">Link da referência
-                    <input type="url" value={c.link ?? ""} onChange={(e) => alterarCotacao(k, j, { link: e.target.value })} />
-                  </label>}
-                  {orcamentos.length > 0 && <label className="wide">Usar orçamento já anexado
-                    <select aria-label={`Orçamento do fornecedor ${j + 1} do item ${k + 1}`} value={c.orcamentoId ?? ""} onChange={(e) => {
-                      const o = orcamentos.find((x) => String(x.id) === e.target.value);
-                      selecionar(k, j, o?.id ?? null, o?.dados, nomeFornecedorOrcamento(o));
-                    }}>
-                      <option value="">Selecione um orçamento</option>
-                      {orcamentos.map((o) => <option key={o.id} value={o.id}
-                        disabled={linha.cotacoes.some((x, n) => n !== j && x.orcamentoId === o.id)}>{[nomeFornecedorOrcamento(o), o.nome].filter(Boolean).join(" · ")}</option>)}
-                    </select>
-                  </label>}
-                  {precos.length > 0 && <label className="wide">Preço identificado na proposta
-                    <select value="" onChange={(e) => {
-                      const preco = e.target.value !== "" ? precos[Number(e.target.value)] : undefined;
-                      if (preco) alterarCotacao(k, j, { valor: precoLido(preco.valor_unitario) });
-                    }}>
-                      <option value="">Selecione a linha que corresponde ao item</option>
-                      {precos.map((i, n) => <option key={n} value={n}>{i.descricao}{i.unidade ? ` · ${i.unidade}` : ""} · {brl(i.valor_unitario)}</option>)}
-                    </select>
-                  </label>}
-                </div>
-                  {(linha.cotacoes.length > 1 || cotacaoPreenchida(c)) && <button type="button" className="lnk"
-                    onClick={() => alterar(k, { cotacoes: linha.cotacoes.length > 1 ? linha.cotacoes.filter((_, i) => i !== j)
-                      : linha.cotacoes.map((x, i) => i === j ? cotacaoVazia() : x) })}>Retirar cotação do item</button>}
-                </details>
-                {orcamento && !fornecedor && <div className="tools">
-                  <span className="small muted">Confira o nome no orçamento e preencha o fornecedor.</span>
-                  {ia && legivel(orcamento.nome) && <button type="button" className="lnk" onClick={() => relerFornecedor(k, j, orcamento)}>Ler fornecedor com IA</button>}
-                </div>}
+            {colunas.map((col, i) => {
+              const j = indiceNaLinha(linha, col);
+              return <td key={i} className="col-preco">
+                <input aria-label={`Preço unitário da cotação ${i + 1}${col.fornecedor.trim() ? ` (${col.fornecedor.trim()})` : ""} para o item ${k + 1}`}
+                  inputMode="decimal" placeholder="—" value={j >= 0 ? linha.cotacoes[j].valor : ""} onChange={(e) => alterarPreco(k, col, e.target.value)} />
               </td>;
             })}
             <td className="edicao-item-estimativa">
-              <label className="campo">Critério de preço
-                <select value={linha.criterio ?? "media"} onChange={(e) => alterar(k, { criterio: e.target.value as CriterioPreco })}>
-                  {Object.entries(CRITERIOS_PRECO).map(([valor, rotulo]) => <option key={valor} value={valor}>{rotulo}</option>)}
-                </select>
-              </label>
+              <select aria-label={`Critério de preço do item ${k + 1}`} value={linha.criterio ?? "media"} onChange={(e) => alterar(k, { criterio: e.target.value as CriterioPreco })}>
+                {Object.entries(CRITERIOS_PRECO).map(([valor, rotulo]) => <option key={valor} value={valor}>{rotulo}</option>)}
+              </select>
               <p><strong>{brl(item?.valor_unitario)}</strong></p>
-              <p className="small muted">Subtotal do item {brl(subtotal)}</p>
+              <p className="small muted">Subtotal {brl(subtotal)}</p>
             </td>
           </tr>;
         })}</tbody>
       </table>
     </div>
     <div className="row">
-      {linhas.length < 200 && <button type="button" className="btn sm" onClick={() => setLinhas((lista) => [...lista, linhaVazia()])}>Adicionar item</button>}
+      <div className="tools">
+        {linhas.length < 200 && <button type="button" className="btn sm" onClick={() => setLinhas((lista) => [...lista, linhaVazia()])}>Adicionar item</button>}
+        {colunas.length < 20 && <button type="button" className="btn sm" onClick={() => setPendentes((lista) => [...lista, colunaNova()])}>Adicionar fornecedor</button>}
+      </div>
       <strong>{parcial && total != null ? "Subtotal dos itens com valor" : "Total estimado"} {brl(total)}</strong>
     </div>
-    <p className="small muted">Você pode digitar o preço antes de anexar. O cálculo é atualizado quando a proposta fica vinculada ao item. {ia ? "Confira os preços identificados pela IA." : ""}</p>
+    <p className="small muted">Cada coluna é um fornecedor: informe o nome e anexe o orçamento uma vez, no topo da coluna, e digite o preço unitário de cada item. Item sem preço daquele fornecedor fica em branco. Preço de coluna sem orçamento anexado não entra no cálculo. {ia ? "Ao anexar, a IA preenche os itens com descrição igual à da proposta; confira os valores." : ""}</p>
     {aviso && <p className="small" role="status">{aviso}</p>}
   </fieldset>;
 }
