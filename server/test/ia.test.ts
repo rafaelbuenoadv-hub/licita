@@ -784,3 +784,20 @@ test("conta da IA sem créditos: aviso claro, sem novas tentativas em vão", asy
     assert.match(fim.erro, /sem créditos/);
   } finally { semCreditos = false; }
 });
+
+test("IA sem créditos: planilha e PDF com texto são lidos sem a IA", async () => {
+  const novo = await api("POST", "/api/processos", { objeto: "Aquisição de cadeiras", tipo: "bens", via: "dispensa", ano: 2026 });
+  const { id } = (await novo.json()) as { id: number };
+  const fd = new FormData();
+  fd.append("arquivo", new Blob(["Descrição;Un;Qtde;Preço unitário;Total\nCadeira escolar;un;30;300,00;9.000,00\nMesa escolar;un;30;250,50;7.515,00"]), "proposta.csv");
+  const [oid] = ((await (await api("POST", `/api/processos/${id}/orcamentos`, fd)).json()) as { ids: number[] }).ids;
+  semCreditos = true;
+  try {
+    const r = await api("POST", `/api/processos/${id}/orcamentos/${oid}/ler`, {});
+    assert.equal(r.status, 200, await r.clone().text());
+    const j: any = await r.json();
+    assert.equal(j.sem_ia, true);
+    assert.deepEqual(j.dados.itens.map((i: any) => [i.descricao, i.quantidade, i.valor_unitario]), [["Cadeira escolar", 30, 300], ["Mesa escolar", 30, 250.5]]);
+    assert.equal(j.dados.valor_total, 16515);
+  } finally { semCreditos = false; }
+});

@@ -12,7 +12,8 @@ import { z } from "zod";
 import { q, q1, auditar } from "../db.js";
 import { exigeLogin, exigePapel } from "../auth.js";
 import { ErroHttp } from "../erros.js";
-import { FORMATO_MINUTA, MODELO, gerarEstruturado, gerarTexto, iaDisponivel, pesquisarNaWeb, semCreditosIA, traduzErroIA, type Fonte } from "../ia.js";
+import { AVISO_SEM_CREDITOS, FORMATO_MINUTA, MODELO, gerarEstruturado, gerarTexto, iaDisponivel, pesquisarNaWeb, semCreditosIA, traduzErroIA, type Fonte } from "../ia.js";
+import { lerOrcamentoSemIA } from "../leitura-sem-ia.js";
 import { extrairTexto } from "../extrair.js";
 import { calcularItens, checksDo, itensSolicitacaoOpcionais, minutaVigente, nomeEnviado, processoDo, salvarMinuta, upload, type Processo } from "./processos.js";
 import { ETAPAS, TIPOS, TRILHA_PROCESSO, VIAS, atual, etapaPorId, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../shared/etapas.js";
@@ -631,9 +632,15 @@ Use null para o que não constar. Não calcule nem deduza valor que não esteja 
           ], "medium");
         }
       };
+      let semIA = false;
       const lido = lerTabelaOrcamento(textoNativo) ?? await ler(conteudo).catch((e) => {
         if (formulario) throw new ErroHttp(422, avisoFormulario);
-        throw e;
+        // IA sem créditos ou não configurada: lê sem IA o que vier em forma de tabela (planilha, Word, PDF com texto).
+        const iaParada = semCreditosIA(e) || (e instanceof ErroHttp && e.status === 503);
+        if (!iaParada) throw e;
+        const local = lerOrcamentoSemIA(textoOrcamento);
+        if (local) { semIA = true; return local; }
+        throw new ErroHttp(semCreditosIA(e) ? 402 : 503, `${semCreditosIA(e) ? AVISO_SEM_CREDITOS : "A IA não está disponível neste servidor."} Sem a IA, o sistema lê planilhas (.xlsx, .csv), Word com tabela e PDF com texto selecionável, mas não encontrou uma tabela de preços neste arquivo (foto ou PDF digitalizado precisam da IA). Informe os preços na coluna do fornecedor.`);
       });
       if (formulario && !lido.itens.some((item) => item.valor_unitario != null && item.valor_unitario > 0)) {
         throw new ErroHttp(422, avisoFormulario);
@@ -647,7 +654,7 @@ Use null para o que não constar. Não calcule nem deduza valor que não esteja 
         [JSON.stringify(dados), valor, (dados.fornecedor ?? "").trim().slice(0, 200), o.id, p.id, textoOrcamento]);
       if (!salvo) throw new ErroHttp(404, "Orçamento não encontrado.");
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "orcamento.lido", detalhe: { nome: o.nome, itens: dados.itens.length } });
-      res.json({ dados: { ...dados, fornecedor: nomeFornecedorOrcamento(salvo) || null }, valor: salvo.valor });
+      res.json({ dados: { ...dados, fornecedor: nomeFornecedorOrcamento(salvo) || null }, valor: salvo.valor, sem_ia: semIA });
     } catch (e) {
       throw traduzErroIA(e);
     }

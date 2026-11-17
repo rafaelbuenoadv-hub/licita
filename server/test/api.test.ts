@@ -1,4 +1,5 @@
 // Testes de ponta a ponta da API. Exigem um Postgres vazio em DATABASE_URL (ex.: banco licita_test).
+import { lerOrcamentoSemIA } from "../leitura-sem-ia.js";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "pdf-lib";
@@ -1297,4 +1298,48 @@ test("editar solicitação pelo formulário com arquivos (quebras de linha \\r\\
   assert.ok(!depois.descricao.includes("\r"));
   assert.match(depois.descricao, /Linha 2 revisada/);
   assert.equal(depois.itens[0].cotacoes.length, 2);
+});
+
+test("leitura sem IA: PDF em colunas, planilha e Word; texto solto não vira item", async () => {
+  const pdf = [
+    "                    CLIMATIZA SERVIÇOS ME   CNPJ 11.222.333/0001-44",
+    " Item   Descrição                                              Unid.   Qtd.     Valor Unit.     Valor Total",
+    " 1      Limpeza de ar condicionado 36.000 a 60.000 BTUs        SERV    60       R$ 230,00       R$ 13.800,00",
+    "        com desmonte e lavagem completa",
+    " 2      Instalação de ar condicionado 9.000 BTUs               SERV    220      R$ 632,50       R$ 139.150,00",
+    " 3      Tubo de cobre 3/8                                      M       1.250    R$ 10,93        R$ 13.662,50",
+    " 4      Item com conta errada                                  UN      2        R$ 10,00        R$ 99,00",
+    "                                                                         VALOR TOTAL:   R$ 166.612,50",
+  ].join("\n");
+  const lido = lerOrcamentoSemIA(pdf)!;
+  assert.deepEqual(lido.itens.map((i) => [i.descricao, i.unidade, i.quantidade, i.valor_unitario, i.valor_total]), [
+    ["Limpeza de ar condicionado 36.000 a 60.000 BTUs com desmonte e lavagem completa", "SERV", 60, 230, 13800],
+    ["Instalação de ar condicionado 9.000 BTUs", "SERV", 220, 632.5, 139150],
+    ["Tubo de cobre 3/8", "M", 1250, 10.93, 13662.5],
+  ]);
+  assert.equal(lido.cnpj, "11.222.333/0001-44");
+  assert.equal(lido.valor_total, 166612.5);
+  const planilha = "Planilha Plan1\n| Item | Descrição do serviço | Unidade | Quantidade | Valor unitário | Valor total |\n| 1 | Limpeza | SERV | 60 | 230 | 13800 |\n| | Total | | | | 13800 |";
+  assert.deepEqual(lerOrcamentoSemIA(planilha)!.itens.map((i) => [i.descricao, i.valor_unitario]), [["Limpeza", 230]]);
+  const word = "PROPOSTA\n| Especificação | Und | Qtde | Preço unitário | Preço total |\n| Resma de papel A4 | cx | 10 | R$ 25,90 | R$ 259,00 |";
+  assert.deepEqual(lerOrcamentoSemIA(word)!.itens.map((i) => [i.descricao, i.unidade, i.quantidade, i.valor_unitario]), [["Resma de papel A4", "cx", 10, 25.9]]);
+  assert.equal(lerOrcamentoSemIA("Prezados, segue nossa proposta. Valor total R$ 1.000,00."), null);
+
+  // Sem a IA configurada (este conjunto de testes roda sem chave), a leitura do orçamento usa a leitura sem IA.
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const { dados: { id } } = await req.post("/api/processos", { objeto: "Aquisição de papel", tipo: "bens", via: "dispensa", ano: 2026 });
+  const fd = new FormData();
+  fd.append("arquivo", new Blob(["Descrição;Un;Qtde;Preço unitário;Total\nResma de papel;cx;10;25,90;259,00"]), "proposta.csv");
+  const env = await req.req("POST", `/api/processos/${id}/orcamentos`, fd);
+  assert.equal(env.status, 201, JSON.stringify(env.dados));
+  const r = await req.post(`/api/processos/${id}/orcamentos/${env.dados.ids[0]}/ler`);
+  assert.equal(r.status, 200, JSON.stringify(r.dados));
+  assert.equal(r.dados.sem_ia, true);
+  assert.equal(r.dados.dados.itens[0].valor_unitario, 25.9);
+  const foto = new FormData();
+  foto.append("arquivo", new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])]), "foto.png");
+  const f = await req.req("POST", `/api/processos/${id}/orcamentos`, foto);
+  const rf = await req.post(`/api/processos/${id}/orcamentos/${f.dados.ids[0]}/ler`);
+  assert.equal(rf.status, 503);
+  assert.match(rf.dados.erro, /foto ou PDF digitalizado precisam da IA/);
 });

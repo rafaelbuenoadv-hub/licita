@@ -161,8 +161,13 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     return { id, fornecedor: limparNomeFornecedor(propostas?.[0]?.fornecedor) };
   };
 
-  const lerOrcamento = async (id: number) =>
-    (await api.post<{ dados: DadosOrcamento }>(`${caminho}/${id}/ler`)).dados;
+  // Leitura pelo servidor: com a IA, ou sem ela (planilha, Word com tabela, PDF com texto) quando a IA está parada.
+  const semIA = useRef(false);
+  const lerOrcamento = async (id: number) => {
+    const r = await api.post<{ dados: DadosOrcamento; sem_ia?: boolean }>(`${caminho}/${id}/ler`);
+    semIA.current = !!r.sem_ia;
+    return r.dados;
+  };
 
   const executar = async (acao: string, funcao: () => Promise<void>) => {
     setAviso("");
@@ -293,13 +298,14 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   };
   const aplicarDadosDaColuna = (col: Coluna, id: number, dados: DadosOrcamento, fornecedor = "") => {
     const n = vincularOrcamento(col, id, dados, limparNomeFornecedor(dados.fornecedor) || fornecedor);
-    setAviso(n ? `Orçamento lido. A IA lançou o preço de ${n} ${n === 1 ? "item" : "itens"}. Confira e complete os demais.`
+    const quem = semIA.current ? "A leitura sem IA" : "A IA";
+    setAviso(n ? `Orçamento lido. ${quem} lançou o preço de ${n} ${n === 1 ? "item" : "itens"}. Confira e complete os demais.`
       : "Orçamento lido. Confira os preços da coluna e preencha os que estiverem faltando.");
   };
   const anexarNaColuna = (i: number, col: Coluna, arquivo: File) => executar(`col-${i}`, async () => {
     const { id, fornecedor } = await enviar(arquivo);
     try {
-      if (ia && legivel(arquivo.name)) aplicarDadosDaColuna(col, id, await lerOrcamento(id), fornecedor);
+      if (legivel(arquivo.name)) aplicarDadosDaColuna(col, id, await lerOrcamento(id), fornecedor);
       else vincularOrcamento(col, id, null, fornecedor);
     } catch (e) {
       vincularOrcamento(col, id, null, fornecedor);
@@ -352,9 +358,9 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     <legend>Itens</legend>
     <BuscaPncpLote key={JSON.stringify(descricoes)} descricoes={descricoes} ocupado={ocupado || !!anexando} usar={usarPncp} />
     <div className="tools">
-      <button className="btn pri" type="button" disabled={!ia || !!anexando || ocupado} onClick={() => seletorImportacao.current?.click()}>
+      <button className="btn pri" type="button" disabled={!!anexando || ocupado} onClick={() => seletorImportacao.current?.click()}>
         {anexando === "importar" ? "Lendo orçamento…" : "Anexar e ler orçamento"}</button>
-      {ia ? <>
+      <>
         <input hidden ref={seletorImportacao} type="file" accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png,.txt,.csv" onChange={(e) => {
           const arquivo = e.target.files?.[0];
           e.target.value = "";
@@ -364,8 +370,8 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
           await conferirImportacao(reler);
           await recarregar();
         })}>Tentar ler o orçamento anexado</button>}
-        <span className="small muted">Confira as linhas extraídas antes de lançar nos itens.</span>
-      </> : <p className="small muted">Leitura automática indisponível. Você pode anexar propostas e informar os preços dentro dos itens.</p>}
+        <span className="small muted">{ia ? "Confira as linhas extraídas antes de lançar nos itens." : "Sem IA neste servidor: lê planilhas (.xlsx, .csv), Word com tabela e PDF com texto selecionável. Foto e PDF digitalizado: informe os preços na coluna."}</span>
+      </>
     </div>
     {leitura && <div className="cotacao-item stack">
       <h4>Conferir orçamento</h4>
