@@ -81,7 +81,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const itens = lidas.itens;
   const temOrcamento = itens.some((item) => item.cotacoes?.some((cotacao) => cotacao.orcamento_id != null));
   // Mesmo caminho do servidor: o quadro de itens entra no texto e os campos do modelo recebem o que foi digitado.
-  const base = inserirItens(rascunhoPrevia ?? descricao, itens);
+  const base = documentoDaSolicitacao(rascunhoPrevia ?? descricao, itens);
   const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: objeto, justificativa, itens });
   const faltantes = pendencias(base).filter((x) => !automaticos[x.i]);
   const previa = aplicarPendencias(base, { ...automaticos, ...(rascunhoPrevia === null ? valores : {}) }).texto;
@@ -354,9 +354,9 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                     <textarea ref={editorPrevia} aria-label="Editar texto da prévia" rows={16} maxLength={LIMITE_SOLICITACAO}
                       value={rascunhoPrevia} disabled={!!ocupado || cotando} onChange={(ev) => setRascunhoPrevia(ev.target.value)} />
                   </label>
-                  <p className="small muted">Edite o texto e confira a folha abaixo. O campo [[Itens]] recebe a tabela preenchida acima.</p>
+                  <p className="small muted">Ao editar, o Licita mescla automaticamente o texto com a planilha de itens e orçamentos lançados. Confira o documento completo abaixo.</p>
                   <div className="tools">
-                    <button type="button" className="btn sm" disabled={!!ocupado || cotando} onClick={() => trocarTexto(rascunhoPrevia)}>Aplicar edição</button>
+                    <button type="button" className="btn sm" disabled={!!ocupado || cotando} onClick={() => trocarTexto(inserirItens(rascunhoPrevia, itens, "marcador"))}>Aplicar edição</button>
                     <button type="button" className="btn sm" disabled={!!ocupado || cotando} onClick={() => setRascunhoPrevia(null)}>Cancelar edição</button>
                   </div>
                 </>}

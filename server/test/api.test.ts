@@ -943,7 +943,8 @@ test("cotações anexadas calculam médias unitárias, subtotais e total da soli
   assert.equal(alterada.status, 200, JSON.stringify(alterada.dados));
   const final = (await lic.get(processo)).dados.solicitacoes[0];
   assert.match(final.descricao, /Total estimado\*{0,2} .*R\$\s455,00/);
-  assert.equal(final.descricao.match(/Valor unitário estimado/g).length, 1);
+  assert.equal(final.descricao.match(/\| Item \| Descrição/g)?.length, 1);
+  assert.match(final.descricao, /Cotação 1[\s\S]*Fornecedor A[\s\S]*Cotação 2[\s\S]*Fornecedor B/);
   assert.equal((await lic.put(`${caminho}/${criada.dados.id}`, alteracao)).status, 409);
   const criterio = await lic.put(`${caminho}/${criada.dados.id}`, {
     anterior: final.descricao, descricao: final.descricao, itens_anteriores: final.itens,
@@ -951,6 +952,24 @@ test("cotações anexadas calculam médias unitárias, subtotais e total da soli
   });
   assert.equal(criterio.status, 200, JSON.stringify(criterio.dados));
   assert.match((await lic.get(processo)).dados.solicitacoes[0].descricao, /Total estimado\*{0,2} .*R\$\s425,00/);
+  // A edição só do texto reaproveita o orçamento persistido mesmo sem o marcador [[Itens]].
+  const existente = (await lic.get(processo)).dados.solicitacoes[0];
+  const textoManual = "# SOLICITAÇÃO REVISADA\nTexto alterado manualmente.\n\n@ Titular";
+  const manual = await lic.put(`${caminho}/${criada.dados.id}`, { anterior: existente.descricao, descricao: textoManual });
+  assert.equal(manual.status, 200, JSON.stringify(manual.dados));
+  const mesclada = (await lic.get(processo)).dados.solicitacoes[0];
+  assert.deepEqual(mesclada.itens, existente.itens);
+  assert.match(mesclada.descricao, /Texto alterado manualmente/);
+  assert.match(mesclada.descricao, /Cotação 1[\s\S]*Fornecedor A[\s\S]*Cotação 2[\s\S]*Fornecedor B/);
+  assert.equal(mesclada.descricao.match(/\| Item \| Descrição/g)?.length, 1);
+  assert.match(mesclada.descricao, /Total estimado\*{0,2} .*R\$\s425,00/);
+  const wordManual = await lic.get(`${caminho}/${criada.dados.id}/docx`);
+  assert.equal(wordManual.status, 200);
+  const wordTexto = await extrairTexto("solicitacao.docx", wordManual.dados);
+  assert.match(wordTexto, /Texto alterado manualmente/);
+  assert.match(wordTexto, /Fornecedor A[\s\S]*Fornecedor B/);
+  assert.equal(wordTexto.match(/\| Item \| Descrição/g)?.length, 1);
+
 });
 
 test("busca PNCP usa os filtros do Licita Ibaiti e devolve o link oficial com o valor unitário", async () => {
