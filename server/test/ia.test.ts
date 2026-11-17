@@ -576,3 +576,31 @@ test("redigir com pesquisa: se a pesquisa falha, a minuta sai assim mesmo e a te
     assert.equal(m.vigente.origem, "ia");
   } finally { pesquisaFalha = false; }
 });
+
+test("agente de contratação em conversa livre: tira dúvidas e redige respostas sem campo da tela", async () => {
+  const novo = await api("POST", "/api/processos", { objeto: "Aquisição de mobiliário escolar", tipo: "bens", via: "licitacao", ano: 2026, requisitante: "Educação" });
+  const { id } = (await novo.json()) as { id: number };
+  textoStream = "Segue a minuta de resposta ao pedido de esclarecimento:\n\nPrezado(a) [[PREENCHER: nome do interessado]]...";
+  const corpo = {
+    campo: null,
+    pagina: { titulo: "Aquisição de mobiliário escolar", caminho: `/processos/${id}` },
+    formulario: [],
+    processo_id: id,
+    mensagens: [{ role: "user", content: "Redija a resposta a um pedido de esclarecimento sobre o prazo de entrega." }],
+  };
+  const r = await api("POST", "/api/ia/agente", corpo);
+  assert.equal(r.status, 200);
+  const linhas = (await r.text()).trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(linhas.filter((l) => l.d).map((l) => l.d).join(""), textoStream);
+  const instrucao = pedidos.at(-1)!.body.messages[0].content as string;
+  assert.match(instrucao, /conversa com um servidor dentro do sistema Licita/);
+  assert.match(instrucao, /pedidos de esclarecimento, impugnações, recursos/);
+  assert.match(instrucao, /"objeto":"Aquisição de mobiliário escolar"/);
+  assert.doesNotMatch(instrucao, /SUGESTÃO PARA O CAMPO|CAMPO: /);
+  // Conversa mais longa que no modo de campo, ainda em ordem.
+  const longa = Array.from({ length: 21 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `mensagem ${i}` }));
+  const r2 = await api("POST", "/api/ia/agente", { ...corpo, processo_id: null, mensagens: longa });
+  assert.equal(r2.status, 200); await r2.text();
+  assert.match(pedidos.at(-1)!.body.messages[0].content, /PROCESSO ABERTO: nenhum/);
+  assert.equal((await api("POST", "/api/ia/agente", { ...corpo, mensagens: [...longa, { role: "assistant", content: "x" }] })).status, 400);
+});
