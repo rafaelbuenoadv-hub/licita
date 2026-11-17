@@ -57,6 +57,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [secretaria, setSecretaria] = useState("");
   const [referencia, setReferencia] = useState("");
   const [descricao, setDescricao] = useState("");
+  const [rascunhoPrevia, setRascunhoPrevia] = useState<string | null>(null);
   const [objeto, setObjeto] = useState("");
   const [justificativa, setJustificativa] = useState("");
   const [linhas, setLinhas] = useState<LinhaItem[]>([linhaVazia()]);
@@ -66,6 +67,8 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [cotando, setCotando] = useState(false);
   const [ocupado, setOcupado] = useState<"salvar" | "ia" | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; erro?: boolean } | null>(null);
+  const painelPrevia = useRef<HTMLDetailsElement>(null);
+  const editorPrevia = useRef<HTMLTextAreaElement>(null);
   const seletor = useRef<HTMLInputElement>(null);
   const seletorApoios = useRef<HTMLInputElement>(null);
   const caminho = `/processos/${processo.id}/solicitacoes`;
@@ -78,10 +81,11 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const itens = lidas.itens;
   const temOrcamento = itens.some((item) => item.cotacoes?.some((cotacao) => cotacao.orcamento_id != null));
   // Mesmo caminho do servidor: o quadro de itens entra no texto e os campos do modelo recebem o que foi digitado.
-  const base = inserirItens(descricao, itens);
+  const base = inserirItens(rascunhoPrevia ?? descricao, itens);
   const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: objeto, justificativa, itens });
   const faltantes = pendencias(base).filter((x) => !automaticos[x.i]);
-  const previa = aplicarPendencias(base, { ...automaticos, ...valores }).texto;
+  const previa = aplicarPendencias(base, { ...automaticos, ...(rascunhoPrevia === null ? valores : {}) }).texto;
+  const editandoPrevia = rascunhoPrevia !== null;
 
   useEffect(() => {
     let ativo = true;
@@ -102,7 +106,18 @@ export function Solicitacoes({ processo, recarregar }: Props) {
 
   const trocarTexto = (texto: string) => {
     setDescricao(texto);
+    setRascunhoPrevia(null);
     setValores({});
+  };
+
+  useEffect(() => {
+    if (!editandoPrevia) return;
+    if (painelPrevia.current) painelPrevia.current.open = true;
+    editorPrevia.current?.focus();
+  }, [editandoPrevia]);
+
+  const editarPrevia = () => {
+    setRascunhoPrevia(inserirItens(previa, itens, "marcador"));
   };
 
   const abrir = (novo: Modo) => {
@@ -122,7 +137,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setAviso(null);
   };
 
-  const editar = (s: Solicitacao) => {
+  const editar = (s: Solicitacao, pelaPrevia = false) => {
     setEdicao(s);
     setChave(crypto.randomUUID());
     setSecretaria(s.secretaria);
@@ -132,7 +147,9 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setLinhas(linhasDosItens(s.itens, processo.orcamentos));
     setArquivo(null);
     setApoios([]);
-    trocarTexto(inserirItens(s.descricao, s.itens, "marcador"));
+    const texto = inserirItens(s.descricao, s.itens, "marcador");
+    trocarTexto(texto);
+    if (pelaPrevia) setRascunhoPrevia(texto);
     setModo("manual");
     setAviso(null);
     document.getElementById("form-solicitacao")?.scrollIntoView({ block: "start" });
@@ -141,6 +158,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const fechar = () => {
     setEdicao(null);
     setModo(null);
+    setRascunhoPrevia(null);
   };
 
   const selecionarApoios = (selecionados: File[]) => {
@@ -192,7 +210,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     try {
       if (modo === "anexo" && !arquivo) throw new Error("Selecione o documento da solicitação.");
       if (lidas.erro) throw new Error(lidas.erro);
-      const texto = aplicarPendencias(base, valores).texto;
+      const texto = previa;
       const dados = montarDados(texto);
       await enviarApoios(dados);
       setProgresso("Salvando a solicitação…");
@@ -326,11 +344,27 @@ export function Solicitacoes({ processo, recarregar }: Props) {
               <span className="small muted">A IA usa os dados preenchidos, os anexos desta solicitação e os orçamentos vinculados aos itens. Essas fontes são enviadas ao provedor de IA para gerar o rascunho.</span>
             </> : <p className="note">IA indisponível no servidor. Você pode preencher e salvar a solicitação nesta tela.</p>}
           </div>}
-          {descricao.trim() && <details className="panel box">
+          {descricao.trim() && <details ref={painelPrevia} className="panel box">
             <summary>Prévia da solicitação</summary>
+            <div className="pad stack">
+              {rascunhoPrevia === null
+                ? <div><button type="button" className="btn sm" disabled={!!ocupado || cotando} onClick={editarPrevia}>Editar manualmente</button></div>
+                : <>
+                  <label className="campo">Texto da solicitação
+                    <textarea ref={editorPrevia} aria-label="Editar texto da prévia" rows={16} maxLength={LIMITE_SOLICITACAO}
+                      value={rascunhoPrevia} disabled={!!ocupado || cotando} onChange={(ev) => setRascunhoPrevia(ev.target.value)} />
+                  </label>
+                  <p className="small muted">Edite o texto e confira a folha abaixo. O campo [[Itens]] recebe a tabela preenchida acima.</p>
+                  <div className="tools">
+                    <button type="button" className="btn sm" disabled={!!ocupado || cotando} onClick={() => trocarTexto(rascunhoPrevia)}>Aplicar edição</button>
+                    <button type="button" className="btn sm" disabled={!!ocupado || cotando} onClick={() => setRascunhoPrevia(null)}>Cancelar edição</button>
+                  </div>
+                </>}
+              <p className="small muted">Use Salvar solicitação para gravar as alterações.</p>
+            </div>
             <Folha texto={documentoDaSolicitacao(previa, itens)} />
           </details>}
-          {faltantes.length > 0 && <div className="pend">
+          {faltantes.length > 0 && !editandoPrevia && <div className="pend">
             <div className="row"><h4>Campos pendentes</h4>
               <button type="button" className="btn sm" disabled={!!ocupado || !Object.values(valores).some((v) => v.trim())}
                 onClick={() => trocarTexto(inserirItens(aplicarPendencias(base, valores).texto, itens, "marcador"))}>Aplicar no texto</button>
@@ -375,7 +409,12 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                 <td>{s.referencia && <strong>{s.referencia}</strong>}
                   {s.objeto && <div>{s.objeto}</div>}
                   {s.itens?.length > 0 && <div className="small muted">{s.itens.length} {s.itens.length === 1 ? "item" : "itens"}{totalDosItens(s.itens) != null ? ` · ${s.itens.some((i) => totalDoItem(i) == null) ? "subtotal dos itens com valor" : "total estimado"} ${brl(totalDosItens(s.itens))}` : ""}</div>}
-                  {s.descricao && <details><summary>Ver solicitação</summary><Folha texto={documentoDaSolicitacao(s.descricao, s.itens)} /></details>}
+                  {s.descricao && <details><summary>Ver solicitação</summary>
+                    {podeAdicionar && <div className="tools">
+                      <button type="button" className="btn sm" disabled={!!ocupado || cotando || !!modo} onClick={() => editar(s, true)}>Editar manualmente</button>
+                    </div>}
+                    <Folha texto={documentoDaSolicitacao(s.descricao, s.itens)} />
+                  </details>}
                   {(comprovantes.size > 0 || fontes.size > 0) && <details><summary>Comprovantes e fontes das cotações</summary>
                     <ul>
                       {[...comprovantes].map(([id, nome]) => <li key={id}><a href={`/api/processos/${processo.id}/orcamentos/${id}/arquivo`}>{nome}</a></li>)}
