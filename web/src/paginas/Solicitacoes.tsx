@@ -278,7 +278,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       </div>}
       {podeAdicionar && modo && (
         <form className="stack" onSubmit={salvar}>
-          {edicao && <h4>Editar solicitação · {edicao.secretaria}</h4>}
+          {edicao && <h4>Alterar solicitação · {edicao.secretaria}</h4>}
           <div className="form">
             <label>Secretaria<input list="secretarias-solicitacao" required minLength={2} maxLength={200} value={secretaria} disabled={!!ocupado || !!edicao} onChange={(e) => setSecretaria(e.target.value)} /></label>
             <datalist id="secretarias-solicitacao">{[...new Set([...areas, ...processo.secretarias])].map((nome) => <option key={nome} value={nome} />)}</datalist>
@@ -360,7 +360,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                     <button type="button" className="btn sm" disabled={!!ocupado || cotando} onClick={() => setRascunhoPrevia(null)}>Cancelar edição</button>
                   </div>
                 </>}
-              <p className="small muted">Use Salvar solicitação para gravar as alterações.</p>
+              <p className="small muted">Use {edicao ? "Salvar alterações" : "Salvar solicitação"} para gravar as alterações.</p>
             </div>
             <Folha texto={documentoDaSolicitacao(previa, itens)} />
           </details>}
@@ -379,7 +379,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
             })}
           </div>}
           <div className="tools">
-            <button className="btn pri" disabled={!!ocupado || cotando}>{ocupado === "salvar" ? "Salvando…" : "Salvar solicitação"}</button>
+            <button className="btn pri" disabled={!!ocupado || cotando}>{ocupado === "salvar" ? "Salvando…" : edicao ? "Salvar alterações" : "Salvar solicitação"}</button>
             <button className="btn" type="button" disabled={!!ocupado || cotando} onClick={() => { fechar(); setAviso(null); }}>Cancelar</button>
           </div>
         </form>
@@ -422,7 +422,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                     </ul>
                   </details>}
                   <div className="tools">
-                    {podeAdicionar && <button type="button" className="btn sm" disabled={!!ocupado || !!modo} onClick={() => editar(s)}>Editar</button>}
+                    {podeAdicionar && <button type="button" className="btn sm" disabled={!!ocupado || !!modo} onClick={() => editar(s, true)}>Alterar solicitação</button>}
                     {s.descricao && <>
                       <a className="btn sm" href={`/api${caminho}/${s.id}/docx${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>Baixar Word</a>
                       <a className="btn sm" href={`/api${caminho}/${s.id}/pdf${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>Baixar PDF</a>
