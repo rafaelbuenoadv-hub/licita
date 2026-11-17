@@ -861,11 +861,11 @@ test("solicitação com objeto genérico, justificativa e itens com quantidade e
   assert.ok(s.descricao.includes(`Protocolo ${protocolo}`));
   assert.match(s.descricao, /## Objeto\nMobiliário escolar\n/);
   assert.match(s.descricao, /## Justificativa da necessidade\nAs cadeiras atuais estão quebradas\.\n/);
-  assert.match(s.descricao, /## Itens solicitados\n\| Item \| Descrição \| Un\. \| Qtd\. \| Valor unitário \| Valor total \|\n\|---/);
+  assert.match(s.descricao, /## Itens solicitados\n\| Item \| Descrição \| Un\. \| Qtd\. \| Valor unitário \| Valor total \|\n\|:---:\|---\|:---:\|---:\|---:\|---:\|\n/);
   assert.match(s.descricao, /\| 1 \| Cadeira escolar \/ empilhável \| un \| 30 \| R\$\s300,00 \| R\$\s9\.000,00 \|/);
   assert.match(s.descricao, /\| 2 \| Mesa escolar individual \| un \| 30 \| R\$\s250,50 \| R\$\s7\.515,00 \|/);
   assert.match(s.descricao, /\| 3 \| Armário de aço \| — \| — \| — \| — \|/);
-  assert.match(s.descricao, /\| \| Total estimado \| \| \| \| R\$\s16\.515,00 \|/);
+  assert.match(s.descricao, /\| \| \*\*Total estimado\*\* \| \| \| \| \*\*R\$\s16\.515,00\*\* \|/);
   assert.match(s.descricao, /@ Denise da Silva Lima/);
   assert.equal(s.descricao.match(/## Itens solicitados/g).length, 1);
 
@@ -879,7 +879,7 @@ test("solicitação com objeto genérico, justificativa e itens com quantidade e
   // Texto livre, sem o campo [[Itens]]: o quadro entra antes da assinatura, uma única vez.
   const r3 = await admin.post(rota, corpo({ secretaria: "Governo", descricao: "# PEDIDO\nPrecisamos dos itens abaixo.\n\n@ Fulana", itens: itens.slice(0, 1) }));
   const s3 = (await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r3.dados.id);
-  assert.match(s3.descricao, /^# PEDIDO\nPrecisamos dos itens abaixo\.\n\n## Itens solicitados\n\| Item [\s\S]*R\$\s9\.000,00 \|\n\n@ Fulana$/);
+  assert.match(s3.descricao, /^# PEDIDO\nPrecisamos dos itens abaixo\.\n\n## Itens solicitados\n\| Item [\s\S]*R\$\s9\.000,00\*\* \|\n\n@ Fulana$/);
   // Modelo do órgão com [[Itens]] sob outro título não recebe o quadro duas vezes.
   const r4 = await admin.post(rota, corpo({ secretaria: "Administração", descricao: "## Relação\n[[Itens]]\n\n@ Beltrano", itens: itens.slice(0, 1) }));
   const s4 = (await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r4.dados.id);
@@ -933,7 +933,7 @@ test("cotações anexadas calculam médias unitárias, subtotais e total da soli
   const anterior = (await lic.get(processo)).dados.solicitacoes[0];
   assert.deepEqual(anterior.itens.map((i: { valor_unitario: number | null }) => i.valor_unitario), [110, 50, null]);
   assert.match(anterior.descricao, /Ar-condicionado .*R\$\s110,00 .*R\$\s330,00/);
-  assert.match(anterior.descricao, /Subtotal dos itens com valor .*R\$\s430,00/);
+  assert.match(anterior.descricao, /Subtotal dos itens com valor\*{0,2} .*R\$\s430,00/);
   assert.equal((await lic.req("DELETE", `${processo}/orcamentos/${a}`)).status, 409);
 
   const completos = [itens[0], itens[1], { ...itens[2], cotacoes: [cotacao(b, "Fornecedor B", 25)] }];
@@ -941,7 +941,7 @@ test("cotações anexadas calculam médias unitárias, subtotais e total da soli
   const alterada = await lic.put(`${caminho}/${criada.dados.id}`, alteracao);
   assert.equal(alterada.status, 200, JSON.stringify(alterada.dados));
   const final = (await lic.get(processo)).dados.solicitacoes[0];
-  assert.match(final.descricao, /Total estimado .*R\$\s455,00/);
+  assert.match(final.descricao, /Total estimado\*{0,2} .*R\$\s455,00/);
   assert.equal(final.descricao.match(/Valor unitário estimado/g).length, 1);
   assert.equal((await lic.put(`${caminho}/${criada.dados.id}`, alteracao)).status, 409);
   const criterio = await lic.put(`${caminho}/${criada.dados.id}`, {
@@ -949,7 +949,7 @@ test("cotações anexadas calculam médias unitárias, subtotais e total da soli
     itens: [{ ...completos[0], criterio: "menor" }, ...completos.slice(1)],
   });
   assert.equal(criterio.status, 200, JSON.stringify(criterio.dados));
-  assert.match((await lic.get(processo)).dados.solicitacoes[0].descricao, /Total estimado .*R\$\s425,00/);
+  assert.match((await lic.get(processo)).dados.solicitacoes[0].descricao, /Total estimado\*{0,2} .*R\$\s425,00/);
 });
 
 test("busca PNCP usa os filtros do Licita Ibaiti e devolve o link oficial com o valor unitário", async () => {
@@ -1012,7 +1012,7 @@ test("preços lançados aparecem na solicitação e entram na estimativa após o
   const rota = `${caminho}/${salva.dados.id}`;
   const previa = documentoDaSolicitacao("# SOLICITAÇÃO\nRelação: [[Itens]]", antes.itens);
   assert.match(previa, /^# SOLICITAÇÃO\nRelação:\n\n\| Item \| Descrição .*Cotação 1\u2028Papelaria A \| Cotação 2\u2028Papelaria B \| Média \|/);
-  assert.match(previa, /Resma de papel .*R\$\s12,50 \(anexo pendente\) \| R\$\s18,00 \(anexo pendente\)/);
+  assert.match(previa, /Resma de papel .*R\$\s12,50\* \| R\$\s18,00\*/);
   assert.doesNotMatch(previa, /Total estimado|\[\[Itens\]\]|Orçamentos por item/);
   assert.equal(documentoDaSolicitacao(previa, antes.itens), previa);
 
@@ -1020,7 +1020,7 @@ test("preços lançados aparecem na solicitação e entram na estimativa após o
   assert.equal(wordAntes.status, 200);
   const textoAntes = await extrairTexto("solicitacao.docx", wordAntes.dados);
   assert.match(textoAntes, /Cotação 1\s*Papelaria A \| Cotação 2\s*Papelaria B \| Média/);
-  assert.match(textoAntes, /Resma de papel .*R\$\s12,50 \(anexo pendente\) \| R\$\s18,00 \(anexo pendente\)/);
+  assert.match(textoAntes, /Resma de papel .*R\$\s12,50\* \| R\$\s18,00\*/);
   assert.doesNotMatch(textoAntes, /Total estimado|Orçamentos por item/);
 
   const form = new FormData();
@@ -1035,15 +1035,15 @@ test("preços lançados aparecem na solicitação e entram na estimativa após o
   const depois = (await lic.get(processo)).dados.solicitacoes[0];
   assert.equal(depois.itens[0].valor_unitario, 12.5);
   assert.equal(depois.itens[0].cotacoes[1].valor_unitario, 18);
-  assert.match(depois.descricao, /Total estimado .*R\$\s50,00/);
+  assert.match(depois.descricao, /Total estimado\*{0,2} .*R\$\s50,00/);
   // Uma solicitação antiga com texto anterior ao quadro também mostra o orçamento salvo.
   await pool.query("update solicitacoes_processo set descricao=$1 where id=$2", ["# SOLICITAÇÃO\nCotação no anexo.\n\n@ Titular", salva.dados.id]);
   const wordDepois = await lic.get(`${rota}/docx`);
   assert.equal(wordDepois.status, 200);
   const textoDepois = await extrairTexto("solicitacao.docx", wordDepois.dados);
-  assert.match(textoDepois, /Resma de papel .*R\$\s12,50 \| R\$\s18,00 \(anexo pendente\) \| R\$\s12,50 \|/);
+  assert.match(textoDepois, /Resma de papel .*R\$\s12,50 \| R\$\s18,00\* \| R\$\s12,50 \| R\$\s50,00 \|/);
   assert.match(textoDepois, /## Itens solicitados|Itens solicitados/);
-  assert.match(textoDepois, /Total estimado .*R\$\s50,00[\s\S]+Titular/);
+  assert.match(textoDepois, /Total estimado\*{0,2} .*R\$\s50,00[\s\S]+Titular/);
   assert.doesNotMatch(textoDepois, /Orçamentos por item/);
   const pdf = await lic.get(`${rota}/pdf`);
   assert.equal(pdf.status, 200);
@@ -1062,12 +1062,12 @@ test("as cotações ficam lado a lado no quadro e os fornecedores comuns aparece
     ...item, descricao: "Resma", cotacoes: [cotacao("Loja Beta", 21), cotacao("LOJA ALFA", 11)],
   }, { ...item, descricao: "Caneta", cotacoes: [cotacao("Loja Beta", 22)] }]);
   const linhas = comum.split("\n");
-  assert.match(linhas[2], /Qtd\. \| Cotação 1\u2028Loja Alfa \| Cotação 2\u2028Loja Beta \| Média \|$/);
-  assert.match(linhas[4], /\| R\$\s10,00 \| R\$\s20,00 \| R\$\s15,00 \|$/);
-  assert.match(linhas[5], /\| R\$\s11,00 \| R\$\s21,00 \| R\$\s15,00 \|$/);
-  assert.match(linhas[6], /\| — \| R\$\s22,00 \| R\$\s15,00 \|$/);
-  assert.match(documentoDaSolicitacao(texto, [{ ...item, criterio: "mediana" }]), /\| Mediana \|\n/);
-  assert.match(documentoDaSolicitacao(texto, [item, { ...item, criterio: "menor" }]), /\| Valor unitário estimado \|\n/);
+  assert.match(linhas[2], /Qtd\. \| Cotação 1\u2028Loja Alfa \| Cotação 2\u2028Loja Beta \| Média \| Valor total \|$/);
+  assert.match(linhas[4], /\| R\$\s10,00 \| R\$\s20,00 \| R\$\s15,00 \| R\$\s15,00 \|$/);
+  assert.match(linhas[5], /\| R\$\s11,00 \| R\$\s21,00 \| R\$\s15,00 \| R\$\s15,00 \|$/);
+  assert.match(linhas[6], /\| — \| R\$\s22,00 \| R\$\s15,00 \| R\$\s15,00 \|$/);
+  assert.match(documentoDaSolicitacao(texto, [{ ...item, criterio: "mediana" }]), /\| Mediana \| Valor total \|\n/);
+  assert.match(documentoDaSolicitacao(texto, [item, { ...item, criterio: "menor" }]), /\| Valor unitário estimado \| Valor total \|\n/);
   assert.equal(comum.match(/Loja Alfa/gi)?.length, 1);
   assert.equal(documentoDaSolicitacao(comum, [item]).match(/\| Item \|/g)?.length, 1);
   const muitos = documentoDaSolicitacao(texto, [{ ...item, cotacoes: [
@@ -1079,7 +1079,7 @@ test("as cotações ficam lado a lado no quadro e os fornecedores comuns aparece
   assert.equal(muitos.match(/Material escolar/g)?.length, 1);
   assert.equal(muitos.match(/Loja Alfa/g)?.length, 1);
   assert.equal(muitos.match(/Total estimado/g)?.length, 1);
-  assert.match(muitos, /\n\n\*\*Total estimado da solicitação\*\* R\$\s15,00$/);
+  assert.match(muitos, /\n\| \| \*\*Total estimado da solicitação\*\* \|( \|)+ \*\*R\$\s15,00\*\* \|\n\nPreço de referência: média das cotações com orçamento anexado\.$/);
   assert.equal(documentoDaSolicitacao(muitos, [{ ...item, cotacoes: [a, b, cotacao("Loja Gama", 30), cotacao("Loja Delta", 40), cotacao("Loja Épsilon", 50)] }]), muitos);
   const distintos = documentoDaSolicitacao(texto, ["Alfa", "Beta", "Gama", "Delta"].map((nome, k) => ({
     ...item, descricao: `Item de ${k + 1}`, cotacoes: [cotacao(nome, (k + 1) * 10)],
@@ -1105,7 +1105,7 @@ test("o documento reúne quadros repetidos dos mesmos itens e preserva as outras
   const documento = documentoDaSolicitacao(texto, [item]);
   assert.equal(documento.match(/Limpeza de ar condicionado/g)?.length, 1);
   assert.equal(documento.match(/## Itens solicitados/g)?.length, 1);
-  assert.match(documento, /Cotação 1\u2028HS Serviços LTDA \| Média \|\n[^\n]+\n\| 1 \| Limpeza de ar condicionado/);
+  assert.match(documento, /Cotação 1\u2028HS Serviços LTDA \| Média \| Valor total \|\n[^\n]+\n\| 1 \| Limpeza de ar condicionado/);
   assert.doesNotMatch(documento, /\[\[Itens\]\]/);
   const paraEditar = inserirItens(texto, [item], "marcador");
   assert.equal(paraEditar.match(/\[\[Itens\]\]/g)?.length, 1);

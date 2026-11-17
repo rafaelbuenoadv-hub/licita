@@ -10,7 +10,7 @@ const NEGRITO = "Times-Bold";
 export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Timbrado) {
   const colunasCotacoes = quantidadeColunasCotacoes(texto);
   // Mantém uma única linha por item mesmo nos quadros com muitas cotações.
-  const size: [number, number] | "A4" = colunasCotacoes > 3
+  const size: [number, number] | "A4" = colunasCotacoes >= 3
     ? [Math.min(14_000, Math.max(842, 455 + colunasCotacoes * 70)), 595.28]
     : "A4";
   const doc = new PDFDocument({ size, margin: MARGEM, bufferPages: true, info: { Title: titulo, Creator: "Licita" } });
@@ -81,30 +81,40 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
     }
   }
 
-  function quadro(linhas: string[][]) {
+  function quadro(linhas: string[][], alinhamentos: string[] = []) {
     const colunas = Math.max(...linhas.map((linha) => linha.length));
-    const tamanho = 10;
+    const quadroItens = linhas[0][0] === "Item" && linhas[0][1] === "Descrição";
+    const tamanho = quadroItens ? (colunas > 8 ? 8.5 : 9.5) : 10;
     const altura = 13;
     const espaco = 4;
-    const quadroComCotacoes = linhas[0][0] === "Item" && linhas[0][1] === "Descrição" && linhas[0].some((coluna) => /^Cotação 1\s/.test(coluna));
-    const pesos = Array.from({ length: colunas }, (_, c) => {
-      const minimos = [6, 144, 10, 6];
-      const minimo = quadroComCotacoes ? minimos[c] ?? (c === colunas - 1 ? 29 : 15) : 6;
-      const maximo = linhas.reduce((max, linha) => Math.max(max, linha[c]?.replace(/\*\*/g, "").length ?? 0), 0);
-      return Math.sqrt(Math.max(minimo, Math.min(150, maximo)));
-    });
-    const totalPesos = pesos.reduce((soma, peso) => soma + peso, 0);
+    // Quadro de itens: item, unidade e quantidade estreitos; valores com largura para uma linha; descrição com o resto.
+    const larguras = quadroItens ? (() => {
+      const fixas = [26, 0, 34, 36];
+      doc.font(NEGRITO).fontSize(tamanho);
+      const valor = Math.max(62, doc.widthOfString("R$ 999.999,99") + 10);
+      const l = Array.from({ length: colunas }, (_, c) => (c < 4 ? fixas[c] : valor));
+      l[1] = Math.max(110, largura - l.reduce((a, b) => a + b, 0));
+      const soma = l.reduce((a, b) => a + b, 0);
+      return l.map((x) => x * largura / soma);
+    })() : (() => {
+      const pesos = Array.from({ length: colunas }, (_, c) => {
+        const maximo = linhas.reduce((max, linha) => Math.max(max, linha[c]?.replace(/\*\*/g, "").length ?? 0), 0);
+        return Math.sqrt(Math.max(6, Math.min(150, maximo)));
+      });
+      const totalPesos = pesos.reduce((soma, peso) => soma + peso, 0);
+      return pesos.map((peso) => largura * peso / totalPesos);
+    })();
     let colunaX = MARGEM;
-    const posicoes = pesos.map((peso) => {
-      const larguraColuna = largura * peso / totalPesos;
+    const posicoes = larguras.map((larguraColuna) => {
       const posicao = { x: colunaX, largura: larguraColuna };
       colunaX += larguraColuna;
       return posicao;
     });
     for (const [i, linha] of linhas.entries()) {
+      // No cabeçalho, "Cotação N" em negrito e o nome do fornecedor em texto normal, logo abaixo.
       const celulas = Array.from({ length: colunas }, (_, c) =>
-        (linha[c] ?? "").split(QUEBRA_NA_CELULA).flatMap((trecho) =>
-          quebrar(trecho, Math.max(1, posicoes[c].largura - 2 * espaco), tamanho, i === 0)));
+        (linha[c] ?? "").split(QUEBRA_NA_CELULA).flatMap((trecho, k) =>
+          quebrar(trecho, Math.max(1, posicoes[c].largura - 2 * espaco), tamanho, i === 0 && k === 0)));
       const total = Math.max(...celulas.map((celula) => celula.length));
       // Preserve a linha inteira quando couber em uma página. Linhas maiores seguem na página seguinte.
       const alturaLinha = total * altura + 2 * espaco;
@@ -113,11 +123,20 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
         if (y + altura + 2 * espaco > fim) novaPagina();
         const quantidade = Math.min(total - inicio, Math.floor((fim - y - 2 * espaco) / altura));
         const bloco = quantidade * altura + 2 * espaco;
+        const linhaTotal = i > 0 && !linha[0] && /^\*\*/.test(linha[1] ?? "");
         celulas.forEach((celula, c) => {
           const { x, largura: larguraColuna } = posicoes[c];
+          if (i === 0 || linhaTotal) doc.rect(x, y, larguraColuna, bloco).fill(i === 0 ? "#e7e7e7" : "#f3f3f3");
           doc.rect(x, y, larguraColuna, bloco).lineWidth(0.5).stroke("#8a8a8a");
-          celula.slice(inicio, inicio + quantidade).forEach((conteudo, j) =>
-            escrever(conteudo, x + espaco, y + espaco + j * altura, tamanho));
+          const alinhar = i === 0 ? "center" : alinhamentos[c];
+          const trechos = celula.slice(inicio, inicio + quantidade);
+          const meio = ((quantidade - trechos.length) * altura) / 2;
+          trechos.forEach((conteudo, j) => {
+            const ocupado = conteudo.reduce((t, trecho) => t + trecho.largura, 0);
+            const livre = larguraColuna - 2 * espaco - ocupado;
+            const desloca = alinhar === "right" ? livre : alinhar === "center" ? livre / 2 : 0;
+            escrever(conteudo, x + espaco + Math.max(0, desloca), y + espaco + meio + j * altura, tamanho);
+          });
         });
         y += bloco;
         inicio += quantidade;
@@ -127,21 +146,24 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
   }
 
   let tabela: string[][] = [];
+  let alinhamentos: string[] = [];
   let assinatura = false;
   for (const bruta of texto.split(/\r?\n/)) {
     const s = bruta.trim();
     if (s.startsWith("|")) {
       const celulas = s.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
-      if (!celulas.every((c) => /^:?-{2,}:?$/.test(c))) tabela.push(celulas);
+      if (celulas.every((c) => /^:?-{2,}:?$/.test(c))) alinhamentos = celulas.map((c) => (c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : "left"));
+      else tabela.push(celulas);
       continue;
     }
-    if (tabela.length) { quadro(tabela); tabela = []; }
+    if (tabela.length) { quadro(tabela, alinhamentos); tabela = []; alinhamentos = []; }
     if (!s) { assinatura = false; continue; }
     const principal = s.startsWith("# ");
     const secao = s.startsWith("## ");
     const assina = s.startsWith("@ ");
-    const tamanho = principal ? 15 : 12;
-    const altura = principal ? 20 : 16;
+    const nota = s.startsWith("Preço de referência: ");
+    const tamanho = principal ? 15 : nota ? 9 : 12;
+    const altura = principal ? 20 : nota ? 12 : 16;
     const espaco = secao ? 10 : assina && !assinatura ? 16 : 0;
     const corpo = s.slice(secao ? 3 : principal || assina ? 2 : 0);
     if (y + espaco + altura * (secao ? 2 : 1) > fim) novaPagina();
@@ -157,7 +179,7 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
     y += principal ? 10 : assina ? 0 : 5;
     assinatura = assina;
   }
-  if (tabela.length) quadro(tabela);
+  if (tabela.length) quadro(tabela, alinhamentos);
 
   const imagemDaPagina = (imagem: Timbrado["cabecalho"], altura: number, posicao: number) => {
     const medida = altura * imagem.proporcao;

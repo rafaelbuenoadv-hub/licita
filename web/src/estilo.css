@@ -112,9 +112,15 @@ table.t tr.link{cursor:pointer} table.t tr.link:hover td{background:var(--sunk)}
 .folha .tw{margin:6px 0 12px}
 .folha table{border-collapse:collapse;width:100%;font-size:14px}
 .folha th,.folha td{border:1px solid var(--paper-line);padding:4px 7px;vertical-align:top;text-align:left}
-.folha .quadro-itens th{overflow-wrap:normal}
+/* A folha pode aparecer dentro de uma tabela da tela (lista de solicitações): não herda o estilo dela. */
+.folha table :is(th,td){font-family:inherit;font-size:inherit;letter-spacing:normal;text-transform:none;color:var(--paper-ink);border:1px solid var(--paper-line);padding:4px 7px}
+.folha .quadro-itens{font-size:13px;font-variant-numeric:tabular-nums}
+.folha .quadro-itens th{background:#e7e7e7;text-align:center;vertical-align:middle;font-weight:700;overflow-wrap:normal;hyphens:none;line-height:1.25}
+.folha .quadro-itens th .forn{font-weight:400;font-size:12px}
 .folha .quadro-itens th:nth-child(2){min-width:24ch}
-.folha .quadro-itens th:nth-child(n+5){min-width:9ch}
+.folha .quadro-itens td{vertical-align:middle}
+.folha .quadro-itens td:nth-child(n+3){white-space:nowrap}
+.folha .quadro-itens tr.total td{background:#f3f3f3;border-top:1.5px solid var(--paper-ink)}
 .folha .vazio{font-family:var(--f-body);font-size:14px;color:#666;text-align:center;margin-top:40px}
 textarea.edit{min-height:460px;background:var(--paper);color:var(--paper-ink);font-family:var(--f-mono);font-size:13px;line-height:1.5}
 .pend{display:flex;flex-direction:column;gap:12px;border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--bg)}
