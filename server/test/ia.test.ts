@@ -2,7 +2,7 @@
 // Confere o que o sistema envia (modelo, respaldo, saída estruturada) e o tratamento das respostas.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -651,6 +651,54 @@ test("leitura de orçamento: foto com extensão trocada, foto grande e PDF recus
     await q1("update orcamentos set texto='' where id=$1", [pdf]);
     const r2 = await api("POST", `/api/processos/${id}/orcamentos/${pdf}/ler`, {});
     assert.equal(r2.status, 422);
-    assert.match(((await r2.json()) as any).erro, /protegido por senha ou danificado/);
+    assert.match(((await r2.json()) as any).erro, /Não foi possível ler a estrutura deste PDF/);
+  } finally { documentoFalha = false; }
+});
+
+test("PDFs de orçamento anexados à solicitação podem ser lidos após a recusa do provedor", async () => {
+  const sharp = (await import("sharp")).default;
+  const novo = await api("POST", "/api/processos", { objeto: "Aquisição de cadeiras", tipo: "bens", via: "dispensa", ano: 2026 });
+  const { id } = (await novo.json()) as { id: number };
+
+  const pesquisavel = await PDFDocument.create();
+  const fonte = await pesquisavel.embedFont(StandardFonts.Helvetica);
+  const pg = pesquisavel.addPage();
+  pg.drawText("Fornecedor: Loja X", { x: 48, y: 740, font: fonte });
+  pg.drawText("Cadeira   UN   5   R$ 100,00   R$ 500,00", { x: 48, y: 715, font: fonte });
+
+  const digitalizado = await PDFDocument.create();
+  const foto = await sharp({ create: { width: 100, height: 60, channels: 3, background: "#eeeeee" } }).jpeg().toBuffer();
+  const jpg = await digitalizado.embedJpg(foto);
+  for (let i = 0; i < 2; i++) digitalizado.addPage().drawImage(jpg, { x: 48, y: 680, width: 100, height: 60 });
+
+  const fd = new FormData();
+  fd.append("arquivo", new Blob([Uint8Array.from(await pesquisavel.save())], { type: "application/pdf" }), "proposta digital.pdf");
+  fd.append("arquivo", new Blob([Uint8Array.from(await digitalizado.save())], { type: "application/pdf" }), "proposta digitalizada.pdf");
+  const upload = await api("POST", `/api/processos/${id}/orcamentos?origem=solicitacao`, fd);
+  assert.equal(upload.status, 201, await upload.clone().text());
+  const { ids } = (await upload.json()) as { ids: number[] };
+  const { q1 } = await import("../db.js");
+  assert.equal((await q1("select texto from orcamentos where id=$1", [ids[0]]))?.texto, "");
+
+  respostaEstruturada = { fornecedor: "Loja X", cnpj: null, data: null, validade: null,
+    itens: [{ descricao: "Cadeira", unidade: "UN", quantidade: 5, valor_unitario: 100, valor_total: 500 }],
+    valor_total: 500, frete: "nao_informado", instalacao: "nao_informado", prazo_entrega: null, observacoes: null };
+  documentoFalha = true;
+  try {
+    const digital = await api("POST", `/api/processos/${id}/orcamentos/${ids[0]}/ler`, {});
+    assert.equal(digital.status, 200, await digital.clone().text());
+    assert.equal((await digital.json()).dados.itens[0].valor_unitario, 100);
+    const texto = pedidos.at(-1)!.body.messages[0].content;
+    assert.match(texto, /Fornecedor: Loja X/);
+    assert.match(texto, /Cadeira +UN +5 +R\$ 100,00/);
+    assert.match((await q1("select texto from orcamentos where id=$1", [ids[0]]))?.texto ?? "", /Fornecedor: Loja X/);
+
+    const scan = await api("POST", `/api/processos/${id}/orcamentos/${ids[1]}/ler`, {});
+    assert.equal(scan.status, 200, await scan.clone().text());
+    assert.equal((await scan.json()).dados.itens[0].valor_total, 500);
+    const visual = pedidos.at(-1)!.body.messages[0].content;
+    assert.deepEqual(visual.map((bloco: any) => bloco.type), ["image", "image", "text"]);
+    assert.equal(visual[0].source.media_type, "image/jpeg");
+    assert.equal(visual[1].source.media_type, "image/jpeg");
   } finally { documentoFalha = false; }
 });
