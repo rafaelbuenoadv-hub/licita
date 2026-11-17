@@ -11,7 +11,7 @@ import { z } from "zod";
 import { q, q1, auditar } from "../db.js";
 import { exigeLogin, exigePapel } from "../auth.js";
 import { ErroHttp } from "../erros.js";
-import { FORMATO_MINUTA, MODELO, gerarEstruturado, gerarTexto, iaDisponivel, pesquisarNaWeb, traduzErroIA, type Fonte } from "../ia.js";
+import { FORMATO_MINUTA, MODELO, gerarEstruturado, gerarTexto, iaDisponivel, pesquisarNaWeb, semCreditosIA, traduzErroIA, type Fonte } from "../ia.js";
 import { extrairTexto } from "../extrair.js";
 import { calcularItens, checksDo, itensSolicitacaoOpcionais, minutaVigente, nomeEnviado, processoDo, salvarMinuta, upload, type Processo } from "./processos.js";
 import { ETAPAS, TIPOS, TRILHA_PROCESSO, VIAS, atual, etapaPorId, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../shared/etapas.js";
@@ -607,7 +607,7 @@ Use null para o que não constar. Não calcule nem deduza valor que não esteja 
       const ler = async (entrada: typeof conteudo): Promise<z.infer<typeof esquema>> => {
         try { return await gerarEstruturado(esquema, entrada, "medium"); }
         catch (e) {
-          if (!(e instanceof Anthropic.BadRequestError) || typeof entrada === "string") throw e;
+          if (!(e instanceof Anthropic.BadRequestError) || semCreditosIA(e) || typeof entrada === "string") throw e;
           if (real !== "pdf") {
             if (textoOrcamento) return gerarEstruturado(esquema, porTexto(textoOrcamento), "medium");
             throw e;

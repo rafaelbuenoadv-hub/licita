@@ -16,6 +16,8 @@ let pausasDaPesquisa = 0;
 let pesquisaFalha = false;
 // Pedidos com PDF recusados pela API (PDF protegido ou danificado).
 let documentoFalha = false;
+// Conta da Anthropic sem créditos: a API recusa todo pedido com 400.
+let semCreditos = false;
 
 const falso = http.createServer((req, res) => {
   let raw = "";
@@ -27,6 +29,11 @@ const falso = http.createServer((req, res) => {
       id: "msg_teste", type: "message", role: "assistant", model: body.model, content, stop_reason: stop, stop_sequence: null,
       usage: { input_tokens: 10, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
     });
+    if (semCreditos) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits." } }));
+      return;
+    }
     const comDocumento = Array.isArray(body.messages?.[0]?.content) && body.messages[0].content.some((b: any) => b.type === "document");
     if (documentoFalha && comDocumento) {
       res.writeHead(400, { "content-type": "application/json" });
@@ -701,4 +708,23 @@ test("PDFs de orçamento anexados à solicitação podem ser lidos após a recus
     assert.equal(visual[0].source.media_type, "image/jpeg");
     assert.equal(visual[1].source.media_type, "image/jpeg");
   } finally { documentoFalha = false; }
+});
+
+test("conta da IA sem créditos: aviso claro, sem novas tentativas em vão", async () => {
+  const novo = await api("POST", "/api/processos", { objeto: "Aquisição de cadeiras", tipo: "bens", via: "dispensa", ano: 2026 });
+  const { id } = (await novo.json()) as { id: number };
+  const fd = new FormData();
+  fd.append("arquivo", new Blob([Buffer.from("%PDF-1.4 x")]), "proposta.pdf");
+  const [oid] = ((await (await api("POST", `/api/processos/${id}/orcamentos`, fd)).json()) as { ids: number[] }).ids;
+  semCreditos = true;
+  try {
+    const antes = pedidos.length;
+    const r = await api("POST", `/api/processos/${id}/orcamentos/${oid}/ler`, {});
+    assert.equal(r.status, 402);
+    assert.match(((await r.json()) as any).erro, /sem créditos.*console\.anthropic\.com/);
+    assert.equal(pedidos.length - antes, 1, "não tenta ler de outro jeito quando o problema é saldo");
+    const chat = await api("POST", "/api/ia/agente", { campo: null, pagina: { titulo: "", caminho: "/" }, formulario: [], processo_id: null, mensagens: [{ role: "user", content: "Olá" }] });
+    const fim = (await chat.text()).trim().split("\n").map((l) => JSON.parse(l)).at(-1);
+    assert.match(fim.erro, /sem créditos/);
+  } finally { semCreditos = false; }
 });
