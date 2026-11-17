@@ -403,14 +403,14 @@ export function rotasProcessos() {
       itens: itensSolicitacaoOpcionais,
       itens_anteriores: itensSolicitacaoOpcionais,
     }).refine((dados) => dados.itens === undefined || dados.itens_anteriores !== undefined, "Reabra a solicitação antes de editar os itens.").parse(req.body);
-    const s = await q1<{ secretaria: string; referencia: string; objeto_solicitacao: string; justificativa: string }>(
-      "select secretaria, referencia, objeto as objeto_solicitacao, justificativa from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
+    const s = await q1<{ secretaria: string; referencia: string; objeto_solicitacao: string; justificativa: string; itens: ItemSolicitacao[] }>(
+      "select secretaria, referencia, objeto as objeto_solicitacao, justificativa, itens from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
     );
     if (!s) throw new ErroHttp(404, "Solicitação não encontrada.");
     const pendentes = parametrosApoios(d, p.id, req.usuario!.id);
     const documentos = await apoiosComTextoLocal(apoios);
     const itens = d.itens && calcularItens(d.itens);
-    const descricao = await preencherSolicitacao(p, { ...s, descricao: d.descricao, itens });
+    const descricao = await preencherSolicitacao(p, { ...s, descricao: d.descricao, itens: itens ?? s.itens });
     if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and excluido_em is null for update", [p.id]);
@@ -418,7 +418,7 @@ export function rotasProcessos() {
       const { rows: [existente] } = await c.query<{ descricao: string; tem_arquivo: boolean; itens_iguais: boolean }>(
         `select descricao, (arquivo is not null or exists (select 1 from solicitacao_anexos a where a.solicitacao_id=solicitacoes_processo.id)) as tem_arquivo, ($3::jsonb is null or itens = $3::jsonb) as itens_iguais
          from solicitacoes_processo where processo_id=$1 and id=$2 for update`,
-        [p.id, sid, d.itens_anteriores ? JSON.stringify(d.itens_anteriores) : null],
+        [p.id, sid, JSON.stringify(d.itens_anteriores ?? s.itens)],
       );
       if (!existente) throw new ErroHttp(404, "Solicitação não encontrada.");
       if (existente.descricao !== d.anterior || !existente.itens_iguais) throw new ErroHttp(409, "A solicitação mudou. Reabra para ver a versão atualizada.");
