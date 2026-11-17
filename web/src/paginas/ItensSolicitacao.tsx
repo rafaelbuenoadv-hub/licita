@@ -143,6 +143,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   const seletorImportacao = useRef<HTMLInputElement>(null);
   const [aviso, setAviso] = useState("");
   const [leitura, setLeitura] = useState<LeituraOrcamento | null>(null);
+  const [reler, setReler] = useState<{ id: number; fornecedor: string } | null>(null);
   // Colunas ainda sem preço lançado (fornecedor recém-adicionado): ficam só na tela até receberem um preço.
   const [pendentes, setPendentes] = useState<Coluna[]>(() => (colunasDosDados(linhas).length ? [] : [colunaNova()]));
   const lidas = lerLinhas(linhas);
@@ -172,16 +173,21 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     finally { setAnexando(""); setCotando(false); }
   };
 
+  const conferirImportacao = async ({ id, fornecedor }: { id: number; fornecedor: string }) => {
+    setReler({ id, fornecedor });
+    const dados = await lerOrcamento(id);
+    const itens = dados.itens.filter((i) => i.descricao.trim());
+    if (!itens.length) throw new Error("O orçamento foi anexado. A leitura não encontrou itens para lançar.");
+    setLeitura({ id, dados: { ...dados, fornecedor: limparNomeFornecedor(dados.fornecedor) || fornecedor, itens }, usar: itens.map(() => true) });
+    setReler(null);
+  };
   const importar = (arquivo: File) => executar("importar", async () => {
     if (!legivel(arquivo.name)) throw new Error("Para importar os itens, envie PDF, Word, XLSX, foto ou texto.");
     setLeitura(null);
-    const { id, fornecedor } = await enviar(arquivo);
-    try {
-      const dados = await lerOrcamento(id);
-      const itens = dados.itens.filter((i) => i.descricao.trim());
-      if (!itens.length) throw new Error("O orçamento foi anexado. A leitura não encontrou itens para lançar.");
-      setLeitura({ id, dados: { ...dados, fornecedor: limparNomeFornecedor(dados.fornecedor) || fornecedor, itens }, usar: itens.map(() => true) });
-    } finally { await recarregar(); }
+    setReler(null);
+    const enviado = await enviar(arquivo);
+    try { await conferirImportacao(enviado); }
+    finally { await recarregar(); }
   });
 
   const automaticos = leitura ? destinosDoOrcamento(linhas, leitura.dados.itens) : [];
@@ -269,8 +275,11 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     const precos = precosDaProposta(linhas, dados);
     const resultado = linhas.map((l, k) => {
       const j = indiceNaLinha(l, col);
-      if (j >= 0) return { ...l, cotacoes: l.cotacoes.map((c, n) => (n === j ? { ...c, ...novo, valor: c.valor || precos.get(k) || "" } : c)) };
       const preco = precos.get(k);
+      if (j >= 0) {
+        if (!l.cotacoes[j].valor && preco) preenchidos++;
+        return { ...l, cotacoes: l.cotacoes.map((c, n) => (n === j ? { ...c, ...novo, valor: c.valor || preco || "" } : c)) };
+      }
       if (!preco || l.cotacoes.some((c) => c.orcamentoId === id)) return l;
       preenchidos++;
       return { ...l, cotacoes: [...l.cotacoes.filter(cotacaoPreenchida), { ...novo, valor: preco }] };
@@ -282,22 +291,23 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     }
     return preenchidos;
   };
+  const aplicarDadosDaColuna = (col: Coluna, id: number, dados: DadosOrcamento, fornecedor = "") => {
+    const n = vincularOrcamento(col, id, dados, limparNomeFornecedor(dados.fornecedor) || fornecedor);
+    setAviso(n ? `Orçamento lido. A IA lançou o preço de ${n} ${n === 1 ? "item" : "itens"}. Confira e complete os demais.`
+      : "Orçamento lido. Confira os preços da coluna e preencha os que estiverem faltando.");
+  };
   const anexarNaColuna = (i: number, col: Coluna, arquivo: File) => executar(`col-${i}`, async () => {
     const { id, fornecedor } = await enviar(arquivo);
-    let dados: DadosOrcamento | null = null;
-    if (ia && legivel(arquivo.name)) {
-      try { dados = await lerOrcamento(id); }
-      catch { setAviso("Orçamento anexado. Confira o fornecedor e informe os preços."); }
-    }
-    const n = vincularOrcamento(col, id, dados, limparNomeFornecedor(dados?.fornecedor) || fornecedor);
-    await recarregar();
-    if (dados) setAviso(n ? `Orçamento anexado. A IA leu a proposta e lançou o preço de ${n} ${n === 1 ? "item" : "itens"}, conciliando com os itens já cadastrados. Confira e complete os demais.` : "Orçamento anexado. Não foi possível ligar as linhas da proposta aos itens: informe os preços na coluna ou use \"Anexar e ler orçamento\" para conferir linha a linha.");
+    try {
+      if (ia && legivel(arquivo.name)) aplicarDadosDaColuna(col, id, await lerOrcamento(id), fornecedor);
+      else vincularOrcamento(col, id, null, fornecedor);
+    } catch (e) {
+      vincularOrcamento(col, id, null, fornecedor);
+      throw new Error(`Orçamento anexado. ${e instanceof Error ? e.message : "A leitura da proposta falhou."}`);
+    } finally { await recarregar(); }
   });
-  const relerFornecedor = (col: Coluna, orcamento: OrcamentoLido) => executar(`fornecedor-${orcamento.id}`, async () => {
-    const dados = await lerOrcamento(orcamento.id);
-    const fornecedor = limparNomeFornecedor(dados.fornecedor);
-    if (fornecedor) alterarColuna(col, { fornecedor });
-    else setAviso("O fornecedor não foi identificado no arquivo. Confira a proposta e informe o nome.");
+  const relerColuna = (col: Coluna, id: number) => executar(`fornecedor-${id}`, async () => {
+    aplicarDadosDaColuna(col, id, await lerOrcamento(id));
     await recarregar();
   });
 
@@ -350,6 +360,10 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
           e.target.value = "";
           if (arquivo) void importar(arquivo);
         }} />
+        {reler && <button type="button" className="btn sm" onClick={() => executar("importar", async () => {
+          await conferirImportacao(reler);
+          await recarregar();
+        })}>Tentar ler o orçamento anexado</button>}
         <span className="small muted">Confira as linhas extraídas antes de lançar nos itens.</span>
       </> : <p className="small muted">Leitura automática indisponível. Você pode anexar propostas e informar os preços dentro dos itens.</p>}
     </div>
@@ -423,7 +437,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
                   if (arquivo) void anexarNaColuna(i, col, arquivo);
                 }} />
               </div>
-              {orcamento && !nome && ia && legivel(orcamento.nome) && <button type="button" className="lnk small" onClick={() => relerFornecedor(col, orcamento)}>Ler fornecedor com IA</button>}
+              {(!col.fonte || col.fonte === "fornecedor") && ia && orcamento && legivel(orcamento.nome) && <button type="button" className="lnk small" onClick={() => relerColuna(col, orcamento.id)}>Ler orçamento com IA</button>}
               <details className="cotacao-detalhes">
                 <summary>Opções</summary>
                 <div className="stack" style={{ gap: 6 }}>

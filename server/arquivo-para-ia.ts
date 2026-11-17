@@ -6,7 +6,7 @@ import { ErroHttp } from "./erros.js";
 export type TipoArquivo = "pdf" | "png" | "jpeg" | "gif" | "webp" | "outro";
 
 export function tipoPeloConteudo(buf: Buffer): TipoArquivo {
-  if (buf.subarray(0, 5).toString("latin1") === "%PDF-") return "pdf";
+  if (buf.subarray(0, 1024).includes(Buffer.from("%PDF-"))) return "pdf";
   if (buf.length > 8 && buf[0] === 0x89 && buf.subarray(1, 4).toString("latin1") === "PNG") return "png";
   if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpeg";
   if (buf.subarray(0, 4).toString("latin1") === "GIF8") return "gif";
