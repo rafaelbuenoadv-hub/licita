@@ -385,12 +385,12 @@ test("anexo .docx tem o texto extraído (inclusive quadros)", async () => {
 });
 
 test("IA sem chave responde 503 com mensagem clara", async () => {
-  if (process.env.ANTHROPIC_API_KEY) return;
+  if (process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY) return;
   const req = await new Cliente().entrar("req@a.gov.br");
   assert.equal((await req.get("/api/ia/status")).dados.disponivel, false);
   const r = await req.post(`/api/processos/${procId}/ia/sugerir`, { etapa: "etp" });
   assert.equal(r.status, 503);
-  assert.match(r.dados.erro, /ANTHROPIC_API_KEY/);
+  assert.match(r.dados.erro, /GEMINI_API_KEY/);
 });
 
 test("PCA aponta fracionamento quando dispensas da mesma natureza passam do limite", async () => {

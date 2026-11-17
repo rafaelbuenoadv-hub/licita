@@ -1,5 +1,4 @@
 import { anexosDaRequisicao, consolidarFontes, filtroApoiosPendentes, lerDocumentoParaSolicitacao, nomeAnexoEnviado, parametrosApoios, receberAnexosSolicitacao, referenciasApoios, type AnexoSolicitacao } from "../anexos-solicitacao.js";
-import Anthropic from "@anthropic-ai/sdk";
 import { conferirPdf, imagemParaIA, tipoPeloConteudo } from "../arquivo-para-ia.js";
 import { imagensLocaisDoPdf, textoLocalDoPdf } from "../orcamento-pdf.js";
 import { lerTabelaOrcamento, pedidoSemPrecos } from "../tabela-orcamento.js";
@@ -12,7 +11,7 @@ import { z } from "zod";
 import { q, q1, auditar } from "../db.js";
 import { exigeLogin, exigePapel } from "../auth.js";
 import { ErroHttp } from "../erros.js";
-import { AVISO_SEM_CREDITOS, FORMATO_MINUTA, MODELO, gerarEstruturado, gerarTexto, iaDisponivel, pesquisarNaWeb, semCreditosIA, traduzErroIA, type Fonte } from "../ia.js";
+import { AVISO_SEM_CREDITOS, FORMATO_MINUTA, MODELO, gerarEstruturado, gerarTexto, iaDisponivel, iaParadaAgora, pedidoInvalidoIA, pesquisarNaWeb, semCreditosIA, traduzErroIA, type Fonte } from "../ia.js";
 import { lerOrcamentoSemIA } from "../leitura-sem-ia.js";
 import { extrairTexto } from "../extrair.js";
 import { calcularItens, checksDo, itensSolicitacaoOpcionais, minutaVigente, nomeEnviado, processoDo, salvarMinuta, upload, type Processo } from "./processos.js";
@@ -612,12 +611,12 @@ Use null para o que não constar. Não calcule nem deduza valor que não esteja 
       const ler = async (entrada: typeof conteudo): Promise<z.infer<typeof esquema>> => {
         try { return await gerarEstruturado(esquema, entrada, "medium"); }
         catch (e) {
-          if (!(e instanceof Anthropic.BadRequestError) || semCreditosIA(e) || typeof entrada === "string") throw e;
+          if (!pedidoInvalidoIA(e) || typeof entrada === "string") throw e;
           if (real !== "pdf") {
             if (textoOrcamento) return gerarEstruturado(esquema, porTexto(textoOrcamento), "medium");
             throw e;
           }
-          console.warn("PDF de orçamento recusado pelo provedor; usando leitura local", { orcamento: o.id, status: e.status });
+          console.warn("PDF de orçamento recusado pelo provedor; usando leitura local", { orcamento: o.id, status: (e as { status?: number }).status });
           textoOrcamento ||= await textoLocalDoPdf(o.arquivo);
           if (textoOrcamento) {
             const lido = await gerarEstruturado(esquema, porTexto(textoOrcamento), "medium");
@@ -636,11 +635,11 @@ Use null para o que não constar. Não calcule nem deduza valor que não esteja 
       const lido = lerTabelaOrcamento(textoNativo) ?? await ler(conteudo).catch((e) => {
         if (formulario) throw new ErroHttp(422, avisoFormulario);
         // IA sem créditos ou não configurada: lê sem IA o que vier em forma de tabela (planilha, Word, PDF com texto).
-        const iaParada = semCreditosIA(e) || (e instanceof ErroHttp && e.status === 503);
+        const iaParada = iaParadaAgora(e);
         if (!iaParada) throw e;
         const local = lerOrcamentoSemIA(textoOrcamento);
         if (local) { semIA = true; return local; }
-        throw new ErroHttp(semCreditosIA(e) ? 402 : 503, `${semCreditosIA(e) ? AVISO_SEM_CREDITOS : "A IA não está disponível neste servidor."} Sem a IA, o sistema lê planilhas (.xlsx, .csv), Word com tabela e PDF com texto selecionável, mas não encontrou uma tabela de preços neste arquivo (foto ou PDF digitalizado precisam da IA). Informe os preços na coluna do fornecedor.`);
+        throw new ErroHttp(semCreditosIA(e) ? 402 : 503, `${semCreditosIA(e) ? AVISO_SEM_CREDITOS : traduzErroIA(e).message} Sem a IA, o sistema lê planilhas (.xlsx, .csv), Word com tabela e PDF com texto selecionável, mas não encontrou uma tabela de preços neste arquivo (foto ou PDF digitalizado precisam da IA). Informe os preços na coluna do fornecedor.`);
       });
       if (formulario && !lido.itens.some((item) => item.valor_unitario != null && item.valor_unitario > 0)) {
         throw new ErroHttp(422, avisoFormulario);
