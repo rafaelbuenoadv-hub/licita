@@ -39,8 +39,14 @@ function confereRecusa(m: Anthropic.Beta.BetaMessage) {
     throw new ErroHttp(422, "A IA não pôde atender a esse pedido. Reformule e tente de novo.");
   }
 }
+/** Recusa por falta de créditos na conta da Anthropic: nenhum ajuste no pedido resolve; não adianta tentar de novo. */
+export const semCreditosIA = (e: unknown) =>
+  e instanceof Anthropic.APIError && /credit balance|billing|purchase credits/i.test(e.message);
+export const AVISO_SEM_CREDITOS = "A IA está sem créditos: o saldo da conta da Anthropic usada pelo sistema acabou. O administrador precisa adicionar créditos em console.anthropic.com, em Settings → Billing. Enquanto isso, o sistema funciona sem as funções de IA.";
+
 export function traduzErroIA(e: unknown): ErroHttp {
   if (e instanceof ErroHttp) return e;
+  if (semCreditosIA(e)) { console.error("IA sem créditos na conta da Anthropic."); return new ErroHttp(402, AVISO_SEM_CREDITOS); }
   if (e instanceof Anthropic.RateLimitError) return new ErroHttp(429, "Limite de uso da IA atingido. Tente de novo em instantes.");
   if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return new ErroHttp(503, "A chave da IA é inválida ou sem permissão. Avise o administrador.");
   if (e instanceof Anthropic.BadRequestError) {
