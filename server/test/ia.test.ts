@@ -702,3 +702,59 @@ test("PDFs de orçamento anexados à solicitação podem ser lidos após a recus
     assert.equal(visual[1].source.media_type, "image/jpeg");
   } finally { documentoFalha = false; }
 });
+
+test("o Licita lê a proposta preenchida sem chamar o provedor e distingue o pedido sem preços", async () => {
+  const gerarPdf = async (texto: string[]) => {
+    const pdf = await PDFDocument.create();
+    const fonte = await pdf.embedFont(StandardFonts.Courier);
+    const pagina = pdf.addPage([750, 500]);
+    texto.forEach((linha, i) => {
+      if (linha) pagina.drawText(linha, { x: 25, y: 475 - i * 16, size: 9, font: fonte });
+    });
+    return Uint8Array.from(await pdf.save());
+  };
+  const preenchido = await gerarPdf([
+    "Proposta de cotação",
+    "",
+    "                                  Preço   Preço total",
+    "Código    Descrição / Esp.  Unid.  Quantidade   unitário",
+    "         LIMPEZA DE EQUIPAMENTO                     R$ 230,00    R$ 13.800,00",
+    "         Higienização com desmontagem",
+    "42361                       SERV       60",
+    "         e lavagem completa.",
+    "",
+    "                           VALOR",
+    "                           TOTAL:       R$ 13.800,00",
+    "",
+    "Empresa de Teste LTDA • CNPJ 12.345.678/0001-00",
+  ]);
+  const emBranco = await gerarPdf([
+    "Equiplano",
+    "Fornecedor:                         Data: _______",
+    "Código    Descrição do Produto   Unid.  Quantidade   Preço Unitário   Preço Total",
+    "42361     Limpeza de equipamento  SERV   60,00",
+  ]);
+
+  const criado = await api("POST", "/api/processos", { objeto: "Serviços para teste de orçamento", tipo: "servicos", via: "dispensa", ano: 2026 });
+  const { id } = (await criado.json()) as { id: number };
+  const fd = new FormData();
+  fd.append("arquivo", new Blob([preenchido], { type: "application/pdf" }), "proposta.pdf");
+  fd.append("arquivo", new Blob([emBranco], { type: "application/pdf" }), "pedido.pdf");
+  const upload = await api("POST", `/api/processos/${id}/orcamentos?origem=solicitacao`, fd);
+  assert.equal(upload.status, 201);
+  const { ids } = (await upload.json()) as { ids: number[] };
+  const pedidosAntes = pedidos.length;
+  const resposta = await api("POST", `/api/processos/${id}/orcamentos/${ids[0]}/ler`, {});
+  assert.equal(resposta.status, 200, await resposta.clone().text());
+  const dados = (await resposta.json()).dados;
+  assert.equal(pedidos.length, pedidosAntes);
+  assert.equal(dados.fornecedor, "Empresa de Teste LTDA");
+  assert.deepEqual(dados.itens, [{ descricao: "LIMPEZA DE EQUIPAMENTO Higienização com desmontagem e lavagem completa.",
+    unidade: "SERV", quantidade: 60, valor_unitario: 230, valor_total: 13800 }]);
+
+  respostaEstruturada = { fornecedor: null, cnpj: null, data: null, validade: null, itens: [],
+    valor_total: null, frete: "nao_informado", instalacao: "nao_informado", prazo_entrega: null, observacoes: null };
+  const pedido = await api("POST", `/api/processos/${id}/orcamentos/${ids[1]}/ler`, {});
+  assert.equal(pedido.status, 422, await pedido.clone().text());
+  assert.match((await pedido.json()).erro, /campos de fornecedor e preço em branco/);
+});
