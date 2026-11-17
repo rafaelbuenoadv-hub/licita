@@ -43,7 +43,15 @@ export function traduzErroIA(e: unknown): ErroHttp {
   if (e instanceof ErroHttp) return e;
   if (e instanceof Anthropic.RateLimitError) return new ErroHttp(429, "Limite de uso da IA atingido. Tente de novo em instantes.");
   if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return new ErroHttp(503, "A chave da IA é inválida ou sem permissão. Avise o administrador.");
-  if (e instanceof Anthropic.BadRequestError) return new ErroHttp(400, "O pedido à IA ficou inválido (talvez grande demais). Reduza o conteúdo e tente de novo.");
+  if (e instanceof Anthropic.BadRequestError) {
+    // O motivo exato fica no registro do servidor; para o usuário, a causa mais provável em linguagem simples.
+    console.error("Pedido recusado pela IA:", e.message);
+    const m = e.message.toLowerCase();
+    if (/image|media type|base64/.test(m)) return new ErroHttp(400, "A IA não conseguiu abrir a imagem enviada. Envie a proposta em PDF ou em foto JPG legível.");
+    if (/pdf|document/.test(m)) return new ErroHttp(400, "A IA não conseguiu abrir o PDF (pode estar protegido por senha ou danificado). Salve de novo como PDF e anexe outra vez.");
+    if (/too long|too large|maximum|exceed|prompt is too long|context/.test(m)) return new ErroHttp(400, "O conteúdo enviado à IA ficou grande demais. Divida o documento ou reduza o texto e tente de novo.");
+    return new ErroHttp(400, "A IA recusou o pedido por um problema no conteúdo enviado. Tente de novo; se persistir, avise o administrador.");
+  }
   if (e instanceof Anthropic.APIError) return new ErroHttp(502, "A IA está indisponível no momento. Tente de novo.");
   if (e instanceof Anthropic.APIConnectionError) return new ErroHttp(502, "Sem conexão com a IA. Tente de novo.");
   console.error(e);

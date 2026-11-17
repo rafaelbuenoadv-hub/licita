@@ -14,6 +14,8 @@ let pararPor = "end_turn";
 let textoPesquisa = "";
 let pausasDaPesquisa = 0;
 let pesquisaFalha = false;
+// Pedidos com PDF recusados pela API (PDF protegido ou danificado).
+let documentoFalha = false;
 
 const falso = http.createServer((req, res) => {
   let raw = "";
@@ -25,6 +27,12 @@ const falso = http.createServer((req, res) => {
       id: "msg_teste", type: "message", role: "assistant", model: body.model, content, stop_reason: stop, stop_sequence: null,
       usage: { input_tokens: 10, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
     });
+    const comDocumento = Array.isArray(body.messages?.[0]?.content) && body.messages[0].content.some((b: any) => b.type === "document");
+    if (documentoFalha && comDocumento) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "messages.0.content.0.pdf: The PDF specified was not valid." } }));
+      return;
+    }
     if (!body.stream) {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(msg([{ type: "text", text: JSON.stringify(respostaEstruturada) }], pararPor)));
@@ -603,4 +611,46 @@ test("agente de contratação em conversa livre: tira dúvidas e redige resposta
   assert.equal(r2.status, 200); await r2.text();
   assert.match(pedidos.at(-1)!.body.messages[0].content, /PROCESSO ABERTO: nenhum/);
   assert.equal((await api("POST", "/api/ia/agente", { ...corpo, mensagens: [...longa, { role: "assistant", content: "x" }] })).status, 400);
+});
+
+test("leitura de orçamento: foto com extensão trocada, foto grande e PDF recusado não travam a leitura", async () => {
+  const sharp = (await import("sharp")).default;
+  const novo = await api("POST", "/api/processos", { objeto: "Aquisição de cadeiras", tipo: "bens", via: "dispensa", ano: 2026 });
+  const { id } = (await novo.json()) as { id: number };
+  const png = await sharp({ create: { width: 40, height: 30, channels: 3, background: "#ffffff" } }).png().toBuffer();
+  const grande = await sharp({ create: { width: 3000, height: 2400, channels: 3, noise: { type: "gaussian", mean: 128, sigma: 60 } } }).jpeg({ quality: 95 }).toBuffer();
+  assert.ok(grande.length > 3_600_000 && grande.length < 20_000_000, `imagem de teste fora do tamanho: ${grande.length}`);
+  const fd = new FormData();
+  fd.append("arquivo", new Blob([png]), "foto do whatsapp.jpg");
+  fd.append("arquivo", new Blob([grande]), "foto grande.jpg");
+  fd.append("arquivo", new Blob([Buffer.from("%PDF-1.4 protegido")]), "proposta.pdf");
+  const env = await api("POST", `/api/processos/${id}/orcamentos`, fd);
+  assert.equal(env.status, 201, await env.clone().text());
+  const [foto, fotoGrande, pdf] = ((await env.json()) as { ids: number[] }).ids;
+  respostaEstruturada = { fornecedor: "Loja X", cnpj: null, data: null, validade: null, itens: [], valor_total: null, frete: "nao_informado", instalacao: "nao_informado", prazo_entrega: null, observacoes: null };
+
+  // PNG salvo com nome .jpg vai como PNG.
+  assert.equal((await api("POST", `/api/processos/${id}/orcamentos/${foto}/ler`, {})).status, 200);
+  assert.equal(pedidos.at(-1)!.body.messages[0].content[0].source.media_type, "image/png");
+  // Foto acima do limite vai reduzida, como JPEG, dentro do limite da API.
+  assert.equal((await api("POST", `/api/processos/${id}/orcamentos/${fotoGrande}/ler`, {})).status, 200);
+  const enviada = pedidos.at(-1)!.body.messages[0].content[0].source;
+  assert.equal(enviada.media_type, "image/jpeg");
+  assert.ok(Buffer.from(enviada.data, "base64").length < 3_600_000);
+  const meta = await sharp(Buffer.from(enviada.data, "base64")).metadata();
+  assert.ok((meta.width ?? 0) <= 2400 && (meta.height ?? 0) <= 2400);
+
+  // PDF recusado pela API: com texto extraído, lê pelo texto; sem texto, mensagem clara (não "talvez grande demais").
+  documentoFalha = true;
+  try {
+    const { q1 } = await import("../db.js");
+    await q1("update orcamentos set texto='Proposta Loja X: cadeira R$ 100,00' where id=$1", [pdf]);
+    const r = await api("POST", `/api/processos/${id}/orcamentos/${pdf}/ler`, {});
+    assert.equal(r.status, 200, await r.clone().text());
+    assert.match(pedidos.at(-1)!.body.messages[0].content, /TEXTO\nProposta Loja X/);
+    await q1("update orcamentos set texto='' where id=$1", [pdf]);
+    const r2 = await api("POST", `/api/processos/${id}/orcamentos/${pdf}/ler`, {});
+    assert.equal(r2.status, 422);
+    assert.match(((await r2.json()) as any).erro, /protegido por senha ou danificado/);
+  } finally { documentoFalha = false; }
 });
