@@ -131,7 +131,8 @@ export async function sugestaoNumeracao(p: Processo) {
 
 async function validarItemPca(id: number | null, orgao: number, ano: number) {
   if (id === null) return;
-  const item = await q1("select 1 from pca_itens where id=$1 and orgao_id=$2 and ano=$3", [id, orgao, ano]);
+  // PAC do exercício ou do seguinte: o PAC 2027 prevê contratações que começam ainda em 2026.
+  const item = await q1("select 1 from pca_itens where id=$1 and orgao_id=$2 and ano in ($3, $3 + 1)", [id, orgao, ano]);
   if (!item) throw new ErroHttp(400, "Selecione um item do PCA do órgão para o exercício do processo.");
 }
 
@@ -521,6 +522,27 @@ export function rotasProcessos() {
     const protocolado = e.id === "fiscal";
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: protocolado ? "processo.protocolado" : "etapa.concluida", detalhe: { etapa: e.id } });
     res.json({ concluida: true, protocolado, pendencias: lista, proxima: prox ? { id: prox.id, nome: prox.nome } : null });
+  });
+
+  // Etapa 1: vincula (ou desvincula) o item do PAC escolhido na busca e preenche os campos da verificação.
+  r.post("/processos/:id/pac", async (req, res) => {
+    const p = await processoDo(req);
+    exigeEtapaEditavel(req, p, await checksDo(p.id), "pac");
+    const { pca_item_id } = z.object({ pca_item_id: z.number().int().positive().max(2147483647).nullable() }).parse(req.body);
+    await validarItemPca(pca_item_id, p.orgao_id, p.ano);
+    const item = pca_item_id ? await q1<{ descricao: string; ordem_oficial: number | null; periodo_oficial: string | null; ano: number }>(
+      "select descricao, ordem_oficial, periodo_oficial, ano from pca_itens where id=$1", [pca_item_id]) : undefined;
+    const atuais = (await camposDo(p.id)).pac ?? {};
+    const valores: Valores = item
+      ? { ...atuais, consta: "sim", item_pac: `PAC ${item.ano}${item.ordem_oficial ? `, item ${item.ordem_oficial}` : ""} — ${item.descricao}`, mes_planejado: item.periodo_oficial ?? (typeof atuais.mes_planejado === "string" ? atuais.mes_planejado : "") }
+      : { ...atuais, item_pac: "", mes_planejado: "" };
+    await q("update processos set pca_item_id=$1, atualizado_em=now() where id=$2", [pca_item_id, p.id]);
+    await q(`insert into campos_etapa (processo_id, etapa, valores, usuario_id) values ($1,'pac',$2,$3)
+      on conflict (processo_id, etapa) do update set valores=excluded.valores, usuario_id=excluded.usuario_id, atualizado_em=now()`,
+      [p.id, JSON.stringify(limparValores(ETAPAS[0], valores)), req.usuario!.id]);
+    await sincronizarCampos({ ...p, pca_item_id }, req.usuario!.id, [ETAPAS[0]]);
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "pac.vinculado", detalhe: { pca_item_id } });
+    res.json({ ok: true });
   });
 
   // Campos de preenchimento da etapa.

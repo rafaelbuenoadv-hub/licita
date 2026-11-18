@@ -240,7 +240,10 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
         {!lib && <p className="note">Conclua a etapa "{ETAPAS[p.etapa_atual].nome}" para liberar esta.</p>}
         {lib && !atua && <p className="note">Seu perfil acompanha esta etapa, mas quem preenche e marca os itens é: {e.papeis.join(", ")}.</p>}
       </div>
-      {e.id === "pac" && <ItemPac p={p} />}
+      {e.id === "pac" && <ItemPac p={p} editavel={editavel} setAviso={setAviso} aoVincular={async () => {
+        const novo = await recarregar();
+        if (novo) { setVals({ ...(novo.sugestoes_campos?.pac ?? {}), ...(novo.campos?.pac ?? {}) }); setSujo(false); }
+      }} />}
       {e.campos.length > 0 && <CamposEtapa e={e} p={p} valores={vals} editavel={editavel} sujo={sujo} gravando={gravandoCampos}
         sugeridos={Object.keys(p.campos?.[e.id] ? {} : (p.sugestoes_campos?.[e.id] ?? {}))}
         mudar={(v) => { setVals(v); setSujo(true); }} salvar={() => salvarCampos()} />}

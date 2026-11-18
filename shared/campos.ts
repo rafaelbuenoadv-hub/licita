@@ -35,7 +35,7 @@ export const CAMPOS: Record<string, Campo[]> = {
     { id: "consta", rotulo: "O objeto consta do PAC vigente?", tipo: "opcao", opcoes: [["sim", "Sim, consta do Plano Anual de Contratações"], ["nao", "Não consta do PAC"]],
       ajuda: "Confira no Plano Anual de Contratações se o objeto está previsto e para qual mês." },
     { id: "item_pac", rotulo: "Item do PAC", tipo: "texto", se: { campo: "consta", em: ["sim"] },
-      ajuda: "Número e descrição do item no PAC. Vincule também o item nos Dados do processo." },
+      ajuda: "Preenchido ao escolher o item na busca do PAC, acima." },
     { id: "mes_planejado", rotulo: "Mês previsto no PAC para o início", tipo: "texto", se: { campo: "consta", em: ["sim"] } },
     { id: "no_prazo", rotulo: "A contratação começa no mês planejado?", tipo: "opcao", opcoes: SIM_NAO, se: { campo: "consta", em: ["sim"] } },
     { id: "motivo_prazo", rotulo: "Motivo da alteração do cronograma", tipo: "area", se: { campo: "no_prazo", em: ["nao"] },

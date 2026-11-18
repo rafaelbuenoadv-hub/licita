@@ -4,7 +4,7 @@ import { ehMunicipioIbaiti } from "./municipio-ibaiti.js";
 const tce = "https://www.tce.pr.gov.br/fiscalizado/lei-de-licitacoes-e-contratos.htm";
 
 const federais: Record<string, string> = {
-  pac: "Art. 12, VII, e art. 18, caput e § 1º, II: a contratação deve estar prevista no plano de contratações anual; fora dele, justificar a inclusão extraordinária e obter autorização prévia do Prefeito (Dec. Municipal 2.533/2024, art. 6º).",
+  pac: "Art. 12, VII, e art. 18, caput e § 1º, II: a contratação deve estar prevista no plano de contratações anual; fora dele, justificar a inclusão extraordinária (Dec. Municipal 2.533/2024, art. 6º).",
   dfd: "Art. 18, I: descrição da necessidade. Arts. 12, VII, e 18, caput: verificar compatibilidade com o PCA, quando elaborado. Art. 72, I: DFD na instrução da contratação direta.",
   etp: "Art. 18, §§ 1º e 2º: demonstrar a necessidade, comparar soluções e documentar quantidades, estimativas, parcelamento e conclusão. Observar os elementos mínimos e justificar a ausência dos demais.",
   fiscal: "Art. 117: fiscal especialmente designado para acompanhar e fiscalizar a execução, com substituto. Art. 7º: preferencialmente servidor efetivo, com atribuições ou formação compatíveis, sem vínculo com o contratado e com segregação de funções (§ 1º). Dec. Municipal 2.533/2024, art. 5º.",

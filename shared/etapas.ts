@@ -61,22 +61,21 @@ export const ETAPAS: Etapa[] = [
   {
     id: "pac", nome: "Verificar no PAC", doc: "Registro da verificação no Plano Anual de Contratações", docOpcional: true,
     fase: "interna", campos: CAMPOS.pac,
-    oque: "Confirme se o objeto já consta do Plano Anual de Contratações (PAC) vigente e no mês planejado para início. Se não consta, é necessária justificativa de inclusão extraordinária e autorização prévia do Prefeito antes de prosseguir: não se inicia processo fora do planejamento sem essa autorização formal.",
+    oque: "Confirme se o objeto já consta do Plano Anual de Contratações (PAC) vigente e no mês planejado para início. Busque o objeto no PAC e vincule o item ao processo. Se não consta, registre a justificativa da inclusão extraordinária.",
     base: [{ rotulo: "Art. 12, VII", url: U.a12 }, { rotulo: "Art. 18, caput e § 1º, II", url: U.a18 }, { rotulo: "Dec. 2.533/2024, art. 6º" }],
     papeis: ["requisitante", "contratacao"],
     itens: [
       campos("pac"),
-      it("pc1", "Objeto e mês de início conferidos no PAC vigente, ou autorização do Prefeito juntada aos autos", "Art. 12, VII; Dec. 2.533/2024, art. 6º"),
+      it("pc1", "Objeto e mês de início conferidos no PAC vigente, ou inclusão extraordinária justificada", "Art. 12, VII; Dec. 2.533/2024, art. 6º"),
     ],
     atencao: [
-      "Objeto que não consta do PAC sem autorização prévia do Prefeito é a primeira causa de devolução.",
+      "Objeto que não consta do PAC sem justificativa da inclusão extraordinária é a primeira causa de devolução.",
       "O mesmo item do PAC deve ser citado no DFD e no ETP.",
     ],
     modelo: `REGISTRO DE VERIFICAÇÃO NO PLANO ANUAL DE CONTRATAÇÕES
 Identificação do processo; Secretaria demandante; objeto
 1. Consta do PAC vigente (item e mês previsto) — ou justificativa da inclusão extraordinária
 2. Início no mês planejado, ou motivo da alteração do cronograma
-3. Autorização prévia do Prefeito (somente se fora do PAC)
 Local e data; assinatura do responsável pela Secretaria`,
   },
   {

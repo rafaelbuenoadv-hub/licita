@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { api } from "../api";
+import { consultarPca, type ItemConsultaPca } from "../../../shared/consulta-pca";
 import { ETAPAS, camposFaltando, camposVisiveis, feita, temValor, type Campo, type Checks, type Etapa, type Valores } from "../../../shared/etapas";
 
 /** Campos de preenchimento da etapa, conforme a capacitação da fase interna. */
@@ -64,24 +67,79 @@ function CampoEtapa({ c, valor, falta, sugerido, mudar }: { c: Campo; valor?: st
   );
 }
 
-/** Item do PAC vinculado ao processo, com prioridade, início previsto e modalidade (PAC 2027). */
-export function ItemPac({ p }: { p: any }) {
+/** Etapa 1: busca no PAC pelo nome do objeto; ao escolher, vincula o item e preenche os campos da verificação. */
+export function ItemPac({ p, editavel, aoVincular, setAviso }: { p: any; editavel: boolean; aoVincular: () => Promise<void>; setAviso: (a: any) => void }) {
   const i = p.pca_item;
-  const abrirDados = () => {
-    const d = document.getElementById("dados-processo") as HTMLDetailsElement | null;
-    if (d) { d.open = true; d.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  const [itens, setItens] = useState<ItemPlano[] | null>(null);
+  const [busca, setBusca] = useState("");
+  const [gravando, setGravando] = useState<number | "remover" | null>(null);
+  useEffect(() => {
+    Promise.all([p.ano, p.ano + 1].map((ano: number) => api.get<{ itens: ItemPlano[] }>(`/pca?ano=${ano}`).then((r) => r.itens.map((x) => ({ ...x, ano }))).catch(() => [] as ItemPlano[])))
+      .then((l) => setItens(l.flat()));
+  }, [p.ano]);
+  const vincular = async (id: number | null) => {
+    setGravando(id ?? "remover");
+    try {
+      await api.post(`/processos/${p.id}/pac`, { pca_item_id: id });
+      await aoVincular();
+      setBusca("");
+      setAviso({ t: id ? "Item do PAC vinculado e campos da etapa preenchidos. Confira o mês previsto e responda se a contratação começa nele." : "Vínculo com o PAC removido.", tipo: "ok" });
+    } catch (e: any) { setAviso({ t: e.message, tipo: "bad" }); }
+    finally { setGravando(null); }
   };
+  const termos = semAcento(busca).split(/\s+/).filter((t) => t.length >= 2);
+  const sugeridos = itens && !termos.length && !i
+    ? (({ vinculo, candidatos }) => (vinculo ? [vinculo] : candidatos))(consultarPca(p.objeto, p.tipo, itens)).map((x) => itens.find((y) => y.id === x.id)!).filter(Boolean)
+    : [];
+  const achados = itens && termos.length
+    ? itens.map((x) => {
+        const t = semAcento(`${x.descricao} ${x.requisitante ?? ""} ${x.modalidade_prevista ?? ""}`);
+        const num = termos.some((k) => /^\d+$/.test(k) && String(x.ordem_oficial) === k);
+        return { x, n: termos.filter((k) => [k, ...(SINONIMOS[k.replace(/s$/, "")] ?? [])].some((v) => t.includes(v))).length + (num ? 2 : 0) };
+      }).filter((r) => r.n > 0).sort((a, b) => b.n - a.n || b.x.ano - a.x.ano).slice(0, 15).map((r) => r.x)
+    : sugeridos;
   return (
     <div className="sec">
-      <span className="lbl">Item do PAC vinculado</span>
+      <span className="lbl">Item do PAC</span>
       {i ? <div className="pac-item">
-        <b>{i.ordem_oficial ? `Item ${i.ordem_oficial} — ` : ""}{i.descricao}</b>
-        <span className="small muted">{[`PAC ${i.ano}`, i.requisitante, i.prioridade && `Prioridade ${i.prioridade}`, i.periodo_oficial && `Início previsto: ${i.periodo_oficial}`, i.modalidade_prevista && `Modalidade prevista: ${i.modalidade_prevista}`].filter(Boolean).join(" · ")}</span>
-      </div> : <p className="small muted">Nenhum item do PAC vinculado. Se o objeto consta do plano, vincule o item nos Dados do processo; se não consta, registre abaixo a justificativa e a autorização do Prefeito.</p>}
-      <button className="btn sm" type="button" onClick={abrirDados}>{i ? "Alterar vínculo nos Dados do processo" : "Vincular item nos Dados do processo"}</button>
+        <b>{`PAC ${i.ano}`}{i.ordem_oficial ? ` · item ${i.ordem_oficial}` : ""} — {i.descricao}</b>
+        <span className="small muted">{[i.requisitante, i.prioridade && `Prioridade ${i.prioridade}`, i.periodo_oficial && `Início previsto: ${i.periodo_oficial}`, i.modalidade_prevista && `Modalidade prevista: ${i.modalidade_prevista}`].filter(Boolean).join(" · ")}</span>
+        {editavel && <div><button className="lnk" type="button" disabled={gravando !== null} onClick={() => vincular(null)}>Remover vínculo</button></div>}
+      </div> : <p className="small muted">Nenhum item vinculado. Digite parte do nome do objeto para buscar no PAC {p.ano} e {p.ano + 1}.</p>}
+      {editavel && <>
+        <label className="campo">Buscar no PAC
+          <input type="search" value={busca} onChange={(ev) => setBusca(ev.target.value)} placeholder="ex.: merenda, pneus, combustível, transporte escolar ou nº do item" />
+        </label>
+        {itens === null ? <p className="small muted">Carregando o PAC…</p>
+          : !itens.length ? <p className="small muted">Não há itens do PAC cadastrados para {p.ano} ou {p.ano + 1}.</p>
+          : achados.length === 0 ? (termos.length || !i ? <p className="small muted">{termos.length ? "Nada encontrado com essas palavras. Tente outra palavra do objeto." : "Digite para buscar."}</p> : null)
+          : <>
+            {!termos.length && <p className="small muted">Itens parecidos com o objeto do processo:</p>}
+            <ul className="pac-resultados">{achados.map((x) => (
+              <li key={x.id} className={x.id === p.pca_item_id ? "sel" : ""}>
+                <span><b>PAC {x.ano}{x.ordem_oficial ? ` · item ${x.ordem_oficial}` : ""}</b> — {x.descricao}
+                  <span className="small muted"> {[x.requisitante, x.prioridade, x.periodo_oficial && `início ${x.periodo_oficial}`, x.modalidade_prevista].filter(Boolean).join(" · ")}</span></span>
+                {x.id === p.pca_item_id ? <span className="pill ok">Vinculado</span>
+                  : <button className="btn sm" type="button" disabled={gravando !== null} onClick={() => vincular(x.id)}>{gravando === x.id ? "Vinculando…" : "Vincular"}</button>}
+              </li>))}</ul>
+          </>}
+      </>}
     </div>
   );
 }
+
+interface ItemPlano extends ItemConsultaPca { ano: number; requisitante?: string; prioridade?: string | null; periodo_oficial?: string | null; modalidade_prevista?: string | null }
+/** Palavras do dia a dia que o PAC escreve de outro jeito. */
+const SINONIMOS: Record<string, string[]> = {
+  merenda: ["alimentacao escolar", "generos alimenticios"], comida: ["alimenticio", "refeic", "marmit"], alimento: ["alimenticio", "alimentacao"],
+  remedio: ["medicamento", "farmac"], carro: ["veicul", "frota", "automotiv"], veiculo: ["frota", "automotiv"], onibu: ["transporte", "veicul"],
+  gasolina: ["combustive"], diesel: ["combustive"], computador: ["informatica"], impressora: ["impressao", "informatica"], papel: ["expediente", "papelaria"],
+  limpeza: ["higiene", "dedetiza"], obra: ["reforma", "engenharia", "pavimenta", "construc"], asfalto: ["asfaltic", "pavimenta", "recape"],
+  roupa: ["uniforme", "rouparia", "enxoval"], tenis: ["calcad", "uniforme"], internet: ["comunicacao de dados"], telefone: ["telefonia"],
+  festa: ["evento", "show", "palco"], show: ["atrac", "evento"], ambulancia: ["veicul"], exame: ["laborator", "diagnostico"],
+  escola: ["escolar", "cmei"], saude: ["medic", "hospital", "ubs"], gas: ["glp", "p13"], pneu: ["camara"], oleo: ["lubrificante", "filtro"],
+};
+const semAcento = (t: string) => t.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 
 const numero = (x: unknown) => {
   if (typeof x !== "string" || !/\d/.test(x)) return null;
@@ -95,7 +153,7 @@ export function ProtocoloChecklist({ p, checks, irPara }: { p: any; checks: Chec
   const dot = p.campos?.dot ?? {};
   const fiscalCompleto = Boolean(checks["fiscal.campos"]);
   const linhas: [string, boolean, string][] = [
-    ["Objeto consta do PAC (ou há autorização do Prefeito para contratação fora do PAC)", ok("pac"), "pac"],
+    ["Objeto consta do PAC (ou inclusão extraordinária justificada)", ok("pac"), "pac"],
     ["DFD assinado pelo responsável da Secretaria", ok("dfd"), "dfd"],
     ["ETP com os elementos mínimos obrigatórios e memória de cálculo de quantidades", ok("etp"), "etp"],
     ["Pesquisa de preços com parâmetros do art. 23 (ao menos 2, ou justificativa de fonte única) e memória de cálculo", ok("precos"), "precos"],

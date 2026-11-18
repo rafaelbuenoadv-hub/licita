@@ -1441,3 +1441,31 @@ test("leitura sem IA: PDF em colunas, planilha e Word; texto solto não vira ite
   assert.equal(rf.status, 503);
   assert.match(rf.dados.erro, /foto ou PDF digitalizado precisam da IA/);
 });
+
+test("etapa 1: escolher o item na busca do PAC vincula o processo e preenche os campos", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const outro = await new Cliente().entrar("admin@b.gov.br");
+  const pac = (await admin.get("/api/pca?ano=2027")).dados.itens;
+  const merenda = pac.find((i: { ordem_oficial: number }) => i.ordem_oficial === 38);
+  const { dados: { id } } = await admin.post("/api/processos", { objeto: "Gêneros alimentícios para a merenda escolar", tipo: "bens", via: "licitacao", ano: 2026, pca_item_id: null });
+  const rota = `/api/processos/${id}/pac`;
+  assert.equal((await outro.post(rota, { pca_item_id: merenda.id })).status, 404);
+  // Item do PAC do exercício seguinte é aceito (o PAC 2027 começa em 2026).
+  assert.equal((await admin.post(rota, { pca_item_id: merenda.id })).status, 200);
+  let det = (await admin.get(`/api/processos/${id}`)).dados;
+  assert.equal(det.pca_item_id, merenda.id);
+  assert.equal(det.pca_item.ano, 2027);
+  assert.deepEqual(det.campos.pac, { consta: "sim", item_pac: "PAC 2027, item 38 — Alimentação escolar / gêneros alimentícios", mes_planejado: "Outubro/2026" });
+  // Respondida a última pergunta, o sistema marca a etapa como preenchida.
+  assert.equal((await admin.put(`/api/processos/${id}/campos/pac`, { valores: { ...det.campos.pac, no_prazo: "sim" } })).status, 200);
+  det = (await admin.get(`/api/processos/${id}`)).dados;
+  assert.ok(det.checagens.some((c: { item: string }) => c.item === "pac.campos"));
+  assert.equal((await admin.post(rota, { pca_item_id: null })).status, 200);
+  det = (await admin.get(`/api/processos/${id}`)).dados;
+  assert.equal(det.pca_item_id, null);
+  assert.equal(det.campos.pac.item_pac, "");
+  assert.ok(!det.checagens.some((c: { item: string }) => c.item === "pac.campos"));
+  // Item de dois exercícios adiante não vale.
+  const outroAno = await admin.post("/api/processos", { objeto: "Teste de exercício", tipo: "bens", via: "licitacao", ano: 2025, pca_item_id: null });
+  assert.equal((await admin.post(`/api/processos/${outroAno.dados.id}/pac`, { pca_item_id: merenda.id })).status, 400);
+});
