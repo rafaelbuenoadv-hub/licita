@@ -81,7 +81,7 @@ table.t tr.link{cursor:pointer} table.t tr.link:hover td{background:var(--sunk)}
 /* trilha do processo */
 .mesa{display:grid;grid-template-columns:200px minmax(0,1fr);gap:10px 16px;align-items:start}
 .mesa>.trilha{grid-column:1;grid-row:1/span 2;min-width:0}
-.mesa-corpo{grid-column:2;grid-row:2;min-width:0}
+.mesa-corpo{grid-column:2;grid-row:1;min-width:0}
 .mesa-corpo a{overflow-wrap:anywhere}
 .trilha{display:flex;flex-direction:column;padding:8px}
 .et{display:grid;grid-template-columns:26px minmax(0,1fr);gap:8px;align-items:start;padding:8px;border-radius:6px;border:0;background:none;text-align:left;cursor:pointer;width:100%}

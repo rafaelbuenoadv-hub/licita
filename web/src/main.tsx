@@ -15,7 +15,6 @@ import { ContratoPg } from "./paginas/Contrato";
 import { Config } from "./paginas/Config";
 import { Revisoes } from "./paginas/Revisoes";
 import { Mensagens } from "./paginas/Mensagens";
-import { Agente } from "./comp/Agente";
 
 export interface Eu { id: number; nome: string; email: string; cargo: string; papeis: Papel[]; orgao_id: number; orgao_nome: string }
 const Ctx = createContext<{ eu: Eu; ia: { disponivel: boolean; modelo: string } } | null>(null);
@@ -82,7 +81,6 @@ function App() {
             </Routes>
           </main>
         </div>
-        <Agente disponivel={ia.disponivel} />
       </BrowserRouter>
     </Ctx.Provider>
   );

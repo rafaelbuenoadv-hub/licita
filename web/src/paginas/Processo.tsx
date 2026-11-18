@@ -82,7 +82,6 @@ export function ProcessoPg() {
               </button></Fragment>);
           })}
         </nav>
-        <Assistente key={`${p.id}-etapas`} p={p} etapa={aberta.id} disponivel={ia.disponivel} />
         <div className="mesa-corpo">
           <Etapa key={e.id} p={p} e={e} ix={ix} numero={aberta.numero} checks={checks} recarregar={carregar} setAviso={setAviso} irPara={irPara} />
         </div>
@@ -564,62 +563,6 @@ function Minuta({ p, e, editavel, setAviso, camposSujos, salvarCampos }: { p: an
   );
 }
 
-/* ---------- assistente ---------- */
-function Assistente({ p, etapa, disponivel }: { p: any; etapa: string; disponivel: boolean }) {
-  const [msgs, setMsgs] = useState<{ role: "user" | "assistant"; content: string; err?: boolean }[]>([]);
-  const [rasc, setRasc] = useState("");
-  const [busy, setBusy] = useState(false);
-  const ctl = useRef<AbortController | null>(null);
-  const caixa = useRef<HTMLDivElement>(null);
-  useEffect(() => { caixa.current?.scrollTo(0, caixa.current.scrollHeight); }, [msgs]);
-  useEffect(() => () => ctl.current?.abort(), []);
-  const enviar = async (texto: string) => {
-    if (!texto.trim() || busy) return;
-    const hist = [...msgs.filter((m) => !m.err), { role: "user" as const, content: texto.trim() }].slice(-20);
-    setMsgs([...msgs, { role: "user", content: texto.trim() }, { role: "assistant", content: "" }]);
-    setRasc(""); setBusy(true);
-    ctl.current = new AbortController();
-    const atualiza = (t: string, err = false) => setMsgs((ms) => [...ms.slice(0, -1), { role: "assistant", content: t, err }]);
-    try {
-      const r = await fluxo(`/processos/${p.id}/ia/chat`, { etapa, mensagens: hist }, (t) => atualiza(t), ctl.current.signal);
-      atualiza(r.texto + (r.truncado ? "\n\n(Resposta cortada pelo limite de tamanho. Peça a continuação.)" : ""));
-    } catch (er: any) {
-      if (er.name === "AbortError") setMsgs((ms) => (ms.at(-1)?.content ? ms : ms.slice(0, -1)));
-      else atualiza((er.texto ? er.texto + "\n\n" : "") + er.message, true);
-    } finally { setBusy(false); }
-  };
-  const sub = (ev: FormEvent) => { ev.preventDefault(); enviar(rasc); };
-  return (
-    <details className="panel chat" onToggle={(ev) => {
-      if (ev.currentTarget.open) caixa.current?.scrollTo(0, caixa.current.scrollHeight);
-    }}>
-      <summary>Assistente</summary>
-      <div className="chat-corpo">
-        <p className="small muted">Ajuda com esta etapa e os documentos do processo.</p>
-        {!disponivel && <p className="note">A IA não está configurada neste servidor.</p>}
-        <div className="msgs" ref={caixa} aria-live="polite">
-          {msgs.map((m, i) => <div key={i} className={`msg ${m.role}${m.err ? " err" : ""}`}>{m.content || "Pensando…"}</div>)}
-        </div>
-        <div className="chips">{(etapa === "solicitacao" ? [
-          ["Conferir a solicitação", "Confira os pedidos das secretarias, os itens e as cotações da Solicitação e indique o que falta."],
-          ["Conferir os orçamentos", "Verifique quais itens estão sem cotação e quais preços precisam de conferência."],
-        ] : [
-          ["O que falta nesta etapa?", "O que falta nesta etapa?"],
-          ["Conferir a minuta", "Confira a minuta desta etapa contra o checklist e aponte incoerências com as outras peças."],
-          ["Que documentos preciso juntar agora?", "Que documentos preciso juntar agora?"],
-        ]).map(([rotulo, pergunta]) =>
-          <button key={rotulo} className="chip" disabled={!disponivel || busy} onClick={() => enviar(pergunta)}>{rotulo}</button>)}</div>
-        <form className="chatform" onSubmit={sub}>
-          <textarea id="chat-in" value={rasc} onChange={(ev) => setRasc(ev.target.value)} placeholder="Pergunte ou cole um trecho para conferir" aria-label="Mensagem para o assistente"
-            onKeyDown={(ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); enviar(rasc); } }} disabled={!disponivel} />
-          {busy ? <button type="button" className="btn" onClick={() => ctl.current?.abort()}>Parar</button> : <button className="btn pri" disabled={!disponivel}>Enviar</button>}
-        </form>
-      </div>
-    </details>
-  );
-}
-
-/* ---------- anexos e histórico ---------- */
 function Anexos({ p, recarregar, podeIncluir }: { p: any; recarregar: () => Promise<any>; podeIncluir: boolean }) {
   const [msg, setMsg] = useState<{ t: string; tipo?: string } | null>(null);
   const [busy, setBusy] = useState(false);
