@@ -14,7 +14,7 @@ import { migrar } from "../migrate.js";
 import { hashSenha } from "../auth.js";
 import { criarApp } from "../app.js";
 import { extrairTexto } from "../extrair.js";
-import { ETAPAS, itensDe } from "../../shared/etapas.js";
+import { ETAPAS, itensDe, type Etapa } from "../../shared/etapas.js";
 
 let base = "";
 let server: ReturnType<ReturnType<typeof criarApp>["listen"]>;
@@ -45,6 +45,19 @@ class Cliente {
   }
 }
 
+/** Preenche todos os campos da etapa com valores válidos (primeira opção, todas as marcas, texto de teste). */
+async function preencherCampos(c: Cliente, id: number, e: Etapa) {
+  if (!e.campos.length) return;
+  const valores = Object.fromEntries(e.campos.map((x) => [x.id,
+    x.tipo === "marcas" ? x.opcoes!.map(([k]) => k) : x.tipo === "opcao" ? x.opcoes![0][0] : x.tipo === "valor" ? "1.000,00" : "Texto de teste"]));
+  const r = await c.put(`/api/processos/${id}/campos/${e.id}`, { valores });
+  assert.equal(r.status, 200, JSON.stringify(r.dados));
+}
+/** Conclui a etapa 1 (verificação no PAC) para liberar o DFD. */
+async function concluirPac(c: Cliente, id: number) {
+  assert.equal((await c.put(`/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda de teste.", autorizacao_prefeito: "Despacho de teste" } })).status, 200);
+  assert.equal((await c.post(`/api/processos/${id}/checagens`, { item: "pc1", marcado: true })).status, 200);
+}
 async function usuario(orgao: number, email: string, papeis: string[]) {
   await q1("insert into usuarios (orgao_id, nome, email, senha_hash, papeis) values ($1,$2,$3,$4,$5)", [orgao, email.split("@")[0], email, await hashSenha(SENHA), papeis]);
 }
@@ -139,16 +152,25 @@ test("cria processo e respeita ordem das etapas e papéis", async () => {
   assert.equal(novo.dados.procedimento, "");
   assert.equal(novo.dados.numeracao.liberada, false);
 
-  // Item do ETP antes de concluir a solicitação: bloqueado.
-  assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: "e1", marcado: true })).status, 409);
+  // Item do ETP antes de concluir a verificação no PAC: bloqueado.
+  assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: "e14", marcado: true })).status, 409);
   // Item que não se aplica (p1 é só para bens/serviços).
   assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: "p1", marcado: true })).status, 400);
-  // Conclui a solicitação.
-  for (const i of itensDe(ETAPAS[0], { tipo: "obra", via: "dispensa" })) {
+  // O item dos campos é do sistema: não se marca à mão.
+  assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: "pac.campos", marcado: true })).status, 400);
+  // Conclui a verificação no PAC: campos (fora do PAC, com autorização) e conferência.
+  assert.equal((await req.put(`/api/processos/${procId}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda surgida após a aprovação do PAC.", autorizacao_prefeito: "Despacho nº 12/2026" } })).status, 200);
+  for (const i of itensDe(ETAPAS[0], { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
+    assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
+  }
+  assert.equal((await req.get(`/api/processos/${procId}`)).dados.etapa_atual, 1);
+  // Conclui o DFD: campos e conferência.
+  await preencherCampos(req, procId, ETAPAS[1]);
+  for (const i of itensDe(ETAPAS[1], { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
     assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
   }
   const det = await req.get(`/api/processos/${procId}`);
-  assert.equal(det.dados.etapa_atual, 1);
+  assert.equal(det.dados.etapa_atual, 2);
   assert.equal(det.dados.checagens[0].usuario, "req");
   // Jurídico não atua na solicitação.
   const jur = await new Cliente().entrar("jur@a.gov.br");
@@ -238,6 +260,12 @@ test("PCA integral de Ibaiti é acessível e o item 39 é vinculado na abertura"
   await migrar();
   const plano = (await admin.get("/api/pca?ano=2026")).dados;
   assert.equal(plano.itens.length, 120);
+  // PAC 2027 da capacitação: 69 itens com prioridade, início previsto e modalidade.
+  const pac2027 = (await admin.get("/api/pca?ano=2027")).dados.itens;
+  assert.equal(pac2027.length, 69);
+  assert.deepEqual(((x) => [x.descricao, x.requisitante, x.prioridade, x.periodo_oficial, x.modalidade_prevista])(pac2027.find((i: { ordem_oficial: number }) => i.ordem_oficial === 38)),
+    ["Alimentação escolar / gêneros alimentícios", "Secretaria Municipal de Educação", "P1 Crítica", "Outubro/2026", "Pregão"]);
+  assert.equal((await outro.get("/api/pca?ano=2027")).dados.itens.length, 0);
   assert.equal(plano.total_planejado, null);
   const pdf = await admin.get(plano.documento.url);
   assert.equal(pdf.status, 200);
@@ -271,6 +299,7 @@ test("preenche portaria de nomeação pelo cadastro, sem usar ato de fiscal ou a
     ano: 2028, requisitante: "SEMUSA", areas_adicionais: ["Secretaria de Educação (SEDUC)", "Obras"],
   });
   const rota = `/api/processos/${id}/minutas/dfd`;
+  await concluirPac(admin, id);
   const texto = [
     "Portaria nº [[portaria de nomeação — Saúde]]",
     "Educação — Portaria nº [[número]]",
@@ -346,6 +375,7 @@ test("Ibaiti pode baixar seus 11 timbrados e usá-los nas exportações Word e P
   assert.equal((await outro.get("/api/orgao/timbrados/semad")).status, 404);
   const { dados: { id } } = await admin.post("/api/processos", { objeto: "Processo para teste de timbrado", tipo: "bens", via: "licitacao", ano: 2028 });
   const rota = `/api/processos/${id}/minutas/dfd`;
+  await concluirPac(admin, id);
   assert.equal((await admin.post(rota, { texto: "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA" })).status, 200);
   const minuta = await admin.get(`${rota}/docx?timbrado=semad&versao=1`);
   assert.equal(minuta.status, 200);
@@ -467,8 +497,11 @@ test("protocolo sequencial por órgão; nº do processo e do procedimento só na
 
   // Conclui todas as etapas menos a última.
   const pb = { tipo: "bens", via: "dispensa" } as const;
-  for (const e of ETAPAS.slice(0, -1)) for (const i of itensDe(e, pb)) {
-    assert.equal((await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true })).status, 200, i.id);
+  for (const e of ETAPAS.slice(0, -1)) {
+    await preencherCampos(adm, id, e);
+    for (const i of itensDe(e, pb).filter((x) => !x.auto)) {
+      assert.equal((await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true })).status, 200, i.id);
+    }
   }
   const det = await lic.get(`/api/processos/${id}`);
   assert.equal(det.dados.etapa_atual, ETAPAS.length - 1);
@@ -612,6 +645,7 @@ test("minutas: nome do secretário e portaria entram sozinhos em qualquer peça,
   const base = { objeto: "Contratação de teste com titular único", tipo: "bens", via: "licitacao", ano: 2028 };
   const { dados: { id } } = await admin.post("/api/processos", { ...base, requisitante: "SEDUC" });
   const rota = `/api/processos/${id}/minutas/dfd`;
+  await concluirPac(admin, id);
   const texto = [
     "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA",
     "Titular: [[PREENCHER: nome do secretário]] — Portaria nº [[portaria de nomeação]]",
@@ -635,64 +669,120 @@ test("minutas: nome do secretário e portaria entram sozinhos em qualquer peça,
   // Com duas áreas, o pedido genérico fica pendente; o que cita a secretaria é preenchido.
   const dois = (await admin.post("/api/processos", { ...base, requisitante: "SEDUC", areas_adicionais: ["Finanças"] })).dados.id;
   const rota2 = `/api/processos/${dois}/minutas/dfd`;
+  await concluirPac(admin, dois);
   assert.equal((await admin.post(rota2, { texto: "A: [[nome do secretário]]\nB: [[nome do secretário — Finanças]]\nC: [[nome da secretária de Educação]]" })).status, 200);
   const v = (await admin.get(rota2)).dados;
   assert.equal(v.vigente.texto, "A: [[nome do secretário]]\nB: Luiz Carlos Bernardi Gelinski\nC: Denise da Silva Lima");
   assert.deepEqual(v.sugestoes_cadastro, []);
 });
 
-test("concluir e avançar: confere a solicitação, aponta o que falta e abre o ETP com os dados aproveitados", async () => {
+test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo e montam o documento sem IA", async () => {
   const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
   const outro = await new Cliente().entrar("admin@b.gov.br");
   const { dados: { id, protocolo } } = await admin.post("/api/processos", { objeto: "Aquisição de 30 cadeiras escolares", tipo: "bens", via: "licitacao", ano: 2028, requisitante: "Almoxarifado", pca_item_id: null });
+  const pac = `/api/processos/${id}/etapas/pac/concluir`;
   const rota = `/api/processos/${id}/etapas/dfd/concluir`;
-  assert.equal((await outro.post(rota)).status, 404);
-  assert.equal((await admin.post(`/api/processos/${id}/etapas/etp/concluir`)).status, 409);
-  let r = await admin.post(rota);
+  assert.equal((await outro.post(pac)).status, 404);
+  assert.equal((await admin.post(rota)).status, 409);
+  let r = await admin.post(pac);
   assert.equal(r.status, 200, JSON.stringify(r.dados));
   assert.equal(r.dados.concluida, false);
   const cods = () => r.dados.pendencias.map((x: any) => x.codigo);
-  assert.deepEqual([...new Set(cods())], ["valor", "secretario", "pca", "minuta", "item"]);
-  assert.equal(r.dados.pendencias.find((x: any) => x.codigo === "pca").bloqueia, false);
-  assert.deepEqual(r.dados.pendencias.find((x: any) => x.codigo === "valor"), { codigo: "valor", texto: "Informe o valor estimado preliminar nos dados do processo.", onde: "dados", alvo: "valor", bloqueia: true });
-  assert.equal((await admin.get(`/api/processos/${id}/minutas/etp`)).dados.vigente, null);
+  assert.deepEqual([...new Set(cods())], ["campo", "item"]);
+  assert.deepEqual(r.dados.pendencias[0], { codigo: "campo", texto: "Preencha o campo \"O objeto consta do PAC vigente?\".", onde: "campos", alvo: "consta", bloqueia: true });
 
-  // Corrige os dados; a secretaria sem portaria passa a ser a pendência.
+  // Diz que consta do PAC sem vincular o item: falta o item e os dados do cronograma.
+  assert.equal((await admin.put(`/api/processos/${id}/campos/pac`, { valores: { consta: "sim", campo_inexistente: "x" } })).status, 200);
+  r = await admin.post(pac);
+  assert.deepEqual([...new Set(cods())], ["campo", "pca", "item"]);
+  assert.deepEqual(r.dados.pendencias.filter((x: any) => x.codigo === "campo").map((x: any) => x.alvo), ["item_pac", "mes_planejado", "no_prazo"]);
+  assert.equal(r.dados.pendencias.find((x: any) => x.codigo === "pca").bloqueia, true);
+
+  // Fora do PAC: justificativa e autorização do Prefeito; o sistema marca o item dos campos.
+  assert.equal((await admin.put(`/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Cadeiras quebradas após o início do ano letivo.", autorizacao_prefeito: "Despacho nº 3/2028" } })).status, 200);
+  let det = (await admin.get(`/api/processos/${id}`)).dados;
+  assert.deepEqual(det.campos.pac, { consta: "nao", justificativa_inclusao: "Cadeiras quebradas após o início do ano letivo.", autorizacao_prefeito: "Despacho nº 3/2028" });
+  assert.ok(det.checagens.some((c: any) => c.item === "pac.campos"));
+  await admin.post(`/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
+  r = await admin.post(pac);
+  assert.equal(r.dados.concluida, true);
+  assert.deepEqual(r.dados.proxima, { id: "dfd", nome: "DFD" });
+  det = (await admin.get(`/api/processos/${id}`)).dados;
+  assert.equal(det.trilha.atual.id, "dfd");
+  assert.equal(det.trilha.etapas[0].estado, "concluida");
+
+  // DFD: dados do processo, cadastro de secretários, campos, documento e conferência.
+  r = await admin.post(rota);
+  assert.deepEqual([...new Set(cods())], ["campo", "valor", "secretario", "minuta", "item"]);
+  assert.deepEqual(r.dados.pendencias.find((x: any) => x.codigo === "valor"), { codigo: "valor", texto: "Informe o valor estimado preliminar nos dados do processo.", onde: "dados", alvo: "valor", bloqueia: true });
   const dados = { objeto: "Aquisição de 30 cadeiras escolares", tipo: "bens", via: "licitacao", ano: 2028, requisitante: "Obras", valor_estimado: 9000, pca_item_id: null };
   assert.equal((await admin.put(`/api/processos/${id}`, dados)).status, 200);
   r = await admin.post(rota);
   assert.match(r.dados.pendencias.find((x: any) => x.codigo === "portaria").texto, /Antônio Vincenzi \(Obras, Viação e Serviços Urbanos\)/);
   assert.equal((await admin.put(`/api/processos/${id}`, { ...dados, requisitante: "SEDUC" })).status, 200);
 
-  // Minuta com campo pendente trava; completa, só resta a conferência.
-  const dfd = (extra: string) => ["# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA", "## 2. Objeto", "Cadeiras escolares.", "## 3. Justificativa da necessidade", "As cadeiras atuais estão quebradas, conforme laudo anexo.", "## 4. Quantidade e valor estimado", "30 unidades, a R$ 300,00 cada.", extra, "", "@ Denise da Silva Lima"].join("\n");
-  assert.equal((await admin.post(`/api/processos/${id}/minutas/dfd`, { texto: dfd("Prazo: [[prazo de entrega]]") })).status, 200);
-  r = await admin.post(rota);
-  assert.match(r.dados.pendencias.find((x: any) => x.codigo === "campos").texto, /1 campo pendente/);
-  assert.equal((await admin.post(`/api/processos/${id}/minutas/dfd`, { texto: dfd("## 5. Prazo\n30 dias.") })).status, 200);
-  r = await admin.post(rota);
-  assert.deepEqual([...new Set(cods())], ["pca", "item"]);
-  for (const i of itensDe(ETAPAS[0], { tipo: "bens", via: "licitacao" })) await admin.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
+  // O responsável vem do cadastro de secretários; o objeto, do processo.
+  det = (await admin.get(`/api/processos/${id}`)).dados;
+  assert.match(det.sugestoes_campos.dfd.responsavel, /^Denise da Silva Lima — Secretário\(a\) Municipal de Educação \(Portaria nº 008\/2025\)$/);
+  assert.equal(det.sugestoes_campos.dfd.objeto, "Aquisição de 30 cadeiras escolares");
+  assert.equal((await admin.post(`/api/processos/${id}/minutas/dfd/dos-campos`)).status, 400);
+  const dfd = {
+    responsavel: det.sugestoes_campos.dfd.responsavel, contato: "(43) 3546-0000", objeto: "Cadeiras escolares, sem marca.",
+    justificativa: "As cadeiras atuais estão quebradas, conforme laudo anexo.", quantidade: "30 unidades: uma por aluno da turma ampliada.",
+    data_pretendida: "Até o início do segundo semestre.",
+  };
+  assert.equal((await admin.put(`/api/processos/${id}/campos/dfd`, { valores: dfd })).status, 200);
+  const montado = await admin.post(`/api/processos/${id}/minutas/dfd/dos-campos`);
+  assert.equal(montado.status, 200, JSON.stringify(montado.dados));
+  const doc = (await admin.get(`/api/processos/${id}/minutas/dfd`)).dados.vigente;
+  assert.equal(doc.origem, "campos");
+  assert.ok(doc.texto.startsWith(`# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA\n\nProtocolo ${protocolo}`));
+  assert.match(doc.texto, /## 4\. Justificativa da necessidade\n\nAs cadeiras atuais estão quebradas, conforme laudo anexo\./);
+  assert.match(doc.texto, /@ Denise da Silva Lima\n@ Secretário\(a\) Municipal de Educação \(Portaria nº 008\/2025\)$/);
+  // O ETP já recebe a justificativa e as quantidades do DFD.
+  det = (await admin.get(`/api/processos/${id}`)).dados;
+  assert.equal(det.sugestoes_campos.etp.i, dfd.justificativa);
+  assert.equal(det.sugestoes_campos.etp.iv, dfd.quantidade);
+  assert.match(det.sugestoes_campos.etp.ii, /fora do PAC.*Despacho nº 3\/2028/);
 
-  // Tudo certo: conclui, mantém o aviso do PCA e abre o ETP já preenchido.
+  r = await admin.post(rota);
+  assert.deepEqual([...new Set(cods())], ["item"]);
+  for (const i of itensDe(ETAPAS[1], { tipo: "bens", via: "licitacao" }).filter((x) => !x.auto)) await admin.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
   r = await admin.post(rota);
   assert.equal(r.dados.concluida, true);
-  assert.deepEqual(r.dados.proxima, { id: "etp", nome: "Estudo Técnico Preliminar", rascunho: true });
-  assert.deepEqual(cods(), ["pca"]);
-  const etp = (await admin.get(`/api/processos/${id}/minutas/etp`)).dados.vigente;
-  assert.equal(etp.origem, "aproveitado");
-  assert.ok(etp.texto.includes(`Protocolo ${protocolo}`));
-  assert.match(etp.texto, /## 1\. Informações básicas\nObjeto: Aquisição de 30 cadeiras escolares/);
-  assert.match(etp.texto, /## 2\. Descrição da necessidade\nAs cadeiras atuais estão quebradas, conforme laudo anexo\./);
-  assert.match(etp.texto, /## 3\. Área requisitante\nSEDUC\nEducação — Denise da Silva Lima\. Portaria de nomeação nº 008\/2025\./);
-  assert.match(etp.texto, /## 6\. Estimativa das quantidades\n30 unidades, a R\$ 300,00 cada\./);
-  assert.match(etp.texto, /## 7\. Estimativa do valor\nValor estimado preliminar informado na solicitação: R\$\s9\.000,00/);
-  assert.match(etp.texto, /\[\[PREENCHER: requisitos da contratação/);
-  // Repetir não sobrescreve o que já existe no ETP.
-  assert.equal((await admin.post(`/api/processos/${id}/minutas/etp`, { texto: "# ETP revisado pelo servidor" })).status, 200);
-  r = await admin.post(rota);
-  assert.equal(r.dados.proxima.rascunho, false);
-  assert.equal((await admin.get(`/api/processos/${id}/minutas/etp`)).dados.vigente.texto, "# ETP revisado pelo servidor");
+  assert.deepEqual(r.dados.proxima, { id: "etp", nome: "Estudo Técnico Preliminar" });
+
+  // Apagar um campo obrigatório desmarca o item do sistema e a etapa volta a ficar pendente.
+  assert.equal((await admin.put(`/api/processos/${id}/campos/dfd`, { valores: { ...dfd, contato: " " } })).status, 200);
+  det = (await admin.get(`/api/processos/${id}`)).dados;
+  assert.equal(det.trilha.atual.id, "dfd");
+});
+
+test("etapa 7: protocolo exige a dotação indicada e fiscal substituto diferente", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const adm = await new Cliente().entrar("admin@a.gov.br");
+  const pb = { tipo: "servicos", via: "dispensa" } as const;
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Serviço de dedetização dos prédios públicos", ...pb, ano: 2031, requisitante: "Administração", valor_estimado: 10000 });
+  const fiscal = ETAPAS.findIndex((e) => e.id === "fiscal");
+  for (const e of ETAPAS.slice(0, fiscal)) {
+    await preencherCampos(adm, id, e);
+    for (const i of itensDe(e, pb).filter((x) => !x.auto)) await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
+  }
+  assert.equal((await lic.get(`/api/processos/${id}`)).dados.trilha.atual.id, "fiscal");
+  await preencherCampos(adm, id, ETAPAS[fiscal]);
+  const det = (await lic.get(`/api/processos/${id}`)).dados;
+  // O preenchimento genérico deixou a dotação (opcional na etapa 6) com texto: apaga para conferir o bloqueio.
+  assert.equal((await adm.put(`/api/processos/${id}/campos/dot`, { valores: { ...det.campos.dot, dotacao: "" } })).status, 200);
+  const r = await adm.post(`/api/processos/${id}/etapas/fiscal/concluir`);
+  const cods = r.dados.pendencias.map((x: any) => x.codigo);
+  assert.equal(r.dados.concluida, false);
+  assert.ok(cods.includes("dotacao") && cods.includes("substituto") && cods.includes("minuta"), cods.join());
+  const montado = await adm.post(`/api/processos/${id}/minutas/fiscal/dos-campos`);
+  assert.equal(montado.status, 200);
+  const texto = (await adm.get(`/api/processos/${id}/minutas/fiscal`)).dados.vigente.texto as string;
+  assert.match(texto, /^# INDICAÇÃO DO FISCAL DO CONTRATO E ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES/);
+  assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo/);
+  assert.match(texto, /- O fiscal e o substituto não têm vínculo com possíveis contratados/);
 });
 
 test("revisão avulsa preserva PDFs, versões e evidências dentro do órgão", async () => {
@@ -1226,20 +1316,20 @@ test("exclusão retira o processo das consultas e conserva o protocolo e a audit
   assert.notEqual(posterior.dados.protocolo, r.dados.protocolo);
 });
 
-test("Solicitação abre a trilha e o painel acompanha o DFD sem alterar o fluxo formal", async () => {
+test("trilha: 7 etapas da fase interna antes da fase externa; os pedidos das secretarias ficam no DFD", async () => {
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const painel = async () => (await lic.get("/api/painel")).dados.processos.por_etapa as { id: string; numero: number; etapa: string; total: number }[];
   const antes = await painel();
-  assert.deepEqual(antes.slice(0, 3).map(({ id, numero }) => [id, numero]), [["solicitacao", 1], ["dfd", 2], ["etp", 3]]);
+  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["dfd", 2], ["etp", 3], ["precos", 4], ["tr", 5], ["dot", 6], ["fiscal", 7], ["edital", 8], ["parecer", 9], ["pub", 10]]);
+  assert.deepEqual(ETAPAS.map((e) => e.fase), ["interna", "interna", "interna", "interna", "interna", "interna", "interna", "externa", "externa", "externa"]);
   const r = await lic.post("/api/processos", { objeto: "Compra de materiais para a educação", tipo: "bens", via: "licitacao", ano: 2099 });
   assert.equal(r.status, 201);
   const caminho = `/api/processos/${r.dados.id}`;
   const lista = async () => (await lic.get("/api/processos?ano=2099")).dados.find((p: { id: number }) => p.id === r.dados.id);
-  assert.equal((await lista()).trilha.atual.id, "solicitacao");
+  assert.equal((await lista()).trilha.atual.id, "pac");
   const inicio = (await lic.get(caminho)).dados;
-  assert.equal(inicio.trilha.atual.id, "solicitacao");
-  assert.equal(inicio.trilha.etapas[1].estado, "disponivel");
-  assert.equal(inicio.trilha.etapas[2].estado, "bloqueada");
+  assert.equal(inicio.trilha.atual.id, "pac");
+  assert.equal(inicio.trilha.etapas[1].estado, "bloqueada");
   assert.equal((await painel())[0].total, antes[0].total + 1);
 
   const pedido = await lic.post(`${caminho}/solicitacoes`, {
@@ -1247,19 +1337,8 @@ test("Solicitação abre a trilha e o painel acompanha o DFD sem alterar o fluxo
   });
   assert.equal(pedido.status, 201);
   const seguir = (await lic.get(caminho)).dados;
-  assert.equal(seguir.trilha.atual.id, "dfd");
-  assert.equal(seguir.trilha.etapas[0].estado, "concluida");
+  assert.equal(seguir.trilha.atual.id, "pac");
   assert.equal(seguir.etapa_atual, 0);
-  assert.equal((await lista()).trilha.atual.numero, 2);
-  const proximoPainel = await painel();
-  assert.equal(proximoPainel[0].total, antes[0].total);
-  assert.equal(proximoPainel[1].total, antes[1].total + 1);
-
-  const legado = await lic.post("/api/processos", { objeto: "Outro processo que já está no DFD", tipo: "bens", via: "licitacao", ano: 2099 });
-  assert.equal((await lic.post(`/api/processos/${legado.dados.id}/minutas/dfd`, { texto: "# DFD" })).status, 200);
-  const detalheLegado = (await lic.get(`/api/processos/${legado.dados.id}`)).dados;
-  assert.equal(detalheLegado.trilha.atual.id, "dfd");
-  assert.equal(detalheLegado.trilha.etapas[0].estado, "disponivel");
 });
 
 test("conciliação: a mesma linha escrita de outro jeito pelo fornecedor cai no item certo, sem duplicar", () => {

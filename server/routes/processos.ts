@@ -15,10 +15,11 @@ import { minutaParaDocx } from "../docx.js";
 import { minutaParaPdf } from "../pdf.js";
 import { lerTimbrado, timbradosDoOrgao } from "../timbrados.js";
 import { extrairTexto } from "../extrair.js";
-import { conferirEtapa, proximaEtapa, rascunhoEtp } from "../conferencia.js";
+import { conferirEtapa, proximaEtapa } from "../conferencia.js";
+import { camposDo, documentoDosCampos, sincronizarCampos, sugestoesDosCampos } from "../campos.js";
 import {
-  ETAPAS, aplicarPendencias, atual, concluido, etapaDoItem, etapaPorId, itensDe, liberada, podeMarcar, trilhaDoProcesso,
-  type Checks, type Tipo, type Via,
+  ETAPAS, aplicarPendencias, atual, concluido, etapaDoItem, etapaPorId, itensDe, liberada, limparValores, podeMarcar, trilhaDoProcesso,
+  type Checks, type Tipo, type Via, type Valores,
 } from "../../shared/etapas.js";
 
 export const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -215,14 +216,12 @@ export function rotasProcessos() {
     const ano = req.query.ano ? Number(req.query.ano) : null;
     const rows = await q(
       `select p.id, p.protocolo, p.numero, p.procedimento, p.objeto, p.tipo, p.via, p.valor_estimado, p.ano, p.situacao, p.requisitante, p.areas_adicionais, p.atualizado_em,
-              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens,
-              exists(select 1 from solicitacoes_processo s where s.processo_id=p.id) as tem_solicitacao,
-              exists(select 1 from minutas m where m.processo_id=p.id and m.etapa='dfd') as tem_dfd
+              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
          from processos p where p.orgao_id = $1 and p.excluido_em is null and ($2::int is null or p.ano = $2) order by p.atualizado_em desc`,
       [req.usuario!.orgao_id, ano]);
-    res.json(rows.map(({ itens, tem_solicitacao, tem_dfd, ...p }) => {
+    res.json(rows.map(({ itens, ...p }) => {
       const c: Checks = Object.fromEntries((itens as string[]).map((i) => [i, true]));
-      return { ...p, trilha: trilhaDoProcesso(p, c, tem_solicitacao, tem_dfd), etapa_atual: atual(p, c), concluido: concluido(p, c), feitas: ETAPAS.map((e) => itensDe(e, p).every((i) => c[i.id])) };
+      return { ...p, trilha: trilhaDoProcesso(p, c), etapa_atual: atual(p, c), concluido: concluido(p, c), feitas: ETAPAS.map((e) => itensDe(e, p).every((i) => c[i.id])) };
     }));
   });
 
@@ -269,9 +268,12 @@ export function rotasProcessos() {
     const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [p.orgao_id]);
     const secretarias = await q<{ secretaria: string }>("select secretaria from secretarios where orgao_id=$1 order by secretaria", [p.orgao_id]);
     const c: Checks = Object.fromEntries(checagens.map((x) => [x.item, true]));
+    const campos = await camposDo(p.id);
+    const pca_item = p.pca_item_id ? await q1(
+      "select ano, descricao, ordem_oficial, periodo_oficial, prioridade, modalidade_prevista, requisitante from pca_itens where id=$1 and orgao_id=$2", [p.pca_item_id, p.orgao_id]) : null;
     res.json({
-      ...p, checagens, minutas, anexos, orcamentos, solicitacoes, timbrados: timbradosDoOrgao(orgao), secretarias: secretarias.map((s) => s.secretaria), etapa_atual: atual(p, c), concluido: concluido(p, c),
-      trilha: trilhaDoProcesso(p, c, solicitacoes.length > 0, minutas.some((m) => m.etapa === "dfd")),
+      ...p, campos, pca_item, sugestoes_campos: await sugestoesDosCampos(p, campos), checagens, minutas, anexos, orcamentos, solicitacoes, timbrados: timbradosDoOrgao(orgao), secretarias: secretarias.map((s) => s.secretaria), etapa_atual: atual(p, c), concluido: concluido(p, c),
+      trilha: trilhaDoProcesso(p, c),
       numeracao: { liberada: numeracaoLiberada(p, c), sugestao: await sugestaoNumeracao(p) },
       pode: { editar: temPapel(req.usuario!, "requisitante", "contratacao"), numerar: temPapel(req.usuario!, "contratacao", "autoridade"), etapas: ETAPAS.filter((e) => podeMarcar(req.usuario!.papeis, e)).map((e) => e.id) },
     });
@@ -288,6 +290,7 @@ export function rotasProcessos() {
     // Mudança de tipo ou via altera os itens aplicáveis: remove marcações que deixaram de existir.
     const validos = ETAPAS.flatMap((e) => itensDe(e, d).map((i) => i.id));
     await q("delete from checagens where processo_id=$1 and not (item = any($2))", [p.id, validos]);
+    await sincronizarCampos({ ...p, ...d, areas_adicionais: d.areas_adicionais ?? p.areas_adicionais }, req.usuario!.id);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "processo.alterado" });
     res.json({ ok: true });
   });
@@ -497,6 +500,7 @@ export function rotasProcessos() {
     const { item, marcado } = z.object({ item: z.string(), marcado: z.boolean() }).parse(req.body);
     const e = etapaDoItem(item);
     if (!e || !itensDe(e, p).some((i) => i.id === item)) throw new ErroHttp(400, "Item não se aplica a este processo.");
+    if (e.itens.find((i) => i.id === item)?.auto) throw new ErroHttp(400, "Este item é conferido pelo sistema: preencha os campos da etapa.");
     exigeEtapaEditavel(req, p, await checksDo(p.id), e.id);
     if (marcado) await q("insert into checagens (processo_id, item, usuario_id) values ($1,$2,$3) on conflict do nothing", [p.id, item, req.usuario!.id]);
     else await q("delete from checagens where processo_id=$1 and item=$2", [p.id, item]);
@@ -506,21 +510,50 @@ export function rotasProcessos() {
     res.json({ etapa_atual: atual(p, c), concluido: concluido(p, c) });
   });
 
-  // Concluir e avançar: confere a etapa; se nada trava, prepara a peça seguinte com o que já foi informado.
+  // Concluir e avançar: confere a etapa (campos, documento e conferência) e aponta o que falta.
   r.post("/processos/:id/etapas/:etapa/concluir", async (req, res) => {
     const p = await processoDo(req);
     const checks = await checksDo(p.id);
     const e = exigeEtapaEditavel(req, p, checks, String(req.params.etapa));
-    const lista = await conferirEtapa(p, e, checks);
+    const lista = await conferirEtapa(p, e, checks, await camposDo(p.id));
     const prox = proximaEtapa(e);
     if (lista.some((x) => x.bloqueia)) return res.json({ concluida: false, pendencias: lista, proxima: null });
-    let rascunho = false;
-    if (e.id === "dfd" && prox?.id === "etp" && podeMarcar(req.usuario!.papeis, prox) && !(await minutaVigente(p.id, "etp"))) {
-      const r1 = await salvarMinuta(p.id, "etp", preencherPortarias(await rascunhoEtp(p), await secretariosDoProcesso(p)), "aproveitado", req.usuario!.id);
-      rascunho = r1.nova;
-    }
-    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "etapa.concluida", detalhe: { etapa: e.id, rascunho_seguinte: rascunho } });
-    res.json({ concluida: true, pendencias: lista, proxima: prox ? { id: prox.id, nome: prox.nome, rascunho } : null });
+    const protocolado = e.id === "fiscal";
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: protocolado ? "processo.protocolado" : "etapa.concluida", detalhe: { etapa: e.id } });
+    res.json({ concluida: true, protocolado, pendencias: lista, proxima: prox ? { id: prox.id, nome: prox.nome } : null });
+  });
+
+  // Campos de preenchimento da etapa.
+  r.put("/processos/:id/campos/:etapa", async (req, res) => {
+    const p = await processoDo(req);
+    const e = exigeEtapaEditavel(req, p, await checksDo(p.id), String(req.params.etapa));
+    if (!e.campos.length) throw new ErroHttp(400, "Esta etapa não tem campos de preenchimento.");
+    const { valores } = z.object({
+      valores: z.record(z.string(), z.union([z.string().max(20000), z.array(z.string().max(100)).max(20)])),
+    }).parse(req.body);
+    const limpos = limparValores(e, valores as Valores);
+    await q(`insert into campos_etapa (processo_id, etapa, valores, usuario_id) values ($1,$2,$3,$4)
+      on conflict (processo_id, etapa) do update set valores=excluded.valores, usuario_id=excluded.usuario_id, atualizado_em=now()`,
+      [p.id, e.id, JSON.stringify(limpos), req.usuario!.id]);
+    await q("update processos set atualizado_em = now() where id = $1", [p.id]);
+    await sincronizarCampos(p, req.usuario!.id, [e]);
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "campos.salvos", detalhe: { etapa: e.id } });
+    const c = await checksDo(p.id);
+    res.json({ ok: true, etapa_atual: atual(p, c) });
+  });
+
+  // Monta o documento da etapa só com os campos preenchidos (sem IA) e salva como nova versão.
+  r.post("/processos/:id/minutas/:etapa/dos-campos", async (req, res) => {
+    const p = await processoDo(req);
+    const e = exigeEtapaEditavel(req, p, await checksDo(p.id), String(req.params.etapa));
+    if (!e.modelo || !e.campos.length) throw new ErroHttp(400, "Esta etapa não tem documento montado pelos campos.");
+    const campos = await camposDo(p.id);
+    if (!Object.values(campos[e.id] ?? {}).some((x) => (Array.isArray(x) ? x.length : String(x).trim()))) throw new ErroHttp(400, "Preencha e salve os campos da etapa antes de montar o documento.");
+    const autor = await q1<{ nome: string; cargo: string }>("select nome, cargo from usuarios where id=$1", [req.usuario!.id]);
+    const texto = preencherPortarias(await documentoDosCampos(p, e, campos, autor!), await secretariosDoProcesso(p));
+    const r1 = await salvarMinuta(p.id, e.id, texto, "campos", req.usuario!.id);
+    if (r1.nova) await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "minuta.campos", detalhe: { etapa: e.id, versao: r1.versao } });
+    res.json(r1);
   });
 
   // Minutas

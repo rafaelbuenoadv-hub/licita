@@ -101,6 +101,14 @@ const api = async (metodo: string, url: string, corpo?: object) => {
   return r;
 };
 
+/** Conclui a etapa 1 (verificação no PAC) para liberar o DFD. */
+async function concluirPac(id: number) {
+  const r = await api("PUT", `/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda de teste.", autorizacao_prefeito: "Despacho de teste" } });
+  if (r.status !== 200) throw new Error(await r.text());
+  const m = await api("POST", `/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
+  if (m.status !== 200) throw new Error(await m.text());
+}
+
 before(async () => {
   await new Promise<void>((ok) => falso.listen(0, ok));
   process.env.ANTHROPIC_API_KEY = "chave-falsa";
@@ -162,6 +170,7 @@ test("extrair dados de um memorando usa saída estruturada e respaldo", async ()
 test("redigir minuta transmite o texto e salva nova versão", async () => {
   const c = await api("POST", "/api/processos", { objeto: "Construção de gavetário", tipo: "obra", via: "dispensa", ano: 2026, requisitante: "Obras", areas_adicionais: ["Administração"] });
   proc = ((await c.json()) as any).id;
+  await concluirPac(proc);
   textoStream = "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA\nProcesso nº [[PREENCHER: número]]\n## 1. Área requisitante\nSecretaria de Obras.";
   const r = await api("POST", `/api/processos/${proc}/ia/redigir`, { etapa: "dfd" });
   const linhas = (await r.text()).trim().split("\n").map((l) => JSON.parse(l));
@@ -523,6 +532,7 @@ test("uma solicitação reúne mais de cinco documentos e a IA consulta os novos
 test("redigir com pesquisa: busca editais e legislação, guarda o dossiê com as fontes e redige com a fundamentação", async () => {
   const c = await api("POST", "/api/processos", { objeto: "Construção de gavetário no cemitério municipal", tipo: "obra", via: "dispensa", ano: 2026, requisitante: "Obras" });
   const id = ((await c.json()) as any).id;
+  await concluirPac(id);
   textoStream = "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA\n## 1. Objeto\nGavetário (art. 72, I, da Lei nº 14.133/2021).";
   textoPesquisa = "Vou consultar o PNCP.\nDOSSIÊ DE PESQUISA\nA) EDITAIS E PEÇAS SEMELHANTES\n- Município X, PR, Dispensa 12/2026: exige atestado de capacidade técnica.\nB) LEGISLAÇÃO E ENTENDIMENTOS VIGENTES\n- Decreto nº 12.807/2025: atualiza os valores do art. 75.";
   pausasDaPesquisa = 1;
@@ -575,6 +585,7 @@ test("redigir com pesquisa: busca editais e legislação, guarda o dossiê com a
 test("redigir com pesquisa: se a pesquisa falha, a minuta sai assim mesmo e a tela é avisada", async () => {
   const c = await api("POST", "/api/processos", { objeto: "Aquisição de material de expediente", tipo: "bens", via: "dispensa", ano: 2026, requisitante: "Administração" });
   const id = ((await c.json()) as any).id;
+  await concluirPac(id);
   textoStream = "# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA\n## 1. Objeto\nMaterial de expediente.";
   pesquisaFalha = true;
   try {

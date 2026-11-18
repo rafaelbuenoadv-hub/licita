@@ -12,13 +12,11 @@ export function rotasPainel() {
     const ano = new Date().getFullYear();
     const procs = await q(
       `select p.id, p.protocolo, p.numero, p.objeto, p.tipo, p.via, p.situacao, p.atualizado_em,
-              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens,
-              exists(select 1 from solicitacoes_processo s where s.processo_id=p.id) as tem_solicitacao,
-              exists(select 1 from minutas m where m.processo_id=p.id and m.etapa='dfd') as tem_dfd
+              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
          from processos p where p.orgao_id=$1 and p.excluido_em is null and p.situacao = 'preparacao' order by p.atualizado_em`, [orgao]);
-    const emPreparo = procs.map(({ itens, tem_solicitacao, tem_dfd, ...p }) => {
+    const emPreparo = procs.map(({ itens, ...p }) => {
       const c: Checks = Object.fromEntries((itens as string[]).map((i) => [i, true]));
-      const { atual: etapa } = trilhaDoProcesso(p, c, tem_solicitacao, tem_dfd);
+      const { atual: etapa } = trilhaDoProcesso(p, c);
       return { ...p, etapa: etapa.nome, etapa_ix: atual(p, c), etapa_id: etapa.id, etapa_numero: etapa.numero,
         parado_dias: Math.floor((Date.now() - new Date(p.atualizado_em).getTime()) / 86400000) };
     });

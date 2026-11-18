@@ -53,6 +53,14 @@ const api = async (metodo: string, url: string, corpo?: object) => {
   if (sc) cookie = sc.split(";")[0];
   return r;
 };
+
+/** Conclui a etapa 1 (verificação no PAC) para liberar o DFD. */
+async function concluirPac(id: number) {
+  const r = await api("PUT", `/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda de teste.", autorizacao_prefeito: "Despacho de teste" } });
+  if (r.status !== 200) throw new Error(await r.text());
+  const m = await api("POST", `/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
+  if (m.status !== 200) throw new Error(await m.text());
+}
 const linhas = async (r: Response) => (await r.text()).trim().split("\n").map((l) => JSON.parse(l));
 
 before(async () => {
@@ -140,6 +148,7 @@ test("Gemini: cota esgotada vira aviso claro e a planilha é lida sem IA", async
 test("Gemini: redigir com pesquisa usa a busca do Google e guarda as fontes", async () => {
   const c = await api("POST", "/api/processos", { objeto: "Construção de gavetário", tipo: "obra", via: "dispensa", ano: 2026, requisitante: "Obras" });
   const id = ((await c.json()) as any).id;
+  await concluirPac(id);
   pesquisa = {
     texto: "Pesquisei.\nDOSSIÊ DE PESQUISA\nA) EDITAIS E PEÇAS SEMELHANTES\n- Município X/PR, Dispensa 12/2026.",
     fontes: [{ uri: "https://pncp.gov.br/app/editais/1", title: "pncp.gov.br" }, { uri: "https://www.planalto.gov.br/l14133.htm", title: "planalto.gov.br" }],

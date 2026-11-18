@@ -3,7 +3,8 @@ import { compararOrcamentos, nomeFornecedorOrcamento, type DadosOrcamento } from
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, brl, dataBR, dataHora, fluxo, fmtNum, numBR } from "../api";
 import { Folha } from "../comp/Folha";
-import { ETAPAS, TIPOS, TRILHA_PROCESSO, VIAS, feita, feitos, itensDe, liberada, pendencias, podeMarcar, type Checks, type TrilhaProcesso } from "../../../shared/etapas";
+import { ETAPAS, ETAPAS_INTERNAS, FASES, TIPOS, VIAS, feita, feitos, itensDe, liberada, pendencias, podeMarcar, type Checks, type TrilhaProcesso, type Valores } from "../../../shared/etapas";
+import { CamposEtapa, ItemPac, ProtocoloChecklist } from "./CamposEtapa";
 import { tem, useEu } from "../main";
 import { CamposProcesso, paraApi, type DadosProc, type PlanoConsulta } from "./NovoProcesso";
 import { Solicitacoes } from "./Solicitacoes";
@@ -14,7 +15,7 @@ const ACOES: Record<string, string> = {
   "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.lido": "pediu a leitura de orçamento à IA", "orcamento.fornecedor": "identificou o fornecedor do orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
   "minuta.titulares": "incluiu os titulares no DFD",
   "solicitacao.incluida": "adicionou solicitação de secretaria", "solicitacao.alterada": "editou solicitação de secretaria",
-  "ia.sugestoes": "pediu sugestões à IA", "contrato.criado": "registrou contrato",
+  "ia.sugestoes": "pediu sugestões à IA", "campos.salvos": "salvou os campos da etapa", "minuta.campos": "montou o documento com os campos", "processo.protocolado": "protocolou o processo no Departamento de Licitações", "contrato.criado": "registrou contrato",
 };
 
 export function ProcessoPg() {
@@ -40,15 +41,10 @@ export function ProcessoPg() {
   if (!p) return <p className="muted">Carregando processo…</p>;
   const checks: Checks = Object.fromEntries(p.checagens.map((c: { item: string }) => [c.item, true]));
   const trilha = p.trilha as TrilhaProcesso;
-  const pedida = params.get("aba");
+  const pedida = params.get("aba") === "solicitacao" ? "dfd" : params.get("aba");
   const aberta = trilha.etapas.find((etapa) => etapa.id === pedida) ?? trilha.atual;
-  const mostrarSolicitacao = aberta.id === "solicitacao";
-  const ix = aberta.numero - 2;
+  const ix = aberta.numero - 1;
   const e = ETAPAS[ix];
-  const recarregarSolicitacao = () => {
-    if (!params.has("aba")) irPara("solicitacao", true);
-    return carregar();
-  };
 
   return (
     <>
@@ -73,32 +69,22 @@ export function ProcessoPg() {
           {trilha.etapas.map((etapa) => {
             const selecionada = etapa.id === aberta.id;
             const estilo = { atual: "cur", concluida: "ok", disponivel: "", bloqueada: "lock" }[etapa.estado];
-            const formal = ETAPAS[etapa.numero - 2];
-            const status = etapa.id === "solicitacao"
-              ? p.solicitacoes.length
-                ? `${p.solicitacoes.length} ${p.solicitacoes.length === 1 ? "pedido registrado" : "pedidos registrados"}`
-                : "Pedidos, itens e orçamentos"
-              : { atual: formal ? `${feitos(formal, p, checks)} de ${itensDe(formal, p).length} itens` : "Em andamento",
-                concluida: "Concluída", disponivel: "Disponível", bloqueada: "Bloqueada" }[etapa.estado];
-            return (
-              <button key={etapa.id} type="button" className={`et ${estilo}${selecionada ? " sel" : ""}`}
+            const formal = ETAPAS[etapa.numero - 1];
+            const status = { atual: `${feitos(formal, p, checks)} de ${itensDe(formal, p).length} itens`,
+              concluida: "Concluída", disponivel: "Disponível", bloqueada: "Bloqueada" }[etapa.estado];
+            const inicioFase = etapa.numero === 1 || ETAPAS[etapa.numero - 2].fase !== formal.fase;
+            return (<Fragment key={etapa.id}>
+              {inicioFase && <div className="fase-trilha"><b>{FASES[formal.fase].nome}</b><span>{FASES[formal.fase].quem}</span></div>}
+              <button type="button" className={`et ${estilo}${selecionada ? " sel" : ""}`}
                 onClick={() => irPara(etapa.id)} title={`${etapa.numero}. ${etapa.nome}`} aria-current={selecionada ? "step" : undefined}>
                 <span className="n">{etapa.numero}</span>
                 <span className="tx"><span className="nm">{etapa.nome}</span><br /><span className="st">{status}</span></span>
-              </button>);
+              </button></Fragment>);
           })}
         </nav>
-        <Assistente key={`${p.id}-${mostrarSolicitacao ? "solicitacao" : "etapas"}`} p={p} etapa={aberta.id} disponivel={ia.disponivel} />
+        <Assistente key={`${p.id}-etapas`} p={p} etapa={aberta.id} disponivel={ia.disponivel} />
         <div className="mesa-corpo">
-          {mostrarSolicitacao ? (
-            <section className="panel" style={{ minWidth: 0 }} aria-labelledby="aba-solicitacao">
-              <div className="sec row">
-                <div><span className="lbl">Etapa {aberta.numero} de {TRILHA_PROCESSO.length}</span><h2 id="aba-solicitacao">Solicitação</h2></div>
-                <button className="btn" type="button" onClick={() => irPara("dfd")}>Abrir DFD →</button>
-              </div>
-              <Solicitacoes key={p.id} processo={p} recarregar={recarregarSolicitacao} />
-            </section>
-          ) : <Etapa key={e.id} p={p} e={e} ix={ix} numero={aberta.numero} checks={checks} recarregar={carregar} setAviso={setAviso} irPara={irPara} />}
+          <Etapa key={e.id} p={p} e={e} ix={ix} numero={aberta.numero} checks={checks} recarregar={carregar} setAviso={setAviso} irPara={irPara} />
         </div>
       </div>
 
@@ -200,17 +186,32 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
     finally { setSalvando(null); }
   };
   const prox = ETAPAS[ix + 1];
+  const editavel = lib && atua && p.situacao !== "cancelado";
+  const [vals, setVals] = useState<Valores>(() => ({ ...(p.sugestoes_campos?.[e.id] ?? {}), ...(p.campos?.[e.id] ?? {}) }));
+  const [sujo, setSujo] = useState(() => Object.keys(p.sugestoes_campos?.[e.id] ?? {}).length > 0 && !p.campos?.[e.id]);
+  const [gravandoCampos, setGravandoCampos] = useState(false);
+  const salvarCampos = async (silencioso = false) => {
+    setGravandoCampos(true);
+    try {
+      await api.put(`/processos/${p.id}/campos/${e.id}`, { valores: vals });
+      setSujo(false); await recarregar();
+      if (!silencioso) setAviso({ t: `${e.nome}: campos salvos.`, tipo: "ok" });
+      return true;
+    } catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); return false; }
+    finally { setGravandoCampos(false); }
+  };
   const [conf, setConf] = useState<{ codigo: string; texto: string; onde: string; alvo?: string; bloqueia: boolean }[] | null>(null);
   const [conferindo, setConferindo] = useState(false);
   const concluir = async () => {
     setConferindo(true);
     try {
+      if (e.campos.length && sujo && !(await salvarCampos(true))) return;
       const r = await api.post(`/processos/${p.id}/etapas/${e.id}/concluir`);
       await recarregar();
       if (!r.concluida) { setConf(r.pendencias); return; }
       setConf(null);
       const avisos = (r.pendencias as { texto: string }[]).map((x) => x.texto).join(" ");
-      setAviso({ t: `${e.nome}: etapa conferida e concluída.${r.proxima?.rascunho ? ` A minuta de "${r.proxima.nome}" foi aberta com objeto, justificativa, quantidades e área requisitante aproveitados.` : ""}${avisos ? ` Atenção: ${avisos}` : ""}`, tipo: avisos ? "" : "ok" });
+      setAviso({ t: r.protocolado ? `Fase interna concluída: processo protocolado no Departamento de Licitações e Contratos.${avisos ? ` Atenção: ${avisos}` : ""}` : `${e.nome}: etapa conferida e concluída.${avisos ? ` Atenção: ${avisos}` : ""}`, tipo: avisos ? "" : "ok" });
       if (r.proxima) irPara(r.proxima.id);
     } catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
     finally { setConferindo(false); }
@@ -218,6 +219,10 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
   const irAte = (x: { onde: string; alvo?: string }) => {
     const mostra = (el: HTMLElement | null) => { el?.scrollIntoView({ behavior: "smooth", block: "center" }); el?.focus({ preventScroll: true }); };
     if (x.onde === "conferencia") mostra(document.getElementById("c-" + x.alvo));
+    else if (x.onde === "campos") {
+      const el = document.getElementById("campo-" + x.alvo);
+      if (el) mostra(el); else if (x.alvo === "dotacao") irPara("dot");
+    }
     else if (x.onde === "minuta") document.getElementById("minuta-etapa")?.scrollIntoView({ behavior: "smooth", block: "start" });
     else if (x.onde === "dados") {
       const d = document.getElementById("dados-processo") as HTMLDetailsElement | null;
@@ -228,30 +233,40 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
   return (
     <section className="panel" style={{ minWidth: 0 }}>
       <div className="sec">
-        <div className="row"><div><span className="lbl">Etapa {numero} de {TRILHA_PROCESSO.length}</span><h2>{e.nome}</h2></div>
+        <div className="row"><div><span className="lbl">{e.fase === "interna" ? `Etapa ${numero} de ${ETAPAS_INTERNAS} · Fase interna (${FASES.interna.quem})` : `Fase externa (${FASES.externa.quem}) · etapa ${numero}`}</span><h2>{e.nome}</h2></div>
           <span className={"pill " + (ok ? "ok" : lib ? "cur" : "")}>{ok ? "Concluída" : lib ? `${nf} de ${its.length} itens` : "Bloqueada"}</span></div>
         {e.doc && <p className="small muted">Documento da etapa: {e.doc}</p>}
         <p style={{ maxWidth: "72ch" }}>{e.oque}</p>
         <div className="base">{e.base.map((b: any) => b.url ? <a key={b.rotulo} href={b.url} target="_blank" rel="noopener">{b.rotulo}</a> : <span key={b.rotulo}>{b.rotulo}</span>)}</div>
         {!lib && <p className="note">Conclua a etapa "{ETAPAS[p.etapa_atual].nome}" para liberar esta.</p>}
-        {lib && !atua && <p className="note">Seu perfil acompanha esta etapa, mas quem marca os itens é: {e.papeis.join(", ")}.</p>}
+        {lib && !atua && <p className="note">Seu perfil acompanha esta etapa, mas quem preenche e marca os itens é: {e.papeis.join(", ")}.</p>}
       </div>
+      {e.id === "pac" && <ItemPac p={p} />}
+      {e.campos.length > 0 && <CamposEtapa e={e} p={p} valores={vals} editavel={editavel} sujo={sujo} gravando={gravandoCampos}
+        sugeridos={Object.keys(p.campos?.[e.id] ? {} : (p.sugestoes_campos?.[e.id] ?? {}))}
+        mudar={(v) => { setVals(v); setSujo(true); }} salvar={() => salvarCampos()} />}
+      {e.id === "dfd" && <details className="sec pedidos" id="pedidos-secretarias" open={p.solicitacoes.length === 0}>
+        <summary><span className="lbl">Pedidos das secretarias, itens e orçamentos</span> <span className="small muted">{p.solicitacoes.length ? `${p.solicitacoes.length} ${p.solicitacoes.length === 1 ? "pedido registrado" : "pedidos registrados"}` : "nenhum pedido ainda"}</span></summary>
+        <p className="small muted">Registre aqui o pedido de cada Secretaria, com os itens, quantidades e orçamentos. Esses dados preenchem os campos do DFD, do ETP e da pesquisa de preços.</p>
+        <Solicitacoes key={p.id} processo={p} recarregar={recarregar} />
+      </details>}
+      {e.id === "fiscal" && <ProtocoloChecklist p={p} checks={checks} irPara={irPara} />}
       <div className="sec"><span className="lbl">Conferência obrigatória</span>
         <ul className="chk">{its.map((i: any) => {
           const q = quem[i.id];
           return (
             <li key={i.id} className={q ? "done" : ""}>
-              <input type="checkbox" id={"c-" + i.id} checked={!!q} disabled={!lib || !atua || salvando !== null || p.situacao === "cancelado"} onChange={(ev) => marcar(i.id, ev.target.checked)} />
+              <input type="checkbox" id={"c-" + i.id} checked={!!q} disabled={i.auto || !lib || !atua || salvando !== null || p.situacao === "cancelado"} onChange={(ev) => marcar(i.id, ev.target.checked)} />
               <label htmlFor={"c-" + i.id}><span>{i.texto}</span>
-                <span className="b">{[i.base, q && `conferido por ${q.usuario ?? "—"} em ${dataHora(q.em)}`].filter(Boolean).join(" · ")}</span></label>
+                <span className="b">{i.auto ? (q ? "marcado pelo sistema: todos os campos obrigatórios estão preenchidos e salvos" : "marcado pelo sistema quando todos os campos obrigatórios estiverem preenchidos e salvos") : [i.base, q && `conferido por ${q.usuario ?? "—"} em ${dataHora(q.em)}`].filter(Boolean).join(" · ")}</span></label>
             </li>);
         })}</ul>
       </div>
-      {e.id === "precos" && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} irAosItens={() => irPara("solicitacao")} />}
+      {e.id === "precos" && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} irAosItens={() => irPara("dfd")} />}
       {e.id === "precos" && p.via === "dispensa" && <Fracionamento id={p.id} />}
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>
         <ul className="aten">{e.atencao.map((a: string) => <li key={a}>{a}</li>)}</ul></div>
-      {e.modelo && <Minuta p={p} e={e} editavel={lib && atua && p.situacao !== "cancelado"} setAviso={setAviso} />}
+      {e.modelo && <Minuta p={p} e={e} editavel={editavel} setAviso={setAviso} camposSujos={sujo} salvarCampos={() => salvarCampos(true)} />}
       {conf && conf.length > 0 && <div className="sec" role="status" aria-live="polite"><span className="lbl">Pendências da etapa</span>
         <p className="small muted">{conf.filter((x) => x.bloqueia).length} {conf.filter((x) => x.bloqueia).length === 1 ? "ajuste impede" : "ajustes impedem"} a conclusão. Resolva e clique de novo em "Concluir e avançar".</p>
         <ul className="pends">{conf.map((x, i) => (
@@ -262,9 +277,9 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
           </li>))}</ul>
       </div>}
       <div className="sec row">
-        {ix > 0 ? <button className="btn" onClick={() => irPara(ETAPAS[ix - 1].id)}>← {ETAPAS[ix - 1].nome}</button> : <button className="btn" type="button" onClick={() => irPara("solicitacao")}>← Solicitação</button>}
+        {ix > 0 ? <button className="btn" onClick={() => irPara(ETAPAS[ix - 1].id)}>← {ETAPAS[ix - 1].nome}</button> : <span />}
         <div className="tools">
-          {lib && atua && p.situacao !== "cancelado" && <button className="btn pri" disabled={conferindo} onClick={concluir}>{conferindo ? "Conferindo…" : prox ? "Concluir e avançar" : "Conferir e concluir"}</button>}
+          {lib && atua && p.situacao !== "cancelado" && <button className="btn pri" disabled={conferindo} onClick={concluir}>{conferindo ? "Conferindo…" : e.id === "fiscal" ? "Protocolar no Departamento de Licitações" : prox ? "Concluir e avançar" : "Conferir e concluir"}</button>}
           {prox ? <button className="btn" disabled={!ok} onClick={() => irPara(prox.id)}>{ok ? "" : `Faltam ${its.length - nf} · `}{prox.nome} →</button>
             : <span className={"pill " + (ok ? "ok" : "")}>{ok ? "Fase preparatória concluída" : "Última etapa"}</span>}
         </div>
@@ -372,7 +387,7 @@ function Fracionamento({ id }: { id: number }) {
 }
 
 /* ---------- minuta ---------- */
-function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolean; setAviso: (a: any) => void }) {
+function Minuta({ p, e, editavel, setAviso, camposSujos, salvarCampos }: { p: any; e: any; editavel: boolean; setAviso: (a: any) => void; camposSujos: boolean; salvarCampos: () => Promise<boolean> }) {
   const [timbrado, setTimbrado] = useState("");
   const { ia } = useEu();
   const [m, setM] = useState<{ vigente: any; versoes: any[]; titulares_dfd: { pode_inserir: boolean; total: number; areas_sem_cadastro: string[]; areas_sem_portaria: string[] } | null; pesquisa: { texto: string; fontes: { url: string; titulo: string }[]; criado_em: string; autor: string | null } | null } | null>(null);
@@ -380,7 +395,7 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
   const [rascunho, setRascunho] = useState("");
   const [vendo, setVendo] = useState<any>(null); // versão antiga em exibição
   const [gerando, setGerando] = useState("");
-  const [busy, setBusy] = useState<"" | "redigir" | "salvar" | "sugerir" | "aplicar">("");
+  const [busy, setBusy] = useState<"" | "redigir" | "salvar" | "sugerir" | "aplicar" | "montar">("");
   const [confirma, setConfirma] = useState(false);
   const [orient, setOrient] = useState("");
   const [pesquisar, setPesquisar] = useState(true);
@@ -419,6 +434,16 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
     setBusy("salvar");
     try { const r = await api.post(`/processos/${p.id}/minutas/${e.id}`, { texto: t }); await carregar(); setModo("ver"); setAviso({ t: r.nova ? `${msg} (versão ${r.versao}).` : "Nada mudou desde a última versão.", tipo: "ok" }); }
     catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
+    finally { setBusy(""); }
+  };
+  const montar = async () => {
+    setBusy("montar");
+    try {
+      if (camposSujos && !(await salvarCampos())) return;
+      const r = await api.post(`/processos/${p.id}/minutas/${e.id}/dos-campos`);
+      await carregar(); setModo("ver");
+      setAviso({ t: r.nova ? `Documento montado com os campos da etapa (versão ${r.versao}). Revise o texto antes de usar.` : "O documento já está igual aos campos.", tipo: "ok" });
+    } catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
     finally { setBusy(""); }
   };
   const sugerir = async () => {
@@ -463,11 +488,14 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
   return (
     <div className="sec" id="minuta-etapa">
       <div className="row"><span className="lbl">Minuta · {e.doc}</span>
-        {m.vigente && <span className="small muted">Versão {m.vigente.versao} · {m.vigente.origem === "ia" ? "redigida pela IA" : m.vigente.origem === "pendencias" ? "campos preenchidos" : m.vigente.origem === "aproveitado" ? "rascunho com dados aproveitados da etapa anterior" : "edição manual"} · {m.vigente.autor ?? "—"} · {dataHora(m.vigente.criado_em)}</span>}</div>
+        {m.vigente && <span className="small muted">Versão {m.vigente.versao} · {m.vigente.origem === "ia" ? "redigida pela IA" : m.vigente.origem === "pendencias" ? "campos preenchidos" : m.vigente.origem === "aproveitado" ? "rascunho com dados aproveitados da etapa anterior" : m.vigente.origem === "campos" ? "montada com os campos da etapa" : "edição manual"} · {m.vigente.autor ?? "—"} · {dataHora(m.vigente.criado_em)}</span>}</div>
       <div className="tools">
         {busy === "redigir" ? <><span className="small muted" role="status">{andamento || "Redigindo no layout do órgão…"}</span><button className="btn" onClick={() => ctl.current?.abort()}>Parar</button></>
           : confirma ? <><button className="btn pri" onClick={redigir}>Confirmar: gerar nova versão</button><button className="btn" onClick={() => setConfirma(false)}>Cancelar</button></>
-          : <button className="btn pri" disabled={!editavel || !ia.disponivel || busy !== ""} onClick={() => (texto ? setConfirma(true) : redigir())}>{texto ? "Redigir de novo com IA" : "Redigir minuta com IA"}</button>}
+          : <>
+            {e.campos?.length > 0 && <button className="btn pri" disabled={!editavel || busy !== ""} onClick={montar} title="Monta o documento só com o que foi preenchido nos campos, sem usar a IA">{busy === "montar" ? "Montando…" : texto ? "Montar de novo com os campos" : "Montar com os campos"}</button>}
+            <button className={e.campos?.length ? "btn" : "btn pri"} disabled={!editavel || !ia.disponivel || busy !== ""} onClick={() => (texto ? setConfirma(true) : redigir())}>{texto ? "Redigir de novo com IA" : "Redigir minuta com IA"}</button>
+          </>}
         {busy !== "redigir" && <>
           <button className="btn" disabled={!editavel || !!vendo} onClick={() => { setModo(modo === "ver" ? "editar" : "ver"); setRascunho(texto); }}>{modo === "ver" ? "Editar texto" : "Ver na folha"}</button>
           {texto && p.timbrados?.length > 0 && (
@@ -512,7 +540,7 @@ function Minuta({ p, e, editavel, setAviso }: { p: any; e: any; editavel: boolea
         <p className="small muted">Marcação: "# " título, "## " seção, "| a | b |" quadro, "@ " assinatura, [[texto]] campo pendente.</p>
         <div className="tools"><button className="btn pri" disabled={busy !== ""} onClick={() => salvar(rascunho, "Minuta salva")}>Salvar nova versão</button>
           <button className="btn" onClick={() => { setModo("ver"); setRascunho(texto); }}>Descartar alterações</button></div>
-      </> : <Folha texto={exibido} vazio={busy === "redigir" ? "Redigindo a minuta…" : "Nenhuma minuta ainda. Peça à IA para redigir ou escreva em \"Editar texto\"."} />}
+      </> : <Folha texto={exibido} vazio={busy === "redigir" ? "Redigindo a minuta…" : e.campos?.length ? "Nenhum documento ainda. Preencha os campos acima e clique em \"Montar com os campos\", ou peça à IA para redigir." : "Nenhuma minuta ainda. Peça à IA para redigir ou escreva em \"Editar texto\"."} />}
 
       {!vendo && busy !== "redigir" && modo === "ver" && (pend.length > 0 ? (
         <div className="pend">

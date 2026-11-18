@@ -6,10 +6,24 @@ export type Via = "licitacao" | "dispensa" | "inexigibilidade";
 export type Papel = "admin" | "requisitante" | "contratacao" | "juridico" | "autoridade" | "fiscal";
 export type Condicao = "obra" | "naoobra" | "lic" | "disp" | "inex" | "direta" | "naoinex";
 
-export interface Item { id: string; texto: string; base?: string; cond?: Condicao }
+import { CAMPOS, MARCAS_OBRIGATORIAS, type Campo, type ValorCampo, type Valores } from "./campos.js";
+export type { Campo, ValorCampo, Valores } from "./campos.js";
+
+/** auto: marcado pelo sistema (ex.: todos os campos obrigatórios da etapa preenchidos). */
+export interface Item { id: string; texto: string; base?: string; cond?: Condicao; auto?: boolean }
+export type Fase = "interna" | "externa";
+export const FASES: Record<Fase, { nome: string; quem: string }> = {
+  interna: { nome: "Fase interna", quem: "Secretaria demandante" },
+  externa: { nome: "Fase externa", quem: "Departamento de Licitações e Contratos" },
+};
 export interface Etapa {
   id: string;
   nome: string;
+  fase: Fase;
+  /** Campos de preenchimento da etapa. */
+  campos: Campo[];
+  /** O documento pode ser montado, mas não é exigido para concluir. */
+  docOpcional?: boolean;
   doc: string | null;
   oque: string;
   base: { rotulo: string; url?: string }[];
@@ -41,19 +55,39 @@ export const LINKS_LEI = U;
 
 const it = (id: string, texto: string, base = "", cond?: Condicao): Item => ({ id, texto, base, cond });
 
+const campos = (etapa: string): Item => ({ id: `${etapa}.campos`, texto: "Campos da etapa preenchidos", base: "conferido pelo sistema", auto: true });
+
 export const ETAPAS: Etapa[] = [
   {
-    id: "dfd", nome: "DFD", doc: "Documento de Formalização da Demanda (DFD)",
-    oque: "Formalize a demanda com base nas solicitações das áreas requisitantes e confira a relação com o Plano de Contratações Anual.",
-    base: [{ rotulo: "Art. 12, VII", url: U.a12 }, { rotulo: "Art. 72, I", url: U.a72 }, { rotulo: "Art. 18, caput", url: U.a18 }],
+    id: "pac", nome: "Verificar no PAC", doc: "Registro da verificação no Plano Anual de Contratações", docOpcional: true,
+    fase: "interna", campos: CAMPOS.pac,
+    oque: "Confirme se o objeto já consta do Plano Anual de Contratações (PAC) vigente e no mês planejado para início. Se não consta, é necessária justificativa de inclusão extraordinária e autorização prévia do Prefeito antes de prosseguir: não se inicia processo fora do planejamento sem essa autorização formal.",
+    base: [{ rotulo: "Art. 12, VII", url: U.a12 }, { rotulo: "Art. 18, caput e § 1º, II", url: U.a18 }, { rotulo: "Dec. 2.533/2024, art. 6º" }],
     papeis: ["requisitante", "contratacao"],
     itens: [
+      campos("pac"),
+      it("pc1", "Objeto e mês de início conferidos no PAC vigente, ou autorização do Prefeito juntada aos autos", "Art. 12, VII; Dec. 2.533/2024, art. 6º"),
+    ],
+    atencao: [
+      "Objeto que não consta do PAC sem autorização prévia do Prefeito é a primeira causa de devolução.",
+      "O mesmo item do PAC deve ser citado no DFD e no ETP.",
+    ],
+    modelo: `REGISTRO DE VERIFICAÇÃO NO PLANO ANUAL DE CONTRATAÇÕES
+Identificação do processo; Secretaria demandante; objeto
+1. Consta do PAC vigente (item e mês previsto) — ou justificativa da inclusão extraordinária
+2. Início no mês planejado, ou motivo da alteração do cronograma
+3. Autorização prévia do Prefeito (somente se fora do PAC)
+Local e data; assinatura do responsável pela Secretaria`,
+  },
+  {
+    id: "dfd", nome: "DFD", doc: "Documento de Formalização da Demanda (DFD)",
+    fase: "interna", campos: CAMPOS.dfd ?? [],
+    oque: "A Secretaria formaliza, por escrito, a necessidade da contratação: o que, quanto, quando e por que é necessário. É o documento que abre o processo internamente e referencia o item do PAC. Deve ser assinado pelo responsável pela Secretaria ou por quem ele designar.",
+    base: [{ rotulo: "Art. 18, I", url: U.a18 }, { rotulo: "Art. 72, I", url: U.a72 }, { rotulo: "Dec. 2.533/2024, art. 6º" }],
+    papeis: ["requisitante", "contratacao"],
+    itens: [
+      campos("dfd"),
       it("d1", "DFD assinado pela área requisitante, e não só pelo setor de licitações", "Art. 72, I"),
-      it("d2", "Objeto descrito com clareza, sem marca nem direcionamento"),
-      it("d3", "Justificativa da necessidade apoiada em dados; \"urgência\" só aparece se for o fundamento da contratação"),
-      it("d4", "Quantidade e valor estimado preliminar informados"),
-      it("d5", "Prazo de entrega ou de execução de que a área precisa"),
-      it("d6", "Previsão no plano de contratações anual indicada, ou inclusão fora do plano justificada", "Art. 18, caput e § 1º, II"),
       it("d7", "Toda afirmação de fato tem documento nos autos que a comprove"),
       it("d8", "Estudos feitos antes do pedido formal foram ratificados pela área requisitante, se houver"),
     ],
@@ -78,26 +112,16 @@ Local e data; assinatura do titular da área requisitante; ratificação do seto
   },
   {
     id: "etp", nome: "Estudo Técnico Preliminar", doc: "Estudo Técnico Preliminar (ETP)",
-    oque: "Mostra o problema a resolver e a melhor solução, para que se avalie a viabilidade técnica e econômica. Os incisos I, IV, VI, VIII e XIII são obrigatórios; os demais podem faltar, desde que a ausência seja justificada.",
-    base: [{ rotulo: "Art. 18, §§ 1º e 2º", url: U.a18 }],
+    fase: "interna", campos: CAMPOS.etp ?? [],
+    oque: "Mostra o problema a resolver e a melhor solução, para que se avalie a viabilidade técnica e econômica. Os incisos I, IV, VI, VIII e XIII (★) são o conteúdo mínimo; os demais devem constar ou ter a ausência justificada. Em obras e serviços comuns de engenharia o ETP é opcional no Município, desde que não haja prejuízo técnico (Dec. 2.533/2024, art. 8º).",
+    base: [{ rotulo: "Art. 18, §§ 1º a 3º", url: U.a18 }, { rotulo: "Dec. 2.533/2024, arts. 7º e 8º" }],
     papeis: ["requisitante", "contratacao"],
     itens: [
-      it("e1", "Descrição da necessidade, com os dados que a quantificam", "§ 1º, I (obrigatório)"),
-      it("e2", "Previsão no plano de contratações anual, ou justificativa", "§ 1º, II"),
-      it("e3", "Requisitos da contratação", "§ 1º, III"),
-      it("e4", "Estimativa das quantidades com memória de cálculo", "§ 1º, IV (obrigatório)"),
-      it("e5", "Levantamento de mercado: alternativas comparadas e justificativa da escolhida", "§ 1º, V"),
-      it("e6", "Estimativa do valor com preços unitários e memória de cálculo", "§ 1º, VI (obrigatório)"),
-      it("e7", "Descrição da solução como um todo", "§ 1º, VII"),
-      it("e8", "Justificativa do parcelamento ou do não parcelamento", "§ 1º, VIII (obrigatório)"),
-      it("e9", "Resultados pretendidos", "§ 1º, IX"),
-      it("e10", "Providências antes do contrato, inclusive designação e capacitação de fiscal e gestor", "§ 1º, X"),
-      it("e11", "Contratações correlatas ou interdependentes", "§ 1º, XI"),
-      it("e12", "Impactos ambientais e medidas mitigadoras", "§ 1º, XII"),
-      it("e13", "Conclusão sobre a viabilidade da contratação", "§ 1º, XIII (obrigatório)"),
+      campos("etp"),
       it("e14", "Assinado por quem elaborou; a fiscalização ficará com outro servidor", "Art. 7º, § 1º"),
     ],
     atencao: [
+      "Se o ETP não explica POR QUE esta solução e POR QUE esta quantidade, o processo tende a voltar em diligência.",
       "Comparar de fato as alternativas (vantagens, desvantagens, conclusão), não só descrever a escolhida.",
       "Não invocar urgência quando o fundamento é o valor.",
       "Em versão retificada, fechar com um quadro \"Alterações em relação à versão anterior\" e o motivo de cada uma.",
@@ -126,35 +150,13 @@ Identificação do processo e do procedimento
 Local e data; assinaturas de quem elaborou`,
   },
   {
-    id: "riscos", nome: "Análise de riscos", doc: "Mapa de riscos",
-    oque: "Lista o que pode comprometer a seleção do fornecedor e a execução do contrato, com probabilidade, impacto e a ação prevista para cada risco.",
-    base: [{ rotulo: "Art. 18, X", url: U.a18 }, { rotulo: "Art. 72, I", url: U.a72 }],
-    papeis: ["requisitante", "contratacao"],
-    itens: [
-      it("r1", "Riscos da fase de seleção (procedimento deserto ou fracassado, sobrepreço, impugnação)", "Art. 18, X"),
-      it("r2", "Riscos da execução (atraso, qualidade, acidente, inadimplência)", "Art. 18, X"),
-      it("r3", "Probabilidade e impacto classificados para cada risco"),
-      it("r4", "Ação preventiva ou de contingência, com responsável"),
-      it("r5", "Riscos próprios de obra: projeto incompleto, condições do solo, licenciamento", "", "obra"),
-    ],
-    atencao: [
-      "Riscos genéricos copiados de outro processo costumam ser devolvidos; cada risco deve ter relação com o objeto.",
-      "A ação prevista para o risco precisa aparecer também no Termo de Referência ou no contrato.",
-    ],
-    modelo: `MAPA DE RISCOS
-Identificação do processo e do procedimento
-1. Objeto
-2. Riscos da fase de planejamento e seleção (quadro Risco | Probabilidade | Impacto | Ação preventiva | Ação de contingência | Responsável)
-3. Riscos da execução contratual (mesmo quadro)
-4. Conclusão
-Local e data; assinaturas`,
-  },
-  {
-    id: "precos", nome: "Orçamento estimado", doc: "Relatório de formação de preços e declaração de veracidade",
+    id: "precos", nome: "Pesquisa de preços", doc: "Pesquisa de preços e memória de cálculo",
+    fase: "interna", campos: CAMPOS.precos ?? [],
     oque: "Define o valor estimado da contratação. Bens e serviços usam pesquisa de preços; obras e serviços de engenharia usam sistema oficial de custos, com BDI.",
-    base: [{ rotulo: "Art. 18, IV", url: U.a18 }, { rotulo: "Art. 23" }, { rotulo: "Art. 72, II e VII", url: U.a72 }, { rotulo: "Art. 75, § 1º", url: U.a75p1 }],
+    base: [{ rotulo: "Art. 18, IV", url: U.a18 }, { rotulo: "Art. 23" }, { rotulo: "Dec. 2.533/2024, art. 11" }, { rotulo: "Art. 72, II e VII", url: U.a72 }, { rotulo: "Art. 75, § 1º", url: U.a75p1 }],
     papeis: ["contratacao", "requisitante"],
     itens: [
+      campos("precos"),
       it("p1", "Preços pesquisados em fontes identificadas, com data, e critério de tratamento (média, mediana ou menor valor)", "Art. 23, § 1º", "naoobra"),
       it("p2", "Custos unitários tirados de sistema oficial (SINAPI, SICRO ou referencial estadual), com localidade e mês de referência", "Art. 23, § 2º", "obra"),
       it("p3", "Composição do BDI e dos encargos sociais, composições analíticas e memória de cálculo nos autos", "Art. 18, IV", "obra"),
@@ -165,6 +167,8 @@ Local e data; assinaturas`,
       it("p8", "Somatório do exercício e de objetos da mesma natureza dentro do limite da dispensa; sem fracionamento", "Art. 75, § 1º", "disp"),
     ],
     atencao: [
+      "Fonte única sem justificativa expressa da impossibilidade de diversificação é ressalva obstativa da Procuradoria.",
+      "Guarde as cotações e as telas de consulta com data e hora: sem elas não há como comprovar a pesquisa.",
       "Data-base divergente entre peças é erro recorrente (ex.: mês de um ano no relatório e de outro na planilha).",
       "Norma de pesquisa de preços de bens e serviços citada em orçamento de obra é apontada como fundamento errado.",
       "O limite de dispensa por valor é atualizado por decreto federal todo ano: conferir o valor vigente.",
@@ -186,11 +190,13 @@ Identificação do processo; órgão; objeto
 Local e data; assinaturas do agente de contratação e do responsável técnico`,
   },
   {
-    id: "tr", nome: "Termo de Referência", doc: "Termo de Referência (ou projeto básico)",
-    oque: "Define o objeto e todas as condições da contratação: execução, fiscalização, pagamento, recebimento, seleção do fornecedor e habilitação. Vira anexo do edital.",
-    base: [{ rotulo: "Art. 18, II, III e IX", url: U.a18 }, { rotulo: "Art. 6º, XXIII" }, { rotulo: "Art. 7º, § 1º", url: U.a7 }, { rotulo: "Art. 25, § 7º", url: U.a25 }],
+    id: "tr", nome: "Termo de Referência / Projeto Básico", doc: "Termo de Referência ou Projeto Básico, com análise de riscos",
+    fase: "interna", campos: CAMPOS.tr ?? [],
+    oque: "Termo de Referência para bens e serviços comuns; Projeto Básico para obras e serviços de engenharia. Define o objeto e as regras de execução, gestão e pagamento. A análise de riscos faz parte da fase preparatória; a matriz de alocação de riscos é facultativa, mas obrigatória em obras de grande vulto e na contratação integrada ou semi-integrada.",
+    base: [{ rotulo: "Art. 18, II, III e IX", url: U.a18 }, { rotulo: "Art. 6º, XXIII e XXV" }, { rotulo: "Arts. 18, X, e 22 (riscos)" }, { rotulo: "Art. 7º, § 1º", url: U.a7 }, { rotulo: "Art. 25, § 7º", url: U.a25 }],
     papeis: ["requisitante", "contratacao"],
     itens: [
+      campos("tr"),
       it("t1", "Objeto, quantitativos e valor máximo iguais aos do ETP e do orçamento"),
       it("t2", "Local, prazo de execução ou entrega e vigência", "Art. 18, III"),
       it("t3", "Gestor e fiscal indicados, distintos de quem fez o projeto, o orçamento e o ETP", "Art. 7º, § 1º; art. 117"),
@@ -205,8 +211,14 @@ Local e data; assinaturas do agente de contratação e do responsável técnico`
       it("t12", "Licenças e manifestações ambiental e sanitária tratadas, quando o objeto exigir", "", "obra"),
       it("t13", "Adequação orçamentária indicada"),
       it("t14", "Aprovado pela autoridade competente"),
+      it("r1", "Riscos da fase de seleção analisados (procedimento deserto ou fracassado, sobrepreço, impugnação)", "Art. 18, X"),
+      it("r2", "Riscos da execução analisados (atraso, qualidade, acidente, inadimplência), com a mitigação refletida no TR", "Art. 18, X"),
+      it("r5", "Riscos próprios de obra: projeto incompleto, condições do solo, licenciamento", "", "obra"),
     ],
     atencao: [
+      "Quantidade e valor do TR devem ser os mesmos do ETP e da pesquisa de preços: a Procuradoria confere a coerência.",
+      "Marca, exigência desnecessária e quantidade sem memória de cálculo são pontos típicos de impugnação.",
+      "Riscos genéricos copiados de outro processo costumam ser devolvidos; cada risco deve ter relação com o objeto.",
       "Exigência de conselho profissional deve admitir todos os conselhos com atribuição legal para o objeto.",
       "Vocabulário de outra modalidade (\"pregoeiro\", \"ata de registro de preços\") em dispensa ou concorrência.",
       "Designar como fiscal a autora do projeto e do orçamento fere a segregação de funções.",
@@ -226,32 +238,72 @@ Identificação do processo e do procedimento
 9. FORMA E CRITÉRIOS DE SELEÇÃO DO FORNECEDOR
 10. EXIGÊNCIAS DE HABILITAÇÃO (jurídica; fiscal, social e trabalhista; econômico-financeira; técnica; justificativa das exigências técnicas)
 11. ADEQUAÇÃO ORÇAMENTÁRIA
-12. DISPOSIÇÕES GERAIS
+12. ANÁLISE DE RISCOS (quadro Risco | Probabilidade | Impacto | Mitigação | Responsável) e MATRIZ DE ALOCAÇÃO DE RISCOS, quando cabível
+13. DISPOSIÇÕES GERAIS
 Subitens numerados (1.1, 1.2...). Local e data; assinatura do titular da área requisitante; "Aprovo o presente Termo de Referência" e assinatura da autoridade`,
   },
   {
-    id: "dot", nome: "Dotação e designações", doc: null,
-    oque: "Confirma que há recurso no orçamento, na classificação certa, e que os agentes do processo foram designados por ato publicado.",
-    base: [{ rotulo: "Art. 72, IV", url: U.a72 }, { rotulo: "Art. 18, caput", url: U.a18 }, { rotulo: "Art. 7º", url: U.a7 }],
-    papeis: ["contratacao", "autoridade"],
+    id: "dot", nome: "Dotação orçamentária", doc: "Solicitação de reserva de dotação orçamentária",
+    fase: "interna", campos: CAMPOS.dot,
+    oque: "A Secretaria solicita formalmente à Contabilidade a reserva ou indicação da dotação compatível com o objeto, com base no TR ou PB já elaborado. Sem essa indicação o processo não pode ser protocolado: ela é pré-condição para a Declaração de Adequação Orçamentária emitida na fase externa. Solicite com antecedência — esta etapa depende de outro setor.",
+    base: [{ rotulo: "Art. 150" }, { rotulo: "Art. 72, IV", url: U.a72 }],
+    papeis: ["requisitante", "contratacao", "autoridade"],
     itens: [
-      it("o1", "Declaração de adequação orçamentária com a dotação e a demonstração de saldo", "Art. 72, IV"),
+      campos("dot"),
+      it("o1", "Solicitação formal à Contabilidade com objeto, valor, parcela do exercício e cronograma; protocolo guardado", "Art. 150"),
       it("o2", "Natureza da despesa compatível com o objeto (obra é despesa de capital, não serviço de terceiros)"),
-      it("o3", "Agente de contratação ou comissão designado por ato publicado", "Arts. 7º e 8º"),
-      it("o4", "Gestor, fiscal e fiscal substituto designados por portaria, respeitada a segregação de funções", "Art. 7º, § 1º; art. 117"),
     ],
     atencao: [
-      "Conferir o número da lei ou do decreto citado nas portarias de designação.",
-      "A classificação da despesa deve ser a mesma na declaração da Contabilidade, no TR e no contrato.",
+      "Ausência de indicação de dotação no momento do protocolo é erro comum.",
+      "Se o contrato atravessa exercícios, informe a divisão por ano.",
+      "Com convênio, confira as regras específicas do instrumento.",
+      "A classificação da despesa deve ser a mesma na indicação da Contabilidade, no TR e no contrato.",
     ],
-    modelo: null,
+    modelo: `SOLICITAÇÃO DE RESERVA DE DOTAÇÃO ORÇAMENTÁRIA
+Ofício da Secretaria demandante à Contabilidade; identificação do processo
+1. Objeto (conforme o Termo de Referência ou Projeto Básico)
+2. Valor estimado total e parcela do exercício
+3. Divisão por exercício (se o contrato atravessa anos)
+4. Origem do recurso (próprio, convênio ou transferência)
+5. Cronograma de desembolso
+6. Pedido de reserva e indicação da dotação
+Local e data; assinatura do responsável pela Secretaria`,
+  },
+  {
+    id: "fiscal", nome: "Fiscal e protocolo", doc: "Indicação do fiscal do contrato e encaminhamento ao Departamento de Licitações",
+    fase: "interna", campos: CAMPOS.fiscal,
+    oque: "Indique o servidor que atuará como fiscal do futuro contrato — preferencialmente efetivo, com atribuições ou formação compatíveis com o objeto e sem vínculo com o contratado — e o substituto. Reúna os documentos das etapas 1 a 6 em ordem e protocole o processo completo no Departamento de Licitações e Contratos. A partir daí a responsabilidade passa a ser do Departamento.",
+    base: [{ rotulo: "Art. 7º", url: U.a7 }, { rotulo: "Art. 117" }, { rotulo: "Dec. 2.533/2024, art. 5º" }],
+    papeis: ["requisitante", "contratacao"],
+    itens: [
+      campos("fiscal"),
+      it("o4", "Fiscal e substituto designados pela autoridade competente, respeitada a segregação de funções", "Art. 7º, § 1º; art. 117; Dec. 2.533/2024, art. 5º"),
+      it("f2", "Documentos das etapas 1 a 6 reunidos em ordem nos autos (DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação)"),
+    ],
+    atencao: [
+      "Processo protocolado incompleto, faltando algum documento das etapas 1 a 6, volta em diligência.",
+      "Designar como fiscal quem elaborou o projeto, o orçamento ou o ETP fere a segregação de funções.",
+      "O fiscal anota as ocorrências e comunica aos superiores o que ultrapassar a sua competência (art. 117, §§ 1º e 2º).",
+    ],
+    modelo: `INDICAÇÃO DE FISCAL DO CONTRATO E ENCAMINHAMENTO
+Identificação do processo; Secretaria demandante; objeto
+1. Fiscal do contrato (nome, matrícula, cargo, vínculo e compatibilidade com o objeto)
+2. Fiscal substituto
+3. Gestor do contrato (se definido)
+4. Declarações (ausência de vínculo com contratados; segregação de funções)
+5. Documentos da fase interna encaminhados (DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação)
+6. Encaminhamento ao Departamento de Licitações e Contratos
+Local e data; assinatura do responsável pela Secretaria`,
   },
   {
     id: "edital", nome: "Edital e contrato", doc: "Edital (ou aviso de contratação direta) e minuta de contrato",
+    fase: "externa", campos: [],
     oque: "Reúne as regras da disputa e do contrato. Na dispensa eletrônica, o instrumento é o aviso de contratação direta; na inexigibilidade não há disputa, e a etapa trata da minuta de contrato.",
     base: [{ rotulo: "Art. 25", url: U.a25 }, { rotulo: "Art. 18, V, VI e VIII", url: U.a18 }, { rotulo: "Art. 72", url: U.a72 }],
     papeis: ["contratacao"],
     itens: [
+      it("ed0", "Declaração de adequação orçamentária emitida pela Contabilidade, com a dotação e o saldo", "Art. 72, IV"),
+      it("o3", "Agente de contratação ou comissão designado por ato publicado", "Arts. 7º e 8º"),
       it("ed1", "Instrumento completo: objeto, convocação, julgamento, habilitação, recursos, penalidades, fiscalização e gestão, entrega e pagamento", "Art. 25, caput", "naoinex"),
       it("ed2", "Modalidade, critério de julgamento e modo de disputa motivados", "Art. 18, VIII", "lic"),
       it("ed3", "Instrumento com vocabulário de contratação direta, sem termos de pregão", "", "disp"),
@@ -287,6 +339,7 @@ Local e data; assinatura da autoridade ou do agente de contratação`,
   },
   {
     id: "parecer", nome: "Parecer jurídico", doc: "Relatório de saneamento (resposta ao parecer)",
+    fase: "externa", campos: [],
     oque: "O órgão jurídico faz o controle prévio de legalidade. Se o parecer devolver o processo em diligência, cada ressalva recebe uma providência e um documento, reunidos no relatório de saneamento.",
     base: [{ rotulo: "Art. 53", url: U.a53 }, { rotulo: "Art. 72, III", url: U.a72 }],
     papeis: ["juridico", "contratacao"],
@@ -315,6 +368,7 @@ Local e data; assinaturas do setor de licitações e da área requisitante`,
   },
   {
     id: "pub", nome: "Autorização e publicação", doc: "Extrato para publicação",
+    fase: "externa", campos: [],
     oque: "A autoridade autoriza e o instrumento é divulgado. Daqui em diante corre o prazo para propostas.",
     base: [{ rotulo: "Art. 53, § 3º", url: U.a53 }, { rotulo: "Art. 54", url: U.a54 }, { rotulo: "Art. 55", url: U.a55 }, { rotulo: "Art. 75, § 3º", url: U.a75p3 }, { rotulo: "Art. 72, VIII e parágrafo único", url: U.a72 }],
     papeis: ["autoridade", "contratacao"],
@@ -367,26 +421,69 @@ export function atual(p: ProcessoBase, c: Checks) {
   return ETAPAS.length - 1;
 }
 export const concluido = (p: ProcessoBase, c: Checks) => ETAPAS.every((e) => feita(e, p, c));
-export const TRILHA_PROCESSO = [{ id: "solicitacao", nome: "Solicitação" }, ...ETAPAS]
-  .map(({ id, nome }, i) => ({ id, nome, numero: i + 1 }));
+export const TRILHA_PROCESSO = ETAPAS.map(({ id, nome, fase }, i) => ({ id, nome, fase, numero: i + 1 }));
+/** Quantas etapas a Secretaria cumpre antes do protocolo no Departamento de Licitações. */
+export const ETAPAS_INTERNAS = ETAPAS.filter((e) => e.fase === "interna").length;
 
 type EstadoTrilha = "atual" | "concluida" | "disponivel" | "bloqueada";
 export type EtapaNaTrilha = (typeof TRILHA_PROCESSO)[number] & { estado: EstadoTrilha };
 export interface TrilhaProcesso { atual: EtapaNaTrilha; etapas: EtapaNaTrilha[] }
 
-export function trilhaDoProcesso(p: ProcessoBase, c: Checks, solicitacaoRegistrada: boolean, temMinutaDfd: boolean): TrilhaProcesso {
-  const formal = atual(p, c);
-  const comDfd = formal > 0 || temMinutaDfd || feitos(ETAPAS[0], p, c) > 0;
-  const indice = solicitacaoRegistrada || comDfd ? formal + 1 : 0;
+export function trilhaDoProcesso(p: ProcessoBase, c: Checks): TrilhaProcesso {
+  const indice = atual(p, c);
   const etapas = TRILHA_PROCESSO.map((etapa, i): EtapaNaTrilha => {
-    if (i === 0) return { ...etapa, estado: solicitacaoRegistrada ? "concluida" : indice === 0 ? "atual" : "disponivel" };
-    const formalIx = i - 1;
-    const estado = feita(ETAPAS[formalIx], p, c) ? "concluida"
-      : i === indice ? "atual" : liberada(formalIx, p, c) ? "disponivel" : "bloqueada";
+    const estado = feita(ETAPAS[i], p, c) ? "concluida" : i === indice ? "atual" : liberada(i, p, c) ? "disponivel" : "bloqueada";
     return { ...etapa, estado };
   });
   return { atual: etapas[indice], etapas };
 }
+
+/* ---------- campos de preenchimento ---------- */
+export const temValor = (x?: ValorCampo) => Array.isArray(x) ? x.length > 0 : Boolean(x?.trim());
+export function campoVisivel(c: Campo, p: ProcessoBase, v: Valores) {
+  if (!vale(p, c.cond)) return false;
+  if (!c.se) return true;
+  const ref = v[c.se.campo];
+  if (c.se.menosDe !== undefined) return (Array.isArray(ref) ? ref.length : 0) < c.se.menosDe;
+  const atual = Array.isArray(ref) ? "" : (ref ?? "");
+  if (c.se.em) return c.se.em.includes(atual);
+  if (c.se.fora) return !c.se.fora.includes(atual);
+  return true;
+}
+export const camposVisiveis = (e: Etapa, p: ProcessoBase, v: Valores) => e.campos.filter((c) => campoVisivel(c, p, v));
+/** Campos obrigatórios ainda em branco (ou declarações obrigatórias não marcadas). */
+export function camposFaltando(e: Etapa, p: ProcessoBase, v: Valores) {
+  return camposVisiveis(e, p, v).filter((c) => {
+    if (c.opcional) return false;
+    const exigidas = MARCAS_OBRIGATORIAS[`${e.id}.${c.id}`];
+    if (exigidas) { const x = v[c.id]; return !exigidas.every((o) => Array.isArray(x) && x.includes(o)); }
+    return !temValor(v[c.id]);
+  });
+}
+/** Mantém só os campos da etapa, com o tipo certo de valor. */
+export function limparValores(e: Etapa, v: Valores): Valores {
+  const out: Valores = {};
+  for (const c of e.campos) {
+    const x = v[c.id];
+    if (x === undefined) continue;
+    if (c.tipo === "marcas") { if (Array.isArray(x)) out[c.id] = x.filter((o) => c.opcoes?.some(([k]) => k === o)); }
+    else if (typeof x === "string") out[c.id] = c.tipo === "opcao" && x && !c.opcoes?.some(([k]) => k === x) ? "" : x;
+  }
+  return out;
+}
+/** Texto do valor de um campo para documentos e para a IA. */
+export function textoDoCampo(c: Campo, x?: ValorCampo) {
+  if (!temValor(x)) return "";
+  const rotulo = (k: string) => c.opcoes?.find(([o]) => o === k)?.[1] ?? k;
+  if (Array.isArray(x)) return x.map((k) => `- ${rotulo(k)}`).join("\n");
+  if (c.tipo === "opcao") return rotulo(x!);
+  if (c.tipo === "valor") {
+    const n = Number(x!.replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) && /\d/.test(x!) ? n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : x!.trim();
+  }
+  return x!.trim();
+}
+export const itemDosCampos = (e: Etapa) => e.itens.find((i) => i.auto);
 
 export const etapaPorId = (id: string) => ETAPAS.find((e) => e.id === id);
 export function etapaDoItem(itemId: string) {

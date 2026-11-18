@@ -15,9 +15,10 @@ import { AVISO_SEM_CREDITOS, FORMATO_MINUTA, MODELO, gerarEstruturado, gerarText
 import { lerOrcamentoSemIA } from "../leitura-sem-ia.js";
 import { extrairTexto } from "../extrair.js";
 import { calcularItens, checksDo, itensSolicitacaoOpcionais, minutaVigente, nomeEnviado, processoDo, salvarMinuta, upload, type Processo } from "./processos.js";
-import { ETAPAS, TIPOS, TRILHA_PROCESSO, VIAS, atual, etapaPorId, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../shared/etapas.js";
+import { ETAPAS, FASES, TIPOS, TRILHA_PROCESSO, VIAS, atual, etapaPorId, itensDe, liberada, pendencias, podeMarcar, type Checks } from "../../shared/etapas.js";
 import { fundamentosMinuta } from "../fundamentos-minuta.js";
 import { normasOficiais } from "../normas-oficiais.js";
+import { camposDo, camposParaIA } from "../campos.js";
 
 const LIMITE_DOC = 150_000; // caracteres por documento enviados à IA
 
@@ -89,14 +90,16 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   for (const a of apoios) l.push(`DOCUMENTO DE APOIO À SOLICITAÇÃO DE ${a.secretaria}: ${a.nome}`,
     a.texto ? corta(a.texto) : "Arquivo anexado à solicitação.");
   l.push(`Observações: ${p.obs || "nenhuma"}`, "", "ANDAMENTO");
-  const [inicio, ...formais] = TRILHA_PROCESSO;
-  l.push(`${inicio.numero}. ${inicio.nome}: ${solicitacoes.length} ${solicitacoes.length === 1 ? "pedido registrado" : "pedidos registrados"}`);
+  l.push(`Pedidos das secretarias (solicitações) registrados no DFD: ${solicitacoes.length}`);
   ETAPAS.forEach((x, i) => {
     const its = itensDe(x, p);
-    l.push(`${formais[i].numero}. ${x.nome}: ${its.filter((it) => c[it.id]).length} de ${its.length} itens conferidos`);
+    l.push(`${TRILHA_PROCESSO[i].numero}. ${x.nome} (${FASES[x.fase].nome}): ${its.filter((it) => c[it.id]).length} de ${its.length} itens conferidos`);
   });
+  const campos = await camposDo(p.id);
+  const preenchidos = camposParaIA(p, campos);
+  if (preenchidos) l.push("", "CAMPOS PREENCHIDOS PELA SECRETARIA NAS ETAPAS (fonte principal: use estes dados como estão, sem contradizê-los; quantidade e valor devem ser os mesmos em todas as peças)", preenchidos);
   if (solicitacao) {
-    l.push("", "ABA ABERTA: Solicitação", "Ajude a registrar os pedidos das secretarias, os itens e os orçamentos. O DFD tem uma etapa própria de minuta e conferência.");
+    l.push("", "ABA ABERTA: Solicitação", "Ajude a registrar os pedidos das secretarias, os itens e os orçamentos. Eles ficam dentro da etapa 2 (DFD), que tem campos, minuta e conferência próprios.");
   } else {
     l.push("", `ETAPA ABERTA: ${e.nome}${e.doc ? ` — documento: ${e.doc}` : ""}`, e.oque, "", "CHECKLIST DA ETAPA");
     itensDe(e, p).forEach((i) => l.push(`${c[i.id] ? "[x]" : "[ ]"} ${i.texto}${i.base ? ` (${i.base})` : ""}`));

@@ -368,7 +368,7 @@ create table if not exists minutas (
 );
 -- 'aproveitado': rascunho que o sistema monta com dados de peças anteriores, ao concluir uma etapa.
 alter table minutas drop constraint if exists minutas_origem_check;
-alter table minutas add constraint minutas_origem_check check (origem in ('manual','ia','importado','pendencias','aproveitado'));
+alter table minutas add constraint minutas_origem_check check (origem in ('manual','ia','importado','pendencias','aproveitado','campos'));
 
 -- Modelo de documento de cada etapa, personalizado por órgão.
 create table if not exists modelos (
@@ -545,3 +545,95 @@ create table if not exists revisao_recomendacoes (
   situacao text not null default 'pendente' check (situacao in ('pendente','em_adequacao','atendida','justificada'))
 );
 create index if not exists revisao_recomendacoes_indice on revisao_recomendacoes(revisao_id, id);
+
+-- Campos de preenchimento das etapas da fase interna (capacitação da Procuradoria, PAC 2027).
+create table if not exists campos_etapa (
+  processo_id int not null references processos(id) on delete cascade,
+  etapa text not null,
+  valores jsonb not null default '{}',
+  usuario_id int references usuarios(id) on delete set null,
+  atualizado_em timestamptz not null default now(),
+  primary key (processo_id, etapa)
+);
+
+-- PAC 2027 de Ibaiti: cronograma por Secretaria apresentado na capacitação da fase interna (Anexo I do PAC 2027).
+alter table pca_itens add column if not exists prioridade text;
+alter table pca_itens add column if not exists modalidade_prevista text;
+insert into pca_itens (orgao_id, ano, ordem_oficial, periodo_oficial, descricao, requisitante, prioridade, modalidade_prevista, tipo, tipo_oficial, valor_estimado)
+select o.id, 2027, dados.ordem, dados.inicio, dados.objeto, dados.secretaria, dados.prioridade, dados.modalidade, dados.tipo,
+       case when dados.tipo = 'bens' then 'Material' when dados.tipo = 'obra' then 'Obra' else 'Serviço' end, null
+from orgaos o cross join (values
+  (1, 'Novembro/2026', 'Combustíveis', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Dispensa', 'bens'),
+  (2, 'Setembro/2026', 'Manutenção preventiva e corretiva da frota', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Pregão', 'servicos'),
+  (3, 'Outubro/2026', 'Pneus, câmaras e protetores', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Pregão', 'bens'),
+  (4, 'Novembro/2026', 'Peças e componentes automotivos', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Registro de Preços', 'bens'),
+  (5, 'Dezembro/2026', 'Óleos, filtros e lubrificantes', 'Secretaria Municipal de Administração', 'P2 Alta', 'Registro de Preços', 'bens'),
+  (6, 'Outubro/2026', 'Materiais de limpeza e higiene', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Pregão', 'bens'),
+  (7, 'Janeiro/2027', 'Material de expediente e papelaria', 'Secretaria Municipal de Administração', 'P2 Alta', 'Compra centralizada / RP', 'bens'),
+  (8, 'Janeiro/2027', 'Toner, cartuchos e suprimentos de impressão', 'Secretaria Municipal de Administração', 'P2 Alta', 'Pregão', 'bens'),
+  (9, 'Janeiro/2027', 'Equipamentos e periféricos de informática', 'Secretaria Municipal de Administração', 'P2 Alta', 'Pregão', 'bens'),
+  (10, 'Setembro/2026', 'Internet e comunicação de dados', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Serviço continuado', 'servicos'),
+  (11, 'Dezembro/2026', 'Telefonia', 'Secretaria Municipal de Administração', 'P2 Alta', 'Serviço continuado', 'servicos'),
+  (12, 'Outubro/2026', 'Gás P13 e P45', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Pregão', 'bens'),
+  (13, 'Março/2027', 'Extintores e segurança contra incêndio', 'Secretaria Municipal de Administração', 'P2 Alta', 'Dispensa', 'bens'),
+  (14, 'Dezembro/2026', 'Dedetização e limpeza de caixas d''água', 'Secretaria Municipal de Administração', 'P2 Alta', 'Pregão', 'servicos'),
+  (15, 'Setembro/2026', 'Manutenção predial', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Concorrência', 'obra'),
+  (16, 'Março/2027', 'Materiais de construção, elétricos e hidráulicos', 'Secretaria Municipal de Administração', 'P2 Alta', 'Dispensa', 'bens'),
+  (17, 'Fevereiro/2027', 'Serviços gráficos', 'Secretaria Municipal de Administração', 'P2 Alta', 'Pregão', 'servicos'),
+  (18, 'Outubro/2026', 'Seguro da frota', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Pregão', 'servicos'),
+  (19, 'Fevereiro/2027', 'Refeições / marmitex', 'Secretaria Municipal de Administração', 'P2 Alta', 'Pregão', 'bens'),
+  (20, 'Março/2027', 'Hospedagem', 'Secretaria Municipal de Administração', 'P4 Eventual', 'Pregão', 'servicos'),
+  (21, 'Março/2027', 'Passagens / transporte eventual', 'Secretaria Municipal de Administração', 'P4 Eventual', 'Registro de Preços', 'servicos'),
+  (22, 'Novembro/2026', 'Uniformes e EPIs', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Pregão', 'bens'),
+  (23, 'Abril/2027', 'Instalação e manutenção de ar-condicionado', 'Secretaria Municipal de Administração', 'P2 Alta', 'Dispensa', 'servicos'),
+  (24, 'Setembro/2026', 'Sistemas e softwares corporativos', 'Secretaria Municipal de Administração', 'P1 Crítica', 'Serviço continuado / licenciamento', 'servicos'),
+  (25, 'Setembro/2026', 'Medicamentos e insumos farmacêuticos', 'Secretaria Municipal de Saúde', 'P1 Crítica', 'Pregão / RP', 'bens'),
+  (26, 'Setembro/2026', 'Medicamentos judiciais', 'Secretaria Municipal de Saúde', 'P1 Crítica', 'Pregão', 'bens'),
+  (27, 'Setembro/2026', 'Materiais médico-hospitalares', 'Secretaria Municipal de Saúde', 'P1 Crítica', 'Pregão', 'bens'),
+  (28, 'Novembro/2026', 'Serviços médicos / credenciamento', 'Secretaria Municipal de Saúde', 'P1 Crítica', 'Inexigibilidade', 'servicos'),
+  (29, 'Setembro/2026', 'Exames laboratoriais', 'Secretaria Municipal de Saúde', 'P1 Crítica', 'Pregão', 'servicos'),
+  (30, 'Setembro/2026', 'Exames de diagnóstico por imagem', 'Secretaria Municipal de Saúde', 'P1 Crítica', 'Pregão', 'servicos'),
+  (31, 'Outubro/2026', 'Oxigênio medicinal', 'Secretaria Municipal de Saúde', 'P1 Crítica', 'Pregão', 'bens'),
+  (32, 'Novembro/2026', 'Manutenção de equipamentos hospitalares e odontológicos', 'Secretaria Municipal de Saúde', 'P1 Crítica', 'Pregão', 'servicos'),
+  (33, 'Novembro/2026', 'Insumos odontológicos', 'Secretaria Municipal de Saúde', 'P1 Crítica', 'Dispensa', 'bens'),
+  (34, 'Junho/2027', 'Equipamentos médicos e odontológicos', 'Secretaria Municipal de Saúde', 'P3 Planejada', 'Dispensa', 'bens'),
+  (35, 'Maio/2027', 'Ambulâncias e veículos de saúde', 'Secretaria Municipal de Saúde', 'P3 Planejada', 'Pregão', 'bens'),
+  (36, 'Maio/2027', 'Reformas, ampliações e coberturas de UBS', 'Secretaria Municipal de Saúde', 'P3 Planejada', 'Concorrência / engenharia', 'obra'),
+  (37, 'Outubro/2026', 'Transporte escolar', 'Secretaria Municipal de Educação', 'P1 Crítica', 'Pregão', 'servicos'),
+  (38, 'Outubro/2026', 'Alimentação escolar / gêneros alimentícios', 'Secretaria Municipal de Educação', 'P1 Crítica', 'Pregão', 'bens'),
+  (39, 'Outubro/2026', 'Agricultura familiar - alimentação escolar', 'Secretaria Municipal de Educação', 'P1 Crítica', 'Pregão', 'bens'),
+  (40, 'Dezembro/2026', 'Material escolar e pedagógico', 'Secretaria Municipal de Educação', 'P2 Alta', 'Pregão / RP', 'bens'),
+  (41, 'Janeiro/2027', 'Manutenção das escolas e CMEIs', 'Secretaria Municipal de Educação', 'P2 Alta', 'RP / serviços por demanda', 'servicos'),
+  (42, 'Dezembro/2026', 'Uniformes, tênis e mochilas', 'Secretaria Municipal de Educação', 'P2 Alta', 'Pregão', 'bens'),
+  (43, 'Maio/2027', 'Mobiliário e equipamentos escolares', 'Secretaria Municipal de Educação', 'P3 Planejada', 'Pregão', 'bens'),
+  (44, 'Maio/2027', 'Reformas, ampliações e quadras', 'Secretaria Municipal de Educação', 'P3 Planejada', 'Concorrência / engenharia', 'obra'),
+  (45, 'Outubro/2026', 'Manutenção de máquinas pesadas', 'Secretaria Municipal de Obras, Viação e Serviços Urbanos', 'P1 Crítica', 'RP / manutenção especializada', 'servicos'),
+  (46, 'Novembro/2026', 'Saibro, cascalho, brita e agregados', 'Secretaria Municipal de Obras, Viação e Serviços Urbanos', 'P1 Crítica', 'Pregão', 'bens'),
+  (47, 'Dezembro/2026', 'Massa asfáltica e emulsão', 'Secretaria Municipal de Obras, Viação e Serviços Urbanos', 'P1 Crítica', 'Dispensa', 'bens'),
+  (48, 'Janeiro/2027', 'Tubos, galerias e drenagem', 'Secretaria Municipal de Obras, Viação e Serviços Urbanos', 'P2 Alta', 'Registro de Preços', 'bens'),
+  (49, 'Março/2027', 'Manutenção de iluminação e semáforos', 'Secretaria Municipal de Obras, Viação e Serviços Urbanos', 'P2 Alta', 'Dispensa', 'servicos'),
+  (50, 'Abril/2027', 'Pavimentação, recape e drenagem', 'Secretaria Municipal de Obras, Viação e Serviços Urbanos', 'P3 Planejada', 'Concorrência', 'obra'),
+  (51, 'Abril/2027', 'Projetos de engenharia, topografia e sondagens', 'Secretaria Municipal de Obras, Viação e Serviços Urbanos', 'P3 Planejada', 'Pregão', 'servicos'),
+  (52, 'Junho/2027', 'Poços artesianos - estudos, projetos e perfuração', 'Secretaria Municipal de Obras, Viação e Serviços Urbanos', 'P3 Planejada', 'Pregão', 'obra'),
+  (53, 'Novembro/2026', 'Gêneros alimentícios e benefícios eventuais', 'Secretaria Municipal de Assistência Social', 'P1 Crítica', 'Pregão', 'bens'),
+  (54, 'Novembro/2026', 'Serviços socioassistenciais / acolhimento', 'Secretaria Municipal de Assistência Social', 'P1 Crítica', 'Inexigibilidade', 'servicos'),
+  (55, 'Fevereiro/2027', 'Oficinas e atividades socioassistenciais', 'Secretaria Municipal de Assistência Social', 'P2 Alta', 'Contratação de serviços', 'servicos'),
+  (56, 'Maio/2027', 'Mobiliário e equipamentos', 'Secretaria Municipal de Assistência Social', 'P3 Planejada', 'Pregão', 'bens'),
+  (57, 'Janeiro/2027', 'Manutenção de máquinas e equipamentos agrícolas', 'Secretaria Municipal de Agricultura', 'P2 Alta', 'Pregão', 'servicos'),
+  (58, 'Fevereiro/2027', 'Insumos agrícolas, mudas, sementes e fertilizantes', 'Secretaria Municipal de Agricultura', 'P2 Alta', 'Registro de Preços', 'bens'),
+  (59, 'Junho/2027', 'Tratores e implementos', 'Secretaria Municipal de Agricultura', 'P3 Planejada', 'Pregão', 'bens'),
+  (60, 'Junho/2027', 'Estruturas rurais, estufas e equipamentos', 'Secretaria Municipal de Agricultura', 'P3 Planejada', 'Pregão / engenharia', 'obra'),
+  (61, 'Abril/2027', 'Materiais esportivos', 'Secretaria Municipal de Cultura, Esporte e Lazer', 'P2 Alta', 'Dispensa', 'bens'),
+  (62, 'Abril/2027', 'Manutenção de espaços esportivos e culturais', 'Secretaria Municipal de Cultura, Esporte e Lazer', 'P2 Alta', 'Serviços por demanda', 'servicos'),
+  (63, 'Março/2027', 'Estrutura para eventos - palco, som, iluminação, tendas', 'Secretaria Municipal de Cultura, Esporte e Lazer', 'P4 Eventual', 'Pregão', 'servicos'),
+  (64, 'Conforme calendário', 'Shows e atrações artísticas', 'Secretaria Municipal de Cultura, Esporte e Lazer', 'P4 Eventual', 'Inexigibilidade quando cabível', 'servicos'),
+  (65, 'Fevereiro/2027', 'Transporte de equipes esportivas', 'Secretaria Municipal de Cultura, Esporte e Lazer', 'P2 Alta', 'RP / serviço de transporte', 'servicos'),
+  (66, 'Fevereiro/2027', 'Capacitações e treinamentos', 'Secretaria Municipal de Administração', 'P2 Alta', 'Contratação conforme demanda', 'servicos'),
+  (67, 'Abril/2027', 'Georreferenciamento, atualização cadastral e Planta Genérica de Valores', 'Secretaria Municipal de Administração', 'P3 Planejada', 'Concorrência / técnica e preço conforme estudo', 'servicos'),
+  (68, 'Maio/2027', 'Sistema de protocolo e processo digital', 'Secretaria Municipal de Administração', 'P3 Planejada', 'Licenciamento / serviço continuado', 'servicos'),
+  (69, 'Junho/2027', 'Digitalização e gestão documental', 'Secretaria Municipal de Administração', 'P3 Planejada', 'Serviço técnico', 'servicos')
+) as dados(ordem, inicio, objeto, secretaria, prioridade, modalidade, tipo)
+where regexp_replace(coalesce(o.cnpj, ''), '[^0-9]', '', 'g') = '77008068000141'
+   or (regexp_replace(coalesce(o.cnpj, ''), '[^0-9]', '', 'g') = ''
+       and lower(btrim(o.nome)) ~ '^((município|municipio|prefeitura( municipal)?) de )?ibaiti([[:space:]]*[-/][[:space:]]*pr)?$')
+on conflict (orgao_id, ano, ordem_oficial) do nothing;

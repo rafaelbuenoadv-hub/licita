@@ -4,12 +4,14 @@ import { ehMunicipioIbaiti } from "./municipio-ibaiti.js";
 const tce = "https://www.tce.pr.gov.br/fiscalizado/lei-de-licitacoes-e-contratos.htm";
 
 const federais: Record<string, string> = {
-  dfd: "Arts. 12, VII, e 18, caput: verificar compatibilidade com o PCA, quando elaborado. Art. 72, I: DFD na instrução da contratação direta.",
+  pac: "Art. 12, VII, e art. 18, caput e § 1º, II: a contratação deve estar prevista no plano de contratações anual; fora dele, justificar a inclusão extraordinária e obter autorização prévia do Prefeito (Dec. Municipal 2.533/2024, art. 6º).",
+  dfd: "Art. 18, I: descrição da necessidade. Arts. 12, VII, e 18, caput: verificar compatibilidade com o PCA, quando elaborado. Art. 72, I: DFD na instrução da contratação direta.",
   etp: "Art. 18, §§ 1º e 2º: demonstrar a necessidade, comparar soluções e documentar quantidades, estimativas, parcelamento e conclusão. Observar os elementos mínimos e justificar a ausência dos demais.",
+  fiscal: "Art. 117: fiscal especialmente designado para acompanhar e fiscalizar a execução, com substituto. Art. 7º: preferencialmente servidor efetivo, com atribuições ou formação compatíveis, sem vínculo com o contratado e com segregação de funções (§ 1º). Dec. Municipal 2.533/2024, art. 5º.",
   riscos: "Art. 18, X: analisar riscos que possam comprometer a licitação e a execução. Relacionar os riscos a causas, consequências e medidas de tratamento próprias do objeto.",
   precos: "Art. 23: verificar compatibilidade com o mercado, quantidades, economia de escala e peculiaridades locais. Conferir fontes e metodologia pertinentes à natureza do objeto.",
-  tr: "Art. 6º, XXIII: objeto, fundamentação, solução, requisitos, execução, gestão, medição e pagamento, seleção, estimativa e adequação orçamentária. Conferir coerência com o ETP.",
-  dot: "Arts. 7º e 18, caput: verificar designações e compatibilidade orçamentária. Em contratação direta, conferir art. 72, IV.",
+  tr: "Art. 6º, XXIII (TR): objeto, fundamentação, solução, requisitos, execução, gestão, medição e pagamento, seleção, estimativa e adequação orçamentária. Art. 6º, XXV (Projeto Básico, em obras e serviços de engenharia). Art. 18, X: análise de riscos; art. 22: matriz de alocação de riscos, obrigatória em obras de grande vulto e na contratação integrada ou semi-integrada (§ 3º). Conferir coerência com o ETP e a pesquisa de preços.",
+  dot: "Art. 150: nenhuma contratação sem a caracterização do objeto e a indicação dos créditos orçamentários das parcelas do exercício, sob pena de nulidade. A Contabilidade emite a declaração de adequação orçamentária na fase externa (art. 72, IV, na contratação direta).",
   edital: "Arts. 25 e 92: conferir conteúdo do edital e cláusulas contratuais necessárias. Art. 54: publicidade do edital, quando se tratar de licitação.",
   parecer: "Art. 53: controle prévio de legalidade, observadas as hipóteses do § 5º. Vincular cada resposta ao apontamento real do parecer.",
   pub: "Arts. 54 e 94: distinguir publicidade do edital e divulgação contratual. Na contratação direta, conferir art. 72, parágrafo único.",
