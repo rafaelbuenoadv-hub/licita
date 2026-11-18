@@ -52,7 +52,7 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
   const v = (etapa: string, campo: string) => { const x = campos[etapa]?.[campo]; return typeof x === "string" ? x : ""; };
   const pacTexto = itemPca
     ? `Contratação prevista no PAC ${p.ano}${itemPca.ordem_oficial ? `, item ${itemPca.ordem_oficial}` : ""}: ${itemPca.descricao}${itemPca.periodo_oficial ? `. Início previsto: ${itemPca.periodo_oficial}` : ""}.`
-    : v("pac", "justificativa_inclusao") ? `Contratação fora do PAC, com justificativa de inclusão extraordinária e autorização do Prefeito (${v("pac", "autorizacao_prefeito")}).` : "";
+    : v("pac", "justificativa_inclusao") ? `Contratação fora do PAC, com justificativa de inclusão extraordinária: ${v("pac", "justificativa_inclusao")}` : "";
   const quantidades = itens.length
     ? itens.map((i) => `- ${i.descricao}: ${i.quantidade ?? "?"} ${i.unidade || ""}`.trimEnd()).join("\n")
     : "";

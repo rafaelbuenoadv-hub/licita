@@ -56,7 +56,7 @@ const api = async (metodo: string, url: string, corpo?: object) => {
 
 /** Conclui a etapa 1 (verificação no PAC) para liberar o DFD. */
 async function concluirPac(id: number) {
-  const r = await api("PUT", `/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda de teste.", autorizacao_prefeito: "Despacho de teste" } });
+  const r = await api("PUT", `/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda de teste." } });
   if (r.status !== 200) throw new Error(await r.text());
   const m = await api("POST", `/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
   if (m.status !== 200) throw new Error(await m.text());

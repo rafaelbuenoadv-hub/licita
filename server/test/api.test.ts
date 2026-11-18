@@ -55,7 +55,7 @@ async function preencherCampos(c: Cliente, id: number, e: Etapa) {
 }
 /** Conclui a etapa 1 (verificação no PAC) para liberar o DFD. */
 async function concluirPac(c: Cliente, id: number) {
-  assert.equal((await c.put(`/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda de teste.", autorizacao_prefeito: "Despacho de teste" } })).status, 200);
+  assert.equal((await c.put(`/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda de teste." } })).status, 200);
   assert.equal((await c.post(`/api/processos/${id}/checagens`, { item: "pc1", marcado: true })).status, 200);
 }
 async function usuario(orgao: number, email: string, papeis: string[]) {
@@ -159,7 +159,7 @@ test("cria processo e respeita ordem das etapas e papéis", async () => {
   // O item dos campos é do sistema: não se marca à mão.
   assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: "pac.campos", marcado: true })).status, 400);
   // Conclui a verificação no PAC: campos (fora do PAC, com autorização) e conferência.
-  assert.equal((await req.put(`/api/processos/${procId}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda surgida após a aprovação do PAC.", autorizacao_prefeito: "Despacho nº 12/2026" } })).status, 200);
+  assert.equal((await req.put(`/api/processos/${procId}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda surgida após a aprovação do PAC." } })).status, 200);
   for (const i of itensDe(ETAPAS[0], { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
     assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
   }
@@ -699,9 +699,9 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   assert.equal(r.dados.pendencias.find((x: any) => x.codigo === "pca").bloqueia, true);
 
   // Fora do PAC: justificativa e autorização do Prefeito; o sistema marca o item dos campos.
-  assert.equal((await admin.put(`/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Cadeiras quebradas após o início do ano letivo.", autorizacao_prefeito: "Despacho nº 3/2028" } })).status, 200);
+  assert.equal((await admin.put(`/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Cadeiras quebradas após o início do ano letivo." } })).status, 200);
   let det = (await admin.get(`/api/processos/${id}`)).dados;
-  assert.deepEqual(det.campos.pac, { consta: "nao", justificativa_inclusao: "Cadeiras quebradas após o início do ano letivo.", autorizacao_prefeito: "Despacho nº 3/2028" });
+  assert.deepEqual(det.campos.pac, { consta: "nao", justificativa_inclusao: "Cadeiras quebradas após o início do ano letivo." });
   assert.ok(det.checagens.some((c: any) => c.item === "pac.campos"));
   await admin.post(`/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
   r = await admin.post(pac);
@@ -743,7 +743,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   det = (await admin.get(`/api/processos/${id}`)).dados;
   assert.equal(det.sugestoes_campos.etp.i, dfd.justificativa);
   assert.equal(det.sugestoes_campos.etp.iv, dfd.quantidade);
-  assert.match(det.sugestoes_campos.etp.ii, /fora do PAC.*Despacho nº 3\/2028/);
+  assert.match(det.sugestoes_campos.etp.ii, /fora do PAC.*Cadeiras quebradas/);
 
   r = await admin.post(rota);
   assert.deepEqual([...new Set(cods())], ["item"]);

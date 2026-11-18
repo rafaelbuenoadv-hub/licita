@@ -42,8 +42,6 @@ export const CAMPOS: Record<string, Campo[]> = {
       ajuda: "Explique por que a contratação começa antes ou depois do mês previsto no PAC." },
     { id: "justificativa_inclusao", rotulo: "Justificativa da inclusão extraordinária", tipo: "area", se: { campo: "consta", em: ["nao"] },
       ajuda: "Por que o objeto não foi planejado e por que precisa ser contratado agora." },
-    { id: "autorizacao_prefeito", rotulo: "Autorização prévia do Prefeito", tipo: "texto", se: { campo: "consta", em: ["nao"] },
-      ajuda: "Nº e data do despacho ou documento em que o Prefeito autoriza a contratação fora do PAC. Sem ela, o processo não prossegue." },
   ],
   dfd: [
     { id: "responsavel", rotulo: "Responsável pela Secretaria", tipo: "texto", ajuda: "Nome e cargo de quem solicita e assina o DFD (o titular da Secretaria ou quem ele designar)." },
