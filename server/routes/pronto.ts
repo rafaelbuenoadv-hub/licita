@@ -8,8 +8,9 @@ import { minutaParaDocx } from "../docx.js";
 import { minutaParaPdf } from "../pdf.js";
 import { lerTimbrado, timbradosDoOrgao } from "../timbrados.js";
 import { upload, nomeEnviado } from "./processos.js";
+import { localizadorDeTitulares } from "../portarias.js";
 import {
-  VAZIO_PP, documentoPP, limitePP, pendenciasPagamento, pendenciasPedido, pendenciasRecebimento, totalPP,
+  VAZIO_PP, documentoPP, titularPP, limitePP, pendenciasPagamento, pendenciasPedido, pendenciasRecebimento, totalPP,
   type DadosPP, type SituacaoPP,
 } from "../../shared/pronto-pagamento.js";
 
@@ -72,6 +73,13 @@ export function rotasPronto() {
   const r = Router();
   r.use("/pronto", exigeLogin);
 
+  // Titular da Secretaria no cadastro de secretários (nome e portaria), para preencher o responsável e a assinatura.
+  r.get("/pronto/titular", async (req, res) => {
+    const secretaria = z.string().max(200).parse(req.query.secretaria ?? "");
+    const t = secretaria.trim() ? (await localizadorDeTitulares(req.usuario!.orgao_id))(secretaria) : undefined;
+    res.json({ titular: t ? { nome: t.nome, secretaria: t.secretaria, portaria: t.portaria, texto: titularPP(t) } : null });
+  });
+
   r.get("/pronto", async (req, res) => {
     const ano = Number(req.query.ano ?? new Date().getFullYear());
     const lista = await q(
@@ -84,12 +92,13 @@ export function rotasPronto() {
   r.post("/pronto", exigePapel("requisitante", "contratacao"), async (req, res) => {
     const { ano, secretaria } = z.object({ ano: z.number().int().min(2021).max(2100), secretaria: z.string().max(200).default("") }).parse(req.body);
     const orgao = req.usuario!.orgao_id;
+    const titular = secretaria.trim() ? (await localizadorDeTitulares(orgao))(secretaria) : undefined;
     const novo = await tx(async (c) => {
       const k = (await c.query(
         `insert into sequencias (orgao_id, ano, chave, ultimo) values ($1,$2,'pronto',1)
          on conflict (orgao_id, ano, chave) do update set ultimo = sequencias.ultimo + 1 returning ultimo`, [orgao, ano])).rows[0].ultimo as number;
       const protocolo = `PP ${ano}/${String(k).padStart(4, "0")}`;
-      const dados = { ...VAZIO_PP, secretaria, responsavel: [req.usuario!.nome, req.usuario!.cargo].filter(Boolean).join(" — ") };
+      const dados = { ...VAZIO_PP, secretaria, responsavel: titular ? titularPP(titular) : "" };
       return (await c.query("insert into pronto_pagamentos (orgao_id, protocolo, ano, dados, criado_por) values ($1,$2,$3,$4,$5) returning id, protocolo",
         [orgao, protocolo, ano, JSON.stringify(dados), req.usuario!.id])).rows[0] as { id: number; protocolo: string };
     });
@@ -127,6 +136,11 @@ export function rotasPronto() {
     if (fora.length) throw new ErroHttp(409, "Esses dados não podem mais ser alterados nesta etapa.");
     const novos = z.object(permitidos as z.ZodRawShape).parse(recebido);
     const dados = { ...p.dados, ...novos } as DadosPP;
+    // Secretaria informada e responsável em branco: usa o titular do cadastro de secretários.
+    if (p.situacao === "pedido" && !dados.responsavel?.trim() && dados.secretaria?.trim()) {
+      const t = (await localizadorDeTitulares(p.orgao_id))(dados.secretaria);
+      if (t) dados.responsavel = titularPP(t);
+    }
     await q("update pronto_pagamentos set dados=$1, valor_total=$2, atualizado_em=now() where id=$3", [JSON.stringify(dados), totalPP(dados.itens), p.id]);
     res.json({ ok: true });
   });

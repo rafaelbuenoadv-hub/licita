@@ -44,6 +44,16 @@ export function limitePP(ano: number) {
   return { ...LIMITES_PP[usado], ano: usado, exato: false };
 }
 
+/** Titular da Secretaria, do cadastro de secretários, no texto do campo "responsável". */
+export const titularPP = (t: { nome: string; secretaria: string; portaria: string | null }) =>
+  `${t.nome} — Secretário(a) Municipal de ${t.secretaria}${t.portaria ? ` (Portaria nº ${t.portaria})` : ""}`;
+/** Linhas de assinatura a partir do responsável: nome, cargo e portaria de nomeação, quando houver. */
+export function assinaturaPP(responsavel: string, secretaria: string) {
+  const [nome, resto] = responsavel.includes(" — ") ? responsavel.split(" — ", 2) : [responsavel || "Responsável pelo pedido", secretaria];
+  const m = /^(.*?)\s*\(Portaria nº ([^)]+)\)\s*$/.exec(resto ?? "");
+  return [`@ ${nome.trim()}`, `@ ${(m ? m[1] : resto || secretaria).trim()}`, ...(m ? [`@ Portaria de nomeação nº ${m[2].trim()}`] : [])].join("\n");
+}
+
 export const totalItemPP = (i: ItemPP) => i.quantidade != null && i.valor_unitario != null ? Math.round(i.quantidade * i.valor_unitario * 100) / 100 : null;
 export const totalPP = (itens: ItemPP[]) => Math.round(itens.reduce((s, i) => s + (totalItemPP(i) ?? 0), 0) * 100) / 100;
 
@@ -99,7 +109,7 @@ export function documentoPP(r: RegistroPP, tipo: "autorizacao" | "completo") {
     tipo === "autorizacao" ? "# SOLICITAÇÃO E AUTORIZAÇÃO DE PRONTO PAGAMENTO" : "# PROCESSO DE PRONTO PAGAMENTO",
     `${r.orgao} · Pronto pagamento nº ${r.protocolo}`,
     `Lei nº 14.133/2021, art. 95, § 2º — pequenas compras e serviços de pronto pagamento até ${real(lim.valor)} (${lim.fonte}).`,
-    "## 1. Secretaria solicitante", `${d.secretaria}. Responsável: ${d.responsavel}.`,
+    "## 1. Secretaria solicitante", `${d.secretaria}. Responsável: ${d.responsavel.replace(" — ", ", ")}.`,
     "## 2. Objeto", `${d.tipo === "servico" ? "Prestação de serviço" : "Compra"}: ${d.objeto}`,
     "## 3. Justificativa", d.justificativa,
     "## 4. Itens",
@@ -115,7 +125,7 @@ export function documentoPP(r: RegistroPP, tipo: "autorizacao" | "completo") {
   if (d.dotacao.trim()) l.push("## 7. Dotação orçamentária", d.dotacao);
   l.push("## Declaração",
     `O valor total de ${real(total)} não ultrapassa o limite do art. 95, § 2º, da Lei nº 14.133/2021 para o exercício. A contratação é verbal, de entrega ou execução imediata e sem obrigações futuras.`);
-  l.push(`${r.municipio}${r.municipio ? ", " : ""}____ de ____________ de ${r.ano}.`, `@ ${d.responsavel || "Responsável pelo pedido"}\n@ ${d.secretaria}`);
+  l.push(`${r.municipio}${r.municipio ? ", " : ""}____ de ____________ de ${r.ano}.`, assinaturaPP(d.responsavel, d.secretaria));
   l.push("## Autorização", r.autorizado_por
     ? `Autorizo a ${d.tipo === "servico" ? "prestação do serviço" : "compra"} acima, no valor de ${real(total)}, por pronto pagamento. Autorizado em ${dataBR(r.autorizado_em!.slice(0, 10))}.`
     : `Autorizo a ${d.tipo === "servico" ? "prestação do serviço" : "compra"} acima, no valor de ${real(total)}, por pronto pagamento.`,

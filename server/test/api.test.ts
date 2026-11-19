@@ -1597,3 +1597,20 @@ test("pronto pagamento: documento de autorização traz itens em quadro, limite 
   assert.match(texto, /Autorizado em 19\/11\/2026\.\n\n@ Prefeito Teste\n@ Ordenador da despesa/);
   assert.ok(!texto.includes("Recebimento e atesto"));
 });
+
+test("pronto pagamento: o responsável e a assinatura vêm do cadastro de secretários", async () => {
+  const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
+  const t = (await admin.get(`/api/pronto/titular?secretaria=${encodeURIComponent("SEDUC")}`)).dados.titular;
+  assert.deepEqual(t, { nome: "Denise da Silva Lima", secretaria: "Educação", portaria: "008/2025", texto: "Denise da Silva Lima — Secretário(a) Municipal de Educação (Portaria nº 008/2025)" });
+  assert.equal((await admin.get("/api/pronto/titular?secretaria=Inexistente")).dados.titular, null);
+  const novo = (await admin.post("/api/pronto", { ano: 2026, secretaria: "SEDUC" })).dados;
+  const rota = `/api/pronto/${novo.id}`;
+  assert.equal((await admin.get(rota)).dados.dados.responsavel, t.texto);
+  // Responsável apagado e Secretaria trocada: o sistema põe o titular da nova Secretaria.
+  assert.equal((await admin.put(rota, { dados: { secretaria: "Obras", responsavel: "" } })).status, 200);
+  assert.match((await admin.get(rota)).dados.dados.responsavel, /^Antônio Vincenzi — Secretário\(a\) Municipal de Obras/);
+  assert.equal((await admin.put(rota, { dados: { secretaria: "SEDUC", responsavel: t.texto } })).status, 200);
+  const { documentoPP, VAZIO_PP } = await import("../../shared/pronto-pagamento.js");
+  const texto = documentoPP({ protocolo: "PP 2026/0009", ano: 2026, situacao: "pedido", orgao: "Município", municipio: "", autorizado_por: null, autorizado_em: null, dados: { ...VAZIO_PP, secretaria: "SEDUC", responsavel: t.texto } }, "autorizacao");
+  assert.match(texto, /@ Denise da Silva Lima\n@ Secretário\(a\) Municipal de Educação\n@ Portaria de nomeação nº 008\/2025/);
+});

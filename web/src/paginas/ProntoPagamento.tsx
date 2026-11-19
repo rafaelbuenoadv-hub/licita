@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, brl, dataHora, fmtNum, numBR } from "../api";
 import { tem, useEu } from "../main";
-import { ETAPAS_PP, FORMAS_PAGAMENTO, ORDEM_SITUACAO, SITUACOES, totalItemPP, type DadosPP, type ItemPP, type SituacaoPP } from "../../../shared/pronto-pagamento";
+import { ETAPAS_PP, FORMAS_PAGAMENTO, ORDEM_SITUACAO, SITUACOES, titularPP, totalItemPP, type DadosPP, type ItemPP, type SituacaoPP } from "../../../shared/pronto-pagamento";
 
 const CHAVES: Record<string, (keyof DadosPP)[]> = {
   pedido: ["secretaria", "responsavel", "tipo", "objeto", "justificativa", "itens", "fornecedor", "fornecedor_doc", "fornecedor_contato", "pesquisa_preco", "dotacao"],
@@ -40,6 +40,22 @@ export function ProntoPagamentoPg() {
   const [pend, setPend] = useState<{ campo: string; texto: string }[]>([]);
   const [timbrado, setTimbrado] = useState("");
   const [tipoAnexo, setTipoAnexo] = useState("orcamento");
+  const [titular, setTitular] = useState<{ nome: string; secretaria: string; portaria: string | null; texto: string } | null | undefined>(undefined);
+  const secretariaAtual = d?.secretaria ?? "";
+  useEffect(() => {
+    if (!secretariaAtual.trim()) { setTitular(undefined); return; }
+    const t = setTimeout(() => {
+      api.get(`/pronto/titular?secretaria=${encodeURIComponent(secretariaAtual)}`).then((r) => setTitular(r.titular)).catch(() => setTitular(undefined));
+    }, 350);
+    return () => clearTimeout(t);
+  }, [secretariaAtual]);
+  // Ao escolher a Secretaria, o responsável vem do cadastro de secretários (se ainda não foi digitado outro).
+  useEffect(() => {
+    if (!titular || !d || p?.situacao !== "pedido" || !p?.pode?.pedido) return;
+    if (!d.responsavel.trim() || /— Secretário\(a\) Municipal de /.test(d.responsavel)) {
+      if (d.responsavel !== titular.texto) { setD({ ...d, responsavel: titular.texto }); setSujo(true); }
+    }
+  }, [titular]);
 
   const carregar = useCallback(async () => {
     try {
@@ -142,7 +158,12 @@ export function ProntoPagamentoPg() {
           <div className="campos-grade">
             {campo("secretaria", "Secretaria solicitante", { lista: "pp-secretarias" })}
             <datalist id="pp-secretarias">{p.secretarias.map((s: string) => <option key={s} value={s} />)}</datalist>
-            {campo("responsavel", "Responsável pelo pedido", { ajuda: "Nome e cargo de quem solicita e assina." })}
+            {campo("responsavel", "Responsável pelo pedido", { ajuda: "Vem do cadastro de secretários ao escolher a Secretaria. Pode trocar por quem o titular designou." })}
+            <div className="campo-etapa largo small" role="status">
+              {titular ? <span>Titular no cadastro: <b>{titular.nome}</b> — Secretário(a) Municipal de {titular.secretaria}{titular.portaria ? ` · Portaria nº ${titular.portaria}` : " · portaria não cadastrada"}
+                {editavel("responsavel") && d.responsavel !== titular.texto && <> · <button className="lnk" type="button" onClick={() => set("responsavel", titularPP(titular))}>Usar o titular</button></>}</span>
+                : titular === null ? <span className="muted">Secretaria não encontrada no cadastro de secretários (Configurações). Escolha uma da lista ou informe o responsável à mão.</span> : null}
+            </div>
             <fieldset className="campo-etapa largo">
               <legend><span className="campo-rot">Tipo</span></legend>
               <div className="opcoes" style={{ flexDirection: "row", gap: 16 }}>
