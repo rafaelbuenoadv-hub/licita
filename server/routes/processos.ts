@@ -519,7 +519,7 @@ export function rotasProcessos() {
     const lista = await conferirEtapa(p, e, checks, await camposDo(p.id));
     const prox = proximaEtapa(e);
     if (lista.some((x) => x.bloqueia)) return res.json({ concluida: false, pendencias: lista, proxima: null });
-    const protocolado = e.id === "fiscal";
+    const protocolado = e.id === "protocolo";
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: protocolado ? "processo.protocolado" : "etapa.concluida", detalhe: { etapa: e.id } });
     res.json({ concluida: true, protocolado, pendencias: lista, proxima: prox ? { id: prox.id, nome: prox.nome } : null });
   });

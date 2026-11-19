@@ -148,4 +148,9 @@ export const CAMPOS: Record<string, Campo[]> = {
   ],
 };
 
+CAMPOS.protocolo = [
+  { id: "responsavel", rotulo: "Responsável pelo encaminhamento", tipo: "texto", ajuda: "Nome e cargo de quem protocola em nome da Secretaria." },
+  { id: "observacoes", rotulo: "Observações ao Departamento de Licitações", tipo: "area", opcional: true, ajuda: "Prazos, urgência ou informações úteis para a fase externa." },
+];
+
 export const MARCAS_OBRIGATORIAS: Record<string, string[]> = { "fiscal.declaracoes": ["sem_vinculo", "segregacao"] };

@@ -50,8 +50,12 @@ export async function conferirEtapa(p: Proc, e: Etapa, checks: Checks, campos: R
   if (e.id === "tr" && v.matriz_obrigatoria === "sim" && v.matriz !== "sim") {
     l.push({ codigo: "matriz", texto: "Em obra de grande vulto ou contratação integrada ou semi-integrada a matriz de alocação de riscos é obrigatória (art. 22, § 3º).", onde: "campos", alvo: "matriz", bloqueia: true });
   }
-  if (e.id === "fiscal") {
+  if (e.id === "protocolo") {
     if (!temValor(campos.dot?.dotacao)) l.push({ codigo: "dotacao", texto: "A dotação indicada pela Contabilidade ainda não foi registrada na etapa \"Dotação orçamentária\". Sem ela o processo não é protocolado.", onde: "campos", alvo: "dotacao", bloqueia: true });
+    const pedidos = await q1<{ n: number }>("select count(*)::int as n from solicitacoes_processo where processo_id=$1", [p.id]);
+    if (!pedidos?.n) l.push({ codigo: "solicitacao", texto: "Registre a Solicitação das secretarias, com os itens e os orçamentos, antes de protocolar.", onde: "campos", alvo: "solicitacao", bloqueia: true });
+  }
+  if (e.id === "fiscal") {
     const nome = (x: unknown) => typeof x === "string" ? x.trim().toLowerCase() : "";
     if (nome(v.fiscal_nome) && nome(v.fiscal_nome) === nome(v.substituto_nome)) l.push({ codigo: "substituto", texto: "O fiscal substituto deve ser outra pessoa.", onde: "campos", alvo: "substituto_nome", bloqueia: true });
   }

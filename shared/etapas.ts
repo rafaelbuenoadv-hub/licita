@@ -269,29 +269,46 @@ Ofício da Secretaria demandante à Contabilidade; identificação do processo
 Local e data; assinatura do responsável pela Secretaria`,
   },
   {
-    id: "fiscal", nome: "Fiscal e protocolo", doc: "Indicação do fiscal do contrato e encaminhamento ao Departamento de Licitações",
+    id: "fiscal", nome: "Fiscal do contrato", doc: "Indicação do fiscal do contrato",
     fase: "interna", campos: CAMPOS.fiscal,
-    oque: "Indique o servidor que atuará como fiscal do futuro contrato — preferencialmente efetivo, com atribuições ou formação compatíveis com o objeto e sem vínculo com o contratado — e o substituto. Reúna os documentos das etapas 1 a 6 em ordem e protocole o processo completo no Departamento de Licitações e Contratos. A partir daí a responsabilidade passa a ser do Departamento.",
+    oque: "Indique o servidor que atuará como fiscal do futuro contrato — preferencialmente efetivo, com atribuições ou formação compatíveis com o objeto e sem vínculo com o contratado — e o substituto, que também deve ser servidor apto e sem vínculo com o contratado.",
     base: [{ rotulo: "Art. 7º", url: U.a7 }, { rotulo: "Art. 117" }, { rotulo: "Dec. 2.533/2024, art. 5º" }],
     papeis: ["requisitante", "contratacao"],
     itens: [
       campos("fiscal"),
       it("o4", "Fiscal e substituto designados pela autoridade competente, respeitada a segregação de funções", "Art. 7º, § 1º; art. 117; Dec. 2.533/2024, art. 5º"),
-      it("f2", "Documentos das etapas 1 a 6 reunidos em ordem nos autos (DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação)"),
     ],
     atencao: [
-      "Processo protocolado incompleto, faltando algum documento das etapas 1 a 6, volta em diligência.",
       "Designar como fiscal quem elaborou o projeto, o orçamento ou o ETP fere a segregação de funções.",
       "O fiscal anota as ocorrências e comunica aos superiores o que ultrapassar a sua competência (art. 117, §§ 1º e 2º).",
     ],
-    modelo: `INDICAÇÃO DE FISCAL DO CONTRATO E ENCAMINHAMENTO
+    modelo: `INDICAÇÃO DE FISCAL DO CONTRATO
 Identificação do processo; Secretaria demandante; objeto
 1. Fiscal do contrato (nome, matrícula, cargo, vínculo e compatibilidade com o objeto)
 2. Fiscal substituto
 3. Gestor do contrato (se definido)
 4. Declarações (ausência de vínculo com contratados; segregação de funções)
-5. Documentos da fase interna encaminhados (DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação)
-6. Encaminhamento ao Departamento de Licitações e Contratos
+Local e data; assinatura do responsável pela Secretaria`,
+  },
+  {
+    id: "protocolo", nome: "Protocolo", doc: "Encaminhamento ao Departamento de Licitações e Contratos",
+    fase: "interna", campos: CAMPOS.protocolo,
+    oque: "Encerra a fase interna. Registre a Solicitação das secretarias (feita por último, depois de todos os documentos), confira o checklist e protocole o processo completo no Departamento de Licitações e Contratos. A partir daí a responsabilidade passa a ser do Departamento.",
+    base: [{ rotulo: "Art. 18, caput", url: U.a18 }, { rotulo: "Dec. 2.533/2024, art. 5º" }],
+    papeis: ["requisitante", "contratacao"],
+    itens: [
+      campos("protocolo"),
+      it("f2", "Documentos das etapas 1 a 7 reunidos em ordem nos autos (verificação no PAC, DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação, indicação do fiscal)"),
+    ],
+    atencao: [
+      "Processo protocolado incompleto, faltando algum documento das etapas anteriores, volta em diligência.",
+      "Ausência de indicação de dotação orçamentária no momento do protocolo é erro comum.",
+    ],
+    modelo: `ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES E CONTRATOS
+Identificação do processo; Secretaria demandante; objeto
+1. Documentos da fase interna encaminhados (verificação no PAC, DFD, ETP, pesquisa de preços, TR/PB com análise de riscos, indicação de dotação, indicação do fiscal, solicitação das secretarias)
+2. Observações ao Departamento
+3. Pedido de providências da fase externa
 Local e data; assinatura do responsável pela Secretaria`,
   },
   {

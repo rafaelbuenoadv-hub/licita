@@ -91,6 +91,7 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
       valor_total: primeiro(v("precos", "valor_total"), total != null ? moeda(total) : ""),
     },
     fiscal: {},
+    protocolo: { responsavel: v("dfd", "responsavel") },
   };
   // Só sugere onde o campo ainda está em branco.
   for (const [etapa, valores] of Object.entries(sug)) {
@@ -122,14 +123,15 @@ export async function documentoDosCampos(p: Proc, e: Etapa, campos: Record<strin
     if (!texto || c.foraDoDocumento) continue;
     l.push(`## ${++n}. ${c.rotulo.replace(/^[a-z]\)\s*|^[IVX]+\s*—\s*/, "")}`, texto);
   }
-  if (e.id === "fiscal") {
+  if (e.id === "protocolo") {
     l.push(`## ${++n}. Encaminhamento`,
-      "Encaminha-se o processo, com os documentos da fase interna (verificação no PAC, DFD, ETP, pesquisa de preços e memória de cálculo, Termo de Referência ou Projeto Básico com análise de riscos e indicação de dotação orçamentária), ao Departamento de Licitações e Contratos, para as providências da fase externa.");
+      "Encaminha-se o processo, com os documentos da fase interna (verificação no PAC, DFD, ETP, pesquisa de preços e memória de cálculo, Termo de Referência ou Projeto Básico com análise de riscos, indicação de dotação orçamentária, indicação do fiscal do contrato e solicitação das secretarias), ao Departamento de Licitações e Contratos, para as providências da fase externa.");
   }
   if (e.id === "dot") {
     l.push(`## ${++n}. Pedido`, "Solicita-se à Contabilidade a reserva e a indicação da dotação orçamentária compatível com o objeto, para as parcelas que vencem no exercício (Lei nº 14.133/2021, art. 150).");
   }
-  const assinante = e.id === "dfd" || e.id === "pac" ? primeiro(typeof campos.dfd?.responsavel === "string" ? campos.dfd.responsavel : "", autor.nome) : autor.nome;
+  const resp = (etapa: string) => typeof campos[etapa]?.responsavel === "string" ? campos[etapa].responsavel as string : "";
+  const assinante = e.id === "dfd" || e.id === "pac" ? primeiro(resp("dfd"), autor.nome) : e.id === "protocolo" ? primeiro(resp("protocolo"), resp("dfd"), autor.nome) : autor.nome;
   const [nome, cargo] = assinante.includes(" — ") ? assinante.split(" — ") : [assinante, autor.cargo];
   l.push(`${orgao?.municipio ?? ""}${orgao?.uf ? `/${orgao.uf}` : ""}, ${dataExtenso()}.`.replace(/^, /, ""));
   l.push([`@ ${nome}`, cargo && `@ ${cargo}`].filter(Boolean).join("\n"));

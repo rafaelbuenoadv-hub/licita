@@ -41,7 +41,7 @@ export function ProcessoPg() {
   if (!p) return <p className="muted">Carregando processo…</p>;
   const checks: Checks = Object.fromEntries(p.checagens.map((c: { item: string }) => [c.item, true]));
   const trilha = p.trilha as TrilhaProcesso;
-  const pedida = params.get("aba") === "solicitacao" ? "fiscal" : params.get("aba");
+  const pedida = params.get("aba") === "solicitacao" ? "protocolo" : params.get("aba");
   const aberta = trilha.etapas.find((etapa) => etapa.id === pedida) ?? trilha.atual;
   const ix = aberta.numero - 1;
   const e = ETAPAS[ix];
@@ -220,7 +220,8 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
     if (x.onde === "conferencia") mostra(document.getElementById("c-" + x.alvo));
     else if (x.onde === "campos") {
       const el = document.getElementById("campo-" + x.alvo);
-      if (el) mostra(el); else if (x.alvo === "dotacao") irPara("dot");
+      if (x.alvo === "solicitacao") mostra(document.getElementById("pedidos-secretarias"));
+      else if (el) mostra(el); else if (x.alvo === "dotacao") irPara("dot");
     }
     else if (x.onde === "minuta") document.getElementById("minuta-etapa")?.scrollIntoView({ behavior: "smooth", block: "start" });
     else if (x.onde === "dados") {
@@ -248,12 +249,12 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
         sugeridos={Object.keys(p.campos?.[e.id] ? {} : (p.sugestoes_campos?.[e.id] ?? {}))}
         mudar={(v) => { setVals(v); setSujo(true); }} salvar={() => salvarCampos()} />}
 
-      {e.id === "fiscal" && <section className="sec pedidos" id="pedidos-secretarias">
+      {e.id === "protocolo" && <section className="sec pedidos" id="pedidos-secretarias" tabIndex={-1}>
         <span className="lbl">Solicitação das secretarias</span> <span className="small muted">{p.solicitacoes.length ? `${p.solicitacoes.length} ${p.solicitacoes.length === 1 ? "solicitação registrada" : "solicitações registradas"}` : "nenhuma solicitação ainda"}</span>
         <p className="small muted">A solicitação é feita por último, depois de todos os documentos da fase interna: ela reúne o pedido de cada Secretaria, os itens, as quantidades e os orçamentos, e acompanha o processo no protocolo.</p>
         <Solicitacoes key={p.id} processo={p} recarregar={recarregar} />
       </section>}
-      {e.id === "fiscal" && <ProtocoloChecklist p={p} checks={checks} irPara={irPara} />}
+      {e.id === "protocolo" && <ProtocoloChecklist p={p} checks={checks} irPara={irPara} />}
       <div className="sec"><span className="lbl">Conferência obrigatória</span>
         <ul className="chk">{its.map((i: any) => {
           const q = quem[i.id];
@@ -265,7 +266,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
             </li>);
         })}</ul>
       </div>
-      {e.id === "precos" && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} irAosItens={() => irPara("fiscal")} />}
+      {e.id === "precos" && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} irAosItens={() => irPara("protocolo")} />}
       {e.id === "precos" && p.via === "dispensa" && <Fracionamento id={p.id} />}
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>
         <ul className="aten">{e.atencao.map((a: string) => <li key={a}>{a}</li>)}</ul></div>
@@ -282,7 +283,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
       <div className="sec row">
         {ix > 0 ? <button className="btn" onClick={() => irPara(ETAPAS[ix - 1].id)}>← {ETAPAS[ix - 1].nome}</button> : <span />}
         <div className="tools">
-          {lib && atua && p.situacao !== "cancelado" && <button className="btn pri" disabled={conferindo} onClick={concluir}>{conferindo ? "Conferindo…" : e.id === "fiscal" ? "Protocolar no Departamento de Licitações" : prox ? "Concluir e avançar" : "Conferir e concluir"}</button>}
+          {lib && atua && p.situacao !== "cancelado" && <button className="btn pri" disabled={conferindo} onClick={concluir}>{conferindo ? "Conferindo…" : e.id === "protocolo" ? "Protocolar no Departamento de Licitações" : prox ? "Concluir e avançar" : "Conferir e concluir"}</button>}
           {prox ? <button className="btn" disabled={!ok} onClick={() => irPara(prox.id)}>{ok ? "" : `Faltam ${its.length - nf} · `}{prox.nome} →</button>
             : <span className={"pill " + (ok ? "ok" : "")}>{ok ? "Fase preparatória concluída" : "Última etapa"}</span>}
         </div>
@@ -330,7 +331,7 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
   const inclusao = (v: string) => v === "incluso" ? "incluído" : v === "nao_incluso" ? "não incluído" : "não informado";
   return (
     <div className="sec"><span className="lbl">Orçamentos</span>
-      <p className="small muted">Consulte as propostas do processo. Os itens e as cotações são registrados na Solicitação, feita na etapa 7.</p>
+      <p className="small muted">Consulte as propostas do processo. Os itens e as cotações são registrados na Solicitação, feita na etapa 8.</p>
       {lista.length === 0 ? <p className="muted">Nenhum orçamento anexado.</p> :
         <div className="tw"><table className="t">
           <thead><tr><th>Orçamento</th><th>Fornecedor</th><th className="r">Valor (R$)</th><th /></tr></thead>
@@ -368,7 +369,7 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
         </table></div>}
       {alertas.length > 0 && <div role="status"><span className="lbl">Pontos de atenção na comparação</span>
         <ul className="pends">{alertas.map((a, k) => <li key={k} className="aviso"><span>{a.texto}</span></li>)}</ul></div>}
-      <button className="btn sm" type="button" onClick={irAosItens}>Ir à Solicitação (etapa 7)</button>
+      <button className="btn sm" type="button" onClick={irAosItens}>Ir à Solicitação (etapa 8)</button>
     </div>
   );
 }

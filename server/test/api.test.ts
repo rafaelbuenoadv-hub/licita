@@ -758,7 +758,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   assert.equal(det.trilha.atual.id, "dfd");
 });
 
-test("etapa 7: protocolo exige a dotação indicada e fiscal substituto diferente", async () => {
+test("etapas 7 e 8: fiscal com substituto diferente; protocolo exige dotação indicada e a Solicitação", async () => {
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const adm = await new Cliente().entrar("admin@a.gov.br");
   const pb = { tipo: "servicos", via: "dispensa" } as const;
@@ -770,19 +770,35 @@ test("etapa 7: protocolo exige a dotação indicada e fiscal substituto diferent
   }
   assert.equal((await lic.get(`/api/processos/${id}`)).dados.trilha.atual.id, "fiscal");
   await preencherCampos(adm, id, ETAPAS[fiscal]);
+  // O preenchimento genérico deixou a dotação (opcional na etapa 6) com texto: apaga para conferir o bloqueio no protocolo.
   const det = (await lic.get(`/api/processos/${id}`)).dados;
-  // O preenchimento genérico deixou a dotação (opcional na etapa 6) com texto: apaga para conferir o bloqueio.
   assert.equal((await adm.put(`/api/processos/${id}/campos/dot`, { valores: { ...det.campos.dot, dotacao: "" } })).status, 200);
-  const r = await adm.post(`/api/processos/${id}/etapas/fiscal/concluir`);
-  const cods = r.dados.pendencias.map((x: any) => x.codigo);
+  let r = await adm.post(`/api/processos/${id}/etapas/fiscal/concluir`);
+  let cods = r.dados.pendencias.map((x: any) => x.codigo);
+  assert.ok(cods.includes("substituto") && cods.includes("minuta") && !cods.includes("dotacao"), cods.join());
+  assert.match((await adm.post(`/api/processos/${id}/minutas/fiscal/dos-campos`)).status === 200 ? (await adm.get(`/api/processos/${id}/minutas/fiscal`)).dados.vigente.texto : "", /^# INDICAÇÃO DO FISCAL DO CONTRATO\n/);
+  assert.equal((await adm.put(`/api/processos/${id}/campos/fiscal`, { valores: { ...(await lic.get(`/api/processos/${id}`)).dados.campos.fiscal, substituto_nome: "Outra pessoa" } })).status, 200);
+  for (const i of itensDe(ETAPAS[fiscal], pb).filter((x) => !x.auto)) await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
+  r = await adm.post(`/api/processos/${id}/etapas/fiscal/concluir`);
+  assert.deepEqual([r.dados.concluida, r.dados.protocolado, r.dados.proxima], [true, false, { id: "protocolo", nome: "Protocolo" }]);
+
+  // Etapa 8: sem dotação indicada e sem Solicitação, não protocola.
+  await preencherCampos(adm, id, ETAPAS[fiscal + 1]);
+  r = await adm.post(`/api/processos/${id}/etapas/protocolo/concluir`);
+  cods = r.dados.pendencias.map((x: any) => x.codigo);
   assert.equal(r.dados.concluida, false);
-  assert.ok(cods.includes("dotacao") && cods.includes("substituto") && cods.includes("minuta"), cods.join());
-  const montado = await adm.post(`/api/processos/${id}/minutas/fiscal/dos-campos`);
-  assert.equal(montado.status, 200);
-  const texto = (await adm.get(`/api/processos/${id}/minutas/fiscal`)).dados.vigente.texto as string;
-  assert.match(texto, /^# INDICAÇÃO DO FISCAL DO CONTRATO E ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES/);
-  assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo/);
-  assert.match(texto, /- O fiscal e o substituto não têm vínculo com possíveis contratados/);
+  assert.ok(cods.includes("dotacao") && cods.includes("solicitacao") && cods.includes("minuta"), cods.join());
+  assert.equal((await adm.post(`/api/processos/${id}/minutas/protocolo/dos-campos`)).status, 200);
+  const texto = (await adm.get(`/api/processos/${id}/minutas/protocolo`)).dados.vigente.texto as string;
+  assert.match(texto, /^# ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES E CONTRATOS/);
+  assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo.*solicitação das secretarias/);
+  assert.equal((await adm.put(`/api/processos/${id}/campos/dot`, { valores: { ...det.campos.dot, dotacao: "02.001 3.3.90.39" } })).status, 200);
+  assert.equal((await lic.post(`/api/processos/${id}/solicitacoes`, { chave_envio: randomUUID(), secretaria: "Administração", descricao: "Dedetização anual." })).status, 201);
+  for (const i of itensDe(ETAPAS[fiscal + 1], pb).filter((x) => !x.auto)) await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
+  r = await adm.post(`/api/processos/${id}/etapas/protocolo/concluir`);
+  assert.equal(r.dados.concluida, true, JSON.stringify(r.dados.pendencias));
+  assert.equal(r.dados.protocolado, true);
+  assert.equal(r.dados.proxima.id, "edital");
 });
 
 test("revisão avulsa preserva PDFs, versões e evidências dentro do órgão", async () => {
@@ -1320,8 +1336,8 @@ test("trilha: 7 etapas da fase interna antes da fase externa; os pedidos das sec
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const painel = async () => (await lic.get("/api/painel")).dados.processos.por_etapa as { id: string; numero: number; etapa: string; total: number }[];
   const antes = await painel();
-  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["dfd", 2], ["etp", 3], ["precos", 4], ["tr", 5], ["dot", 6], ["fiscal", 7], ["edital", 8], ["parecer", 9], ["pub", 10]]);
-  assert.deepEqual(ETAPAS.map((e) => e.fase), ["interna", "interna", "interna", "interna", "interna", "interna", "interna", "externa", "externa", "externa"]);
+  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["dfd", 2], ["etp", 3], ["precos", 4], ["tr", 5], ["dot", 6], ["fiscal", 7], ["protocolo", 8], ["edital", 9], ["parecer", 10], ["pub", 11]]);
+  assert.deepEqual(ETAPAS.map((e) => e.fase), ["interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna", "externa", "externa", "externa"]);
   const r = await lic.post("/api/processos", { objeto: "Compra de materiais para a educação", tipo: "bens", via: "licitacao", ano: 2099 });
   assert.equal(r.status, 201);
   const caminho = `/api/processos/${r.dados.id}`;

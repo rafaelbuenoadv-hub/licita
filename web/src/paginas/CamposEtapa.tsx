@@ -151,7 +151,7 @@ const numero = (x: unknown) => {
 export function ProtocoloChecklist({ p, checks, irPara }: { p: any; checks: Checks; irPara: (aba: string) => void }) {
   const ok = (id: string) => feita(ETAPAS.find((e) => e.id === id)!, p, checks);
   const dot = p.campos?.dot ?? {};
-  const fiscalCompleto = Boolean(checks["fiscal.campos"]);
+  const fiscalCompleto = ok("fiscal");
   const linhas: [string, boolean, string][] = [
     ["Objeto consta do PAC (ou inclusão extraordinária justificada)", ok("pac"), "pac"],
     ["DFD assinado pelo responsável da Secretaria", ok("dfd"), "dfd"],
@@ -160,7 +160,7 @@ export function ProtocoloChecklist({ p, checks, irPara }: { p: any; checks: Chec
     ["Termo de Referência / Projeto Básico completo, com análise de riscos e matriz quando cabível", ok("tr"), "tr"],
     ["Indicação de dotação orçamentária solicitada à Contabilidade e indicada", ok("dot") && temValor(dot.dotacao), "dot"],
     ["Fiscal de contrato designado", fiscalCompleto, "fiscal"],
-    ["Solicitação das secretarias registrada, com itens e orçamentos", (p.solicitacoes?.length ?? 0) > 0, "fiscal"],
+    ["Solicitação das secretarias registrada, com itens e orçamentos", (p.solicitacoes?.length ?? 0) > 0, "protocolo"],
   ];
   const vPrecos = numero(p.campos?.precos?.valor_total), vDot = numero(dot.valor_total);
   const divergente = vPrecos != null && vDot != null && Math.abs(vPrecos - vDot) > 0.009;
@@ -170,7 +170,7 @@ export function ProtocoloChecklist({ p, checks, irPara }: { p: any; checks: Chec
       <ul className="pends protocolo">{linhas.map(([t, feito, aba]) => (
         <li key={t} className={feito ? "ok" : ""}>
           <span>{feito ? "✓ " : "○ "}{t}</span>
-          {!feito && aba !== "fiscal" && <button className="btn sm" type="button" onClick={() => irPara(aba)}>Ir à etapa</button>}
+          {!feito && aba !== "protocolo" && <button className="btn sm" type="button" onClick={() => irPara(aba)}>Ir à etapa</button>}
         </li>))}</ul>
       {divergente && <p className="note">O valor da pesquisa de preços e o valor informado na dotação são diferentes. A Procuradoria confere a coerência entre os documentos: quantidade e valor devem ser os mesmos em todas as peças.</p>}
     </div>
