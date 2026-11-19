@@ -137,11 +137,10 @@ export function CamposProcesso({ d, set, plano, novo = false, podeEditar = true 
       <label className="wide">Objeto<textarea {...c("objeto")} required minLength={5} maxLength={4000} /></label>
       <div className="wide stack" style={{ gap: 6 }}>
         <label>Regulamentos citados neste processo<textarea {...c("normas")} maxLength={20000} readOnly={analisando} placeholder="Decretos e leis aplicáveis a esta contratação" /></label>
-        <div><button type="button" className="btn sm" onClick={analisarNormas} disabled={!ia.disponivel || analisando || d.objeto.trim().length < 5}>
+        {ia.disponivel && <div><button type="button" className="btn sm" onClick={analisarNormas} disabled={analisando || d.objeto.trim().length < 5}>
           {analisando ? "Analisando regulamentos…" : "Analisar regulamentos com IA"}
-        </button></div>
+        </button></div>}
         {avisoNormas && <p className="small" role="status">{avisoNormas}</p>}
-        {!ia.disponivel && <p className="small muted">IA não configurada neste servidor.</p>}
       </div>
       <label className="wide">Observações<textarea {...c("obs")} maxLength={20000} placeholder="Prazos, quantidades, local e outros dados úteis para o ETP e o Termo de Referência" /></label>
     </div>
@@ -197,7 +196,7 @@ export function NovoProcesso() {
   return (
     <>
       <div className="row"><div><span className="lbl">Novo processo</span><h1>Dados da contratação</h1></div><Link className="btn" to="/processos">Voltar</Link></div>
-      <section className="panel pad stack">
+      {ia.disponivel && <section className="panel pad stack">
         <div><span className="lbl">Preencher com IA</span><h3>Comece pelo documento que já existe</h3>
           <p className="small muted">Cole o memorando ou o pedido da área, ou anexe o arquivo (.docx, .pdf ou .txt). A IA preenche os campos abaixo e você confere antes de criar. O documento fica anexado ao processo como fonte para as minutas.</p></div>
         <textarea id="fonte" value={fonte} onChange={(e) => { setFonte(e.target.value); setArq(null); }} placeholder="Cole aqui o texto do memorando ou do pedido" style={{ minHeight: 110 }} />
@@ -206,9 +205,8 @@ export function NovoProcesso() {
           <input id="arq" type="file" accept=".docx,.pdf,.txt,.md" hidden onChange={(e) => { setArq(e.target.files?.[0] ?? null); }} />
           {arq && <span className="small muted">{arq.name}</span>}
           <button className="btn pri" type="button" onClick={extrair} disabled={!ia.disponivel || busy !== "" || (!fonte.trim() && !arq)}>{busy === "ia" ? "Lendo o documento…" : "Preencher com IA"}</button>
-          {!ia.disponivel && <span className="small muted">IA não configurada neste servidor.</span>}
         </div>
-      </section>
+      </section>}
       {msg && <p className={"note " + (msg.tipo ?? "")}>{msg.t}</p>}
       <form className="panel pad stack" onSubmit={criar}>
         <CamposProcesso d={d} set={setD} plano={plano} novo />

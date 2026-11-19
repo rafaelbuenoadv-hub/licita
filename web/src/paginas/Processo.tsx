@@ -354,7 +354,7 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
             {d && <tr><td colSpan={4}>
                 <details className="lido">
                   <summary>{fornecedor || "Fornecedor a identificar"}{d.cnpj ? ` · ${d.cnpj}` : ""}{d.data ? ` · ${dataBR(d.data)}` : ""} · {d.itens.length} {d.itens.length === 1 ? "item" : "itens"}</summary>
-                  <p className="small muted">Lido pela IA em {dataHora(o.lido_em)}. Validade: {d.validade ? dataBR(d.validade) : "não consta"} · Frete: {inclusao(d.frete)} · Instalação: {inclusao(d.instalacao)}{d.prazo_entrega ? ` · Entrega: ${d.prazo_entrega}` : ""}</p>
+                  <p className="small muted">Lido em {dataHora(o.lido_em)}. Validade: {d.validade ? dataBR(d.validade) : "não consta"} · Frete: {inclusao(d.frete)} · Instalação: {inclusao(d.instalacao)}{d.prazo_entrega ? ` · Entrega: ${d.prazo_entrega}` : ""}</p>
                   {d.itens.length > 0 && <div className="tw"><table className="t">
                     <thead><tr><th>Item</th><th className="r">Qtd.</th><th>Un.</th><th className="r">Unitário</th><th className="r">Total</th></tr></thead>
                     <tbody>{d.itens.map((it, k) => <tr key={k}><td>{it.descricao}</td><td className="r">{it.quantidade ?? "—"}</td><td>{it.unidade ?? "—"}</td><td className="r">{brl(it.valor_unitario)}</td><td className="r">{brl(it.valor_total)}</td></tr>)}</tbody>
@@ -490,13 +490,13 @@ function Minuta({ p, e, editavel, setAviso, camposSujos, salvarCampos }: { p: an
   return (
     <div className="sec" id="minuta-etapa">
       <div className="row"><span className="lbl">Minuta · {e.doc}</span>
-        {m.vigente && <span className="small muted">Versão {m.vigente.versao} · {m.vigente.origem === "ia" ? "redigida pela IA" : m.vigente.origem === "pendencias" ? "campos preenchidos" : m.vigente.origem === "aproveitado" ? "rascunho com dados aproveitados da etapa anterior" : m.vigente.origem === "campos" ? "montada com os campos da etapa" : "edição manual"} · {m.vigente.autor ?? "—"} · {dataHora(m.vigente.criado_em)}</span>}</div>
+        {m.vigente && <span className="small muted">Versão {m.vigente.versao} · {m.vigente.origem === "ia" ? "gerada automaticamente" : m.vigente.origem === "pendencias" ? "campos preenchidos" : m.vigente.origem === "aproveitado" ? "rascunho com dados aproveitados da etapa anterior" : m.vigente.origem === "campos" ? "montada com os campos da etapa" : "edição manual"} · {m.vigente.autor ?? "—"} · {dataHora(m.vigente.criado_em)}</span>}</div>
       <div className="tools">
         {busy === "redigir" ? <><span className="small muted" role="status">{andamento || "Redigindo no layout do órgão…"}</span><button className="btn" onClick={() => ctl.current?.abort()}>Parar</button></>
           : confirma ? <><button className="btn pri" onClick={redigir}>Confirmar: gerar nova versão</button><button className="btn" onClick={() => setConfirma(false)}>Cancelar</button></>
           : <>
             {e.campos?.length > 0 && <button className="btn pri" disabled={!editavel || busy !== ""} onClick={montar} title="Monta o documento só com o que foi preenchido nos campos, sem usar a IA">{busy === "montar" ? "Montando…" : texto ? "Montar de novo com os campos" : "Montar com os campos"}</button>}
-            <button className={e.campos?.length ? "btn" : "btn pri"} disabled={!editavel || !ia.disponivel || busy !== ""} onClick={() => (texto ? setConfirma(true) : redigir())}>{texto ? "Redigir de novo com IA" : "Redigir minuta com IA"}</button>
+            {ia.disponivel && <button className={e.campos?.length ? "btn" : "btn pri"} disabled={!editavel || busy !== ""} onClick={() => (texto ? setConfirma(true) : redigir())}>{texto ? "Redigir de novo com IA" : "Redigir minuta com IA"}</button>}
           </>}
         {busy !== "redigir" && <>
           <button className="btn" disabled={!editavel || !!vendo} onClick={() => { setModo(modo === "ver" ? "editar" : "ver"); setRascunho(texto); }}>{modo === "ver" ? "Editar texto" : "Ver na folha"}</button>
@@ -521,7 +521,7 @@ function Minuta({ p, e, editavel, setAviso, camposSujos, salvarCampos }: { p: an
         <input type="checkbox" checked={pesquisar} onChange={(ev) => setPesquisar(ev.target.checked)} style={{ marginTop: 3 }} />
         <span>Pesquisar na web, antes de redigir, editais já publicados com o mesmo objeto e a legislação vigente. <span className="muted">Leva alguns minutos a mais e consome mais da IA. A minuta sempre traz o fundamento de cada ponto; com a pesquisa, ele vem conferido em fontes atuais.</span></span>
       </label>}
-      {m.pesquisa && busy !== "redigir" && <details className="pesquisa">
+      {ia.disponivel && m.pesquisa && busy !== "redigir" && <details className="pesquisa">
         <summary>Pesquisa que embasou a minuta · {m.pesquisa.fontes.length} {m.pesquisa.fontes.length === 1 ? "fonte" : "fontes"} · {dataHora(m.pesquisa.criado_em)}{m.pesquisa.autor ? ` · ${m.pesquisa.autor}` : ""}</summary>
         <p className="small muted">Editais de outros órgãos e normas localizados pela IA. É material de apoio: abra as fontes e confira antes de citar em documento oficial.</p>
         {m.pesquisa.fontes.length > 0 && <ul className="fontes">{m.pesquisa.fontes.map((x: { url: string; titulo: string }) => <li key={x.url}><a href={x.url} target="_blank" rel="noopener noreferrer">{x.titulo}</a><span className="small muted"> · {(() => { try { return new URL(x.url).hostname.replace(/^www\./, ""); } catch { return ""; } })()}</span></li>)}</ul>}
@@ -542,13 +542,13 @@ function Minuta({ p, e, editavel, setAviso, camposSujos, salvarCampos }: { p: an
         <p className="small muted">Marcação: "# " título, "## " seção, "| a | b |" quadro, "@ " assinatura, [[texto]] campo pendente.</p>
         <div className="tools"><button className="btn pri" disabled={busy !== ""} onClick={() => salvar(rascunho, "Minuta salva")}>Salvar nova versão</button>
           <button className="btn" onClick={() => { setModo("ver"); setRascunho(texto); }}>Descartar alterações</button></div>
-      </> : <Folha texto={exibido} vazio={busy === "redigir" ? "Redigindo a minuta…" : e.campos?.length ? "Nenhum documento ainda. Preencha os campos acima e clique em \"Montar com os campos\", ou peça à IA para redigir." : "Nenhuma minuta ainda. Peça à IA para redigir ou escreva em \"Editar texto\"."} />}
+      </> : <Folha texto={exibido} vazio={busy === "redigir" ? "Redigindo a minuta…" : e.campos?.length ? "Nenhum documento ainda. Preencha os campos acima e clique em \"Montar com os campos\"." : "Nenhuma minuta ainda. Escreva o texto em \"Editar texto\"."} />}
 
       {!vendo && busy !== "redigir" && modo === "ver" && (pend.length > 0 ? (
         <div className="pend">
           <div className="row"><div><h3>{pend.length} {pend.length > 1 ? "campos pendentes" : "campo pendente"}</h3></div>
             <div className="tools">
-              <button className="btn sm" disabled={!editavel || !ia.disponivel || busy !== ""} onClick={sugerir}>{busy === "sugerir" ? "Procurando nas peças…" : "Sugerir com IA"}</button>
+              {ia.disponivel && <button className="btn sm" disabled={!editavel || busy !== ""} onClick={sugerir}>{busy === "sugerir" ? "Procurando nas peças…" : "Sugerir com IA"}</button>}
               <button className="btn sm pri" disabled={!editavel || busy !== ""} onClick={aplicar}>Aplicar na minuta</button></div></div>
           <p className="small muted">Confira os dados do cadastro e as sugestões das peças do processo antes de aplicar.</p>
           {pend.map((x) => {
@@ -579,7 +579,7 @@ function Anexos({ p, recarregar, podeIncluir }: { p: any; recarregar: () => Prom
   const remover = async (aid: number) => { await api.del(`/processos/${p.id}/anexos/${aid}`); await recarregar(); };
   return (
     <section className="panel">
-      <div className="pad-s row"><div><h2>Documentos de apoio</h2><p className="small muted">Memorandos, planilhas, levantamentos e peças antigas. A IA usa o texto deles nas minutas, nas sugestões e no assistente.</p></div>
+      <div className="pad-s row"><div><h2>Documentos de apoio</h2><p className="small muted">Memorandos, planilhas, levantamentos e peças antigas que ficam juntos do processo.</p></div>
         {podeIncluir && <><label className="btn" htmlFor="anexo">{busy ? "Lendo…" : "Anexar documento"}</label>
           <input id="anexo" type="file" accept=".docx,.pdf,.txt,.md,.csv" hidden disabled={busy} onChange={(e) => { enviar(e.target.files?.[0]); e.target.value = ""; }} /></>}</div>
       {msg && <p className={"note " + (msg.tipo ?? "")} style={{ margin: "0 12px 12px" }}>{msg.t}</p>}

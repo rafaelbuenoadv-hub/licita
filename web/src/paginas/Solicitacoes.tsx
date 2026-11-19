@@ -38,7 +38,6 @@ interface Props {
 
 const modos = {
   manual: "Criar manualmente",
-  ia: "Criar com ajuda da IA",
   anexo: "Anexar solicitação existente",
 };
 type Modo = keyof typeof modos;
@@ -320,7 +319,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
             {lidas.erro && <p className="wide small muted">{lidas.erro}</p>}
             <label className="wide">{modo === "anexo" ? "Descrição complementar (opcional)" : "Descrição da solicitação"}
               <textarea required={modo !== "anexo" && !edicao?.nome_arquivo && !edicao?.apoios.length && !apoios.length} maxLength={LIMITE_SOLICITACAO} value={descricao} disabled={!!ocupado}
-                placeholder={modo === "ia" ? "Informe a necessidade, as quantidades e os prazos que já conhece." : undefined}
+                placeholder={modo === "manual" ? "Informe a necessidade, as quantidades e os prazos que já conhece." : undefined}
                 onChange={(e) => trocarTexto(e.target.value)} />
             </label>
           </div>
@@ -338,11 +337,11 @@ export function Solicitacoes({ processo, recarregar }: Props) {
             </>}
             <span className="small muted">PDF, Word (.docx) ou texto. Até 20 MB.</span>
           </div>}
-          {(modo === "ia" || !!apoios.length || !!arquivo || !!edicao?.apoios.length || !!edicao?.nome_arquivo || temOrcamento) && <div className="stack">
-            {ia.disponivel ? <>
+          {ia.disponivel && (!!apoios.length || !!arquivo || !!edicao?.apoios.length || !!edicao?.nome_arquivo || temOrcamento) && <div className="stack">
+            <>
               <div><button className="btn" type="button" disabled={!!ocupado || cotando} onClick={gerar}>{ocupado === "ia" ? "Gerando rascunho…" : "Gerar rascunho com IA"}</button></div>
               <span className="small muted">A IA usa os dados preenchidos, os anexos desta solicitação e os orçamentos vinculados aos itens. Essas fontes são enviadas ao provedor de IA para gerar o rascunho.</span>
-            </> : <p className="note">IA indisponível no servidor. Você pode preencher e salvar a solicitação nesta tela.</p>}
+            </>
           </div>}
           {descricao.trim() && <details ref={painelPrevia} className="panel box">
             <summary>Prévia da solicitação</summary>

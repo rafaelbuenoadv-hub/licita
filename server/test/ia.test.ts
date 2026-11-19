@@ -814,3 +814,26 @@ test("IA sem créditos: planilha e PDF com texto são lidos sem a IA", async () 
     assert.equal(j.dados.valor_total, 16515);
   } finally { semCreditos = false; }
 });
+
+test("leitura de orçamento com ?sem_ia=1 não envia o arquivo à IA, mesmo com a IA configurada", async () => {
+  const novo = await api("POST", "/api/processos", { objeto: "Aquisição de mesas", tipo: "bens", via: "dispensa", ano: 2026 });
+  const { id } = (await novo.json()) as { id: number };
+  const fd = new FormData();
+  fd.append("arquivo", new Blob(["Descrição;Un;Qtde;Preço unitário;Total\nMesa escolar;un;30;250,50;7.515,00"]), "proposta.csv");
+  const [oid] = ((await (await api("POST", `/api/processos/${id}/orcamentos`, fd)).json()) as { ids: number[] }).ids;
+  const antes = pedidos.length;
+  const r = await api("POST", `/api/processos/${id}/orcamentos/${oid}/ler?sem_ia=1`, {});
+  assert.equal(r.status, 200, await r.clone().text());
+  const j: any = await r.json();
+  assert.equal(j.sem_ia, true);
+  assert.equal(j.dados.itens[0].valor_unitario, 250.5);
+  assert.equal(pedidos.length, antes);
+  // Foto sem tabela legível: avisa para informar os preços, sem chamar a IA.
+  const foto = new FormData();
+  foto.append("arquivo", new Blob([Buffer.from("texto solto sem preços")]), "nota.txt");
+  const [oid2] = ((await (await api("POST", `/api/processos/${id}/orcamentos`, foto)).json()) as { ids: number[] }).ids;
+  const r2 = await api("POST", `/api/processos/${id}/orcamentos/${oid2}/ler?sem_ia=1`, {});
+  assert.equal(r2.status, 422);
+  assert.match(((await r2.json()) as any).erro, /Informe os preços na coluna/);
+  assert.equal(pedidos.length, antes);
+});

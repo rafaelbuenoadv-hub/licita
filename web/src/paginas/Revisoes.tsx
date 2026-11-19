@@ -236,12 +236,12 @@ function DetalheRevisao({ id }: { id: string }) {
         }}>{Object.entries(TIPOS_REVISAO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
         {versoes.length > 0 && <label>Versões salvas<select value={versao} disabled={!!ocupado} onChange={(e) => lerVersao(e.target.value)}>
           <option value="">Rascunho</option>
-          {versoes.map((m) => <option key={m.id} value={m.id}>{dataHora(m.criado_em)} · {m.origem === "ia" ? "Assistida por IA" : "Manual"}</option>)}
+          {versoes.map((m) => <option key={m.id} value={m.id}>{dataHora(m.criado_em)} · {m.origem === "ia" ? "Gerada automaticamente" : "Manual"}</option>)}
         </select></label>}
-        <label className="wide">Orientação para a IA (opcional)<input value={orientacao} maxLength={4000} onChange={(e) => setOrientacao(e.target.value)} /></label>
+        {ia.disponivel && <label className="wide">Orientação para a IA (opcional)<input value={orientacao} maxLength={4000} onChange={(e) => setOrientacao(e.target.value)} /></label>}
       </div>
       <div className="tools">
-        <button className="btn pri" disabled={!!ocupado || !ia.disponivel || !autos} onClick={gerar}> {texto.trim() ? "Gerar novo rascunho com IA" : "Gerar com IA"}</button>
+        {ia.disponivel && <button className="btn pri" disabled={!!ocupado || !autos} onClick={gerar}> {texto.trim() ? "Gerar novo rascunho com IA" : "Gerar com IA"}</button>}
         {ocupado === "ia" && <button className="btn" onClick={() => cancelar.current?.abort()}>Parar análise</button>}
         <button className="btn" disabled={!!ocupado || !texto.trim()} onClick={salvar}>Salvar nova versão</button>
         {versao && <>
@@ -249,7 +249,6 @@ function DetalheRevisao({ id }: { id: string }) {
           <a className="btn" href={`/api${caminho}/minutas/${versao}?formato=pdf`}>Baixar PDF</a>
         </>}
       </div>
-      {!ia.disponivel && <p className="small muted">IA indisponível. Você pode revisar os PDFs e elaborar a minuta manualmente.</p>}
       {ia.disponivel && !autos && <p className="small muted">Anexe os autos para gerar uma análise.</p>}
       {ia.disponivel && tipo === "saneamento" && !parecer && <p className="small muted">Se o parecer estiver em arquivo separado, anexe-o como Parecer existente.</p>}
       {ia.disponivel && autos && <p className="small muted">Ao gerar com IA, o Licita envia os PDFs anexados ao provedor de IA configurado.</p>}

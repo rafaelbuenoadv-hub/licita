@@ -164,7 +164,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   // Leitura pelo servidor: com a IA, ou sem ela (planilha, Word com tabela, PDF com texto) quando a IA está parada.
   const semIA = useRef(false);
   const lerOrcamento = async (id: number) => {
-    const r = await api.post<{ dados: DadosOrcamento; sem_ia?: boolean }>(`${caminho}/${id}/ler`);
+    const r = await api.post<{ dados: DadosOrcamento; sem_ia?: boolean }>(`${caminho}/${id}/ler${ia ? "" : "?sem_ia=1"}`);
     semIA.current = !!r.sem_ia;
     return r.dados;
   };
@@ -298,7 +298,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   };
   const aplicarDadosDaColuna = (col: Coluna, id: number, dados: DadosOrcamento, fornecedor = "") => {
     const n = vincularOrcamento(col, id, dados, limparNomeFornecedor(dados.fornecedor) || fornecedor);
-    const quem = semIA.current ? "A leitura sem IA" : "A IA";
+    const quem = semIA.current ? "A leitura do arquivo" : "A IA";
     setAviso(n ? `Orçamento lido. ${quem} lançou o preço de ${n} ${n === 1 ? "item" : "itens"}. Confira e complete os demais.`
       : "Orçamento lido. Confira os preços da coluna e preencha os que estiverem faltando.");
   };
@@ -370,7 +370,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
           await conferirImportacao(reler);
           await recarregar();
         })}>Tentar ler o orçamento anexado</button>}
-        <span className="small muted">{ia ? "Confira as linhas extraídas antes de lançar nos itens." : "Sem IA neste servidor: lê planilhas (.xlsx, .csv), Word com tabela e PDF com texto selecionável. Foto e PDF digitalizado: informe os preços na coluna."}</span>
+        <span className="small muted">{ia ? "Confira as linhas extraídas antes de lançar nos itens." : "Lê planilhas (.xlsx, .csv), Word com tabela e PDF com texto selecionável. Foto e PDF digitalizado: informe os preços na coluna."}</span>
       </>
     </div>
     {leitura && <div className="cotacao-item stack">

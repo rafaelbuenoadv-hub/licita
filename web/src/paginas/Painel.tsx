@@ -11,17 +11,13 @@ export function Painel() {
   useEffect(() => { api.get("/painel").then(setD).catch((e) => setErro(e.message)); }, []);
   if (erro) return <p className="note bad">{erro}</p>;
   if (!d) return <p className="muted">Carregando painel…</p>;
-  const alertasContrato = d.contratos.alertas as any[];
   return (
     <>
       <div className="row"><div><span className="lbl">Exercício {d.ano}</span><h1>Bom trabalho, {eu.nome.split(" ")[0]}</h1></div>
         <Link className="btn pri" to="/processos/novo">Novo processo</Link></div>
-      {!ia.disponivel && <p className="note">A IA não está configurada neste servidor. A trilha, as conferências e as minutas funcionam normalmente; peça ao administrador para definir a chave da API.</p>}
       <div className="kpis">
         <div className="panel kpi"><span className="lbl">Processos em preparo</span><b>{d.processos.em_preparo}</b></div>
         <div className="panel kpi"><span className="lbl">Parados há 15 dias ou mais</span><b>{d.processos.parados.length}</b></div>
-        <div className="panel kpi"><span className="lbl">Contratos vigentes</span><b>{d.contratos.vigentes}</b></div>
-        <div className="panel kpi"><span className="lbl">Alertas de contrato</span><b>{alertasContrato.length}</b></div>
       </div>
 
       <section className="panel">
@@ -45,15 +41,6 @@ export function Painel() {
           <div className="pad-s"><Link to="/pca">Abrir o plano de contratações</Link></div>
         </section>
       )}
-
-      <section className="panel">
-        <div className="pad-s"><h2>Contratos que pedem providência</h2></div>
-        {alertasContrato.length === 0 ? <p className="pad-s muted">Nenhum alerta nos contratos vigentes.</p> :
-          alertasContrato.map((a, i) => (
-            <div key={i} className={"alerta " + a.nivel} role="link" style={{ cursor: "pointer" }} onClick={() => nav(`/contratos/${a.contrato_id}`)}>
-              <div><b className="mono">{a.numero}</b> · {a.contratada}<div className="small">{a.texto}</div></div>
-            </div>))}
-      </section>
 
       <section className="panel">
         <div className="pad-s"><h2>Processos parados</h2><p className="small muted">Sem movimentação há 15 dias ou mais.</p></div>

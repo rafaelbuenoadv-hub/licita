@@ -10,7 +10,7 @@ export function Config() {
   return (
     <>
       <div><span className="lbl">{eu.orgao_nome}</span><h1>Configurações</h1></div>
-      <p className="small muted">Seu perfil: {eu.papeis.map((p) => PAPEIS[p]).join(", ")}. IA: {ia.disponivel ? `ativa (${ia.modelo})` : "não configurada neste servidor"}.</p>
+      <p className="small muted">Seu perfil: {eu.papeis.map((p) => PAPEIS[p]).join(", ")}.</p>
       <TrocarSenha />
       {admin && <Orgao />}
       {admin && <Usuarios />}
@@ -60,7 +60,7 @@ function Orgao() {
         <div className="form">
           <label className="wide">Nome<input {...c("nome")} required /></label>
           <label>CNPJ<input {...c("cnpj")} /></label><label>Município<input {...c("municipio")} /></label><label>UF<input {...c("uf")} maxLength={2} /></label>
-          <label className="wide">Regulamentos locais que a IA deve citar<textarea {...c("normas")} style={{ minHeight: 140 }}
+          <label className="wide">Regulamentos locais do órgão<textarea {...c("normas")} style={{ minHeight: 140 }}
             placeholder={"Um por linha, com o que regulamenta. Ex.:\nDecreto Municipal nº 2.533/2024 – fase preparatória e pesquisa de preços\nDecreto Municipal nº 2.549/2024 – dispensa eletrônica"} /></label>
         </div>
         {o.timbrados?.length > 0 && (
@@ -149,13 +149,13 @@ function Modelos({ podeEditar }: { podeEditar: boolean }) {
   const atual = lista.find((x) => x.etapa === sel);
   const escolhe = (e: string) => { setSel(e); setTexto(lista.find((x) => x.etapa === e)?.texto ?? ""); setM(null); };
   const salvar = async (t: string) => {
-    try { await api.put(`/admin/modelos/${sel}`, { texto: t }); await carregar(); if (!t) setTexto(atual.padrao); setM({ t: t ? "Modelo do órgão salvo. A IA passa a seguir esta estrutura." : "Voltou ao modelo padrão do sistema.", tipo: "ok" }); }
+    try { await api.put(`/admin/modelos/${sel}`, { texto: t }); await carregar(); if (!t) setTexto(atual.padrao); setM({ t: t ? "Modelo do órgão salvo." : "Voltou ao modelo padrão do sistema.", tipo: "ok" }); }
     catch (e: any) { setM({ t: e.message, tipo: "bad" }); }
   };
   return (
     <details className="panel box"><summary>Modelos de documento do órgão</summary>
       <div className="pad stack">
-        <p className="small muted">A IA redige cada minuta seguindo a estrutura do modelo da etapa. Descreva as seções na ordem do padrão do órgão, uma por linha.</p>
+        <p className="small muted">Estrutura de referência de cada documento. Descreva as seções na ordem do padrão do órgão, uma por linha.</p>
         <label className="campo" style={{ maxWidth: 420 }}>Documento<select id="mod-sel" value={sel} onChange={(e) => escolhe(e.target.value)}>
           {lista.map((x) => <option key={x.etapa} value={x.etapa}>{x.doc}{x.personalizado ? " (personalizado)" : ""}</option>)}</select></label>
         <textarea id="mod-texto" className="edit" style={{ minHeight: 320 }} value={texto} onChange={(e) => setTexto(e.target.value)} readOnly={!podeEditar} />

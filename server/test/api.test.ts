@@ -1467,8 +1467,8 @@ test("leitura sem IA: PDF em colunas, planilha e Word; texto solto não vira ite
   foto.append("arquivo", new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])]), "foto.png");
   const f = await req.req("POST", `/api/processos/${id}/orcamentos`, foto);
   const rf = await req.post(`/api/processos/${id}/orcamentos/${f.dados.ids[0]}/ler`);
-  assert.equal(rf.status, 503);
-  assert.match(rf.dados.erro, /foto ou PDF digitalizado precisam da IA/);
+  assert.equal(rf.status, 422);
+  assert.match(rf.dados.erro, /foto e PDF digitalizado não são lidos/);
 });
 
 test("etapa 1: escolher o item na busca do PAC vincula o processo e preenche os campos", async () => {

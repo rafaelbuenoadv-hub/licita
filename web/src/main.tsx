@@ -11,10 +11,7 @@ import { Processos } from "./paginas/Processos";
 import { NovoProcesso } from "./paginas/NovoProcesso";
 import { ProcessoPg } from "./paginas/Processo";
 import { Pca } from "./paginas/Pca";
-import { Contratos } from "./paginas/Contratos";
-import { ContratoPg } from "./paginas/Contrato";
 import { Config } from "./paginas/Config";
-import { Revisoes } from "./paginas/Revisoes";
 import { Mensagens } from "./paginas/Mensagens";
 
 export interface Eu { id: number; nome: string; email: string; cargo: string; papeis: Papel[]; orgao_id: number; orgao_nome: string }
@@ -28,7 +25,8 @@ export const tem = (eu: Eu, ...p: Papel[]) => eu.papeis.includes("admin") || p.s
 
 function App() {
   const [eu, setEu] = useState<Eu | null | undefined>(undefined);
-  const [ia, setIa] = useState({ disponivel: false, modelo: "" });
+  // A IA foi retirada da tela: as funções sem IA (campos, montagem de documentos, leitura de planilhas) seguem disponíveis.
+  const ia = { disponivel: false, modelo: "" };
   const [naoLidas, setNaoLidas] = useState(0);
   const logado = !!eu;
   useEffect(() => {
@@ -39,7 +37,7 @@ function App() {
     window.addEventListener("licita:mensagens", ver);
     return () => { clearInterval(t); window.removeEventListener("licita:mensagens", ver); };
   }, [logado]);
-  const carregar = () => api.get<Eu>("/auth/eu").then((u) => { setEu(u); api.get("/ia/status").then(setIa).catch(() => {}); }).catch(() => setEu(null));
+  const carregar = () => api.get<Eu>("/auth/eu").then((u) => { setEu(u); }).catch(() => setEu(null));
   useEffect(() => {
     carregar();
     const sair = () => setEu(null);
@@ -59,9 +57,7 @@ function App() {
             <NavLink to="/" end className={({ isActive }) => (isActive ? "ativo" : "")}>Painel</NavLink>
             <NavLink to="/processos" className={({ isActive }) => (isActive ? "ativo" : "")}>Processos</NavLink>
             <NavLink to="/pronto" className={({ isActive }) => (isActive ? "ativo" : "")}>Pronto pagamento</NavLink>
-            {tem(eu, "contratacao", "juridico") && <NavLink to="/revisoes" className={({ isActive }) => (isActive ? "ativo" : "")}>Revisão de processos</NavLink>}
             <NavLink to="/pca" className={({ isActive }) => (isActive ? "ativo" : "")}>Plano de contratações</NavLink>
-            <NavLink to="/contratos" className={({ isActive }) => (isActive ? "ativo" : "")}>Contratos</NavLink>
             <NavLink to="/mensagens" className={({ isActive }) => (isActive ? "ativo" : "")}>Mensagens{naoLidas > 0 && <span className="conta" aria-label={`${naoLidas} não lidas`}>{naoLidas}</span>}</NavLink>
             <NavLink to="/config" className={({ isActive }) => (isActive ? "ativo" : "")}>Configurações</NavLink>
             <div className="pe"><span>{eu.nome}</span><button className="lnk" onClick={sair}>Sair</button></div>
@@ -74,11 +70,7 @@ function App() {
               <Route path="/processos/:id" element={<ProcessoPg />} />
               <Route path="/pronto" element={<ProntoPagamentos />} />
               <Route path="/pronto/:id" element={<ProntoPagamentoPg />} />
-              <Route path="/revisoes" element={<Revisoes />} />
-              <Route path="/revisoes/:id" element={<Revisoes />} />
               <Route path="/pca" element={<Pca />} />
-              <Route path="/contratos" element={<Contratos />} />
-              <Route path="/contratos/:id" element={<ContratoPg />} />
               <Route path="/mensagens" element={<Mensagens />} />
               <Route path="/config" element={<Config />} />
               <Route path="*" element={<Navigate to="/" />} />
