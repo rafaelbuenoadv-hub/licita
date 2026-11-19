@@ -8,6 +8,7 @@ const federais: Record<string, string> = {
   dfd: "Art. 18, I: descrição da necessidade. Arts. 12, VII, e 18, caput: verificar compatibilidade com o PCA, quando elaborado. Art. 72, I: DFD na instrução da contratação direta.",
   etp: "Art. 18, §§ 1º e 2º: demonstrar a necessidade, comparar soluções e documentar quantidades, estimativas, parcelamento e conclusão. Observar os elementos mínimos e justificar a ausência dos demais.",
   fiscal: "Art. 117: fiscal especialmente designado para acompanhar e fiscalizar a execução, com substituto. Art. 7º: preferencialmente servidor efetivo, com atribuições ou formação compatíveis, sem vínculo com o contratado e com segregação de funções (§ 1º). Dec. Municipal 2.533/2024, art. 5º.",
+  solicitacao: "Art. 18, I: descrição da necessidade pela área requisitante; art. 23: os orçamentos e itens servem de base para a pesquisa de preços.",
   protocolo: "Encerramento da fase interna: os autos seguem completos e em ordem ao setor de licitações, com DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação (art. 150) e designação do fiscal (art. 117). Dec. Municipal 2.533/2024, art. 5º.",
   riscos: "Art. 18, X: analisar riscos que possam comprometer a licitação e a execução. Relacionar os riscos a causas, consequências e medidas de tratamento próprias do objeto.",
   precos: "Art. 23: verificar compatibilidade com o mercado, quantidades, economia de escala e peculiaridades locais. Conferir fontes e metodologia pertinentes à natureza do objeto.",

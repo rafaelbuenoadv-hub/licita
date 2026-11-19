@@ -107,6 +107,8 @@ async function concluirPac(id: number) {
   if (r.status !== 200) throw new Error(await r.text());
   const m = await api("POST", `/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
   if (m.status !== 200) throw new Error(await m.text());
+  const s = await api("POST", `/api/processos/${id}/solicitacoes`, { chave_envio: crypto.randomUUID(), secretaria: "Obras", descricao: "Pedido de teste." });
+  if (s.status !== 201) throw new Error(await s.text());
 }
 
 before(async () => {
@@ -405,7 +407,7 @@ test("a aba Solicitação usa o próprio modelo e o DFD aproveita o pedido regis
   assert.match(ctxDfd, /Reposição de 20 caixas para as escolas/);
 
   const semMinutaAvulsa = await api("POST", `${caminho}/ia/redigir`, { etapa: "solicitacao" });
-  assert.equal(semMinutaAvulsa.status, 404);
+  assert.equal(semMinutaAvulsa.status, 400);
 });
 
 test("a IA combina anexos salvos e novos para sugerir os campos da solicitação", async () => {

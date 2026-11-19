@@ -47,16 +47,24 @@ class Cliente {
 
 /** Preenche todos os campos da etapa com valores válidos (primeira opção, todas as marcas, texto de teste). */
 async function preencherCampos(c: Cliente, id: number, e: Etapa) {
+  if (e.id === "solicitacao") return registrarSolicitacao(c, id);
   if (!e.campos.length) return;
   const valores = Object.fromEntries(e.campos.map((x) => [x.id,
     x.tipo === "marcas" ? x.opcoes!.map(([k]) => k) : x.tipo === "opcao" ? x.opcoes![0][0] : x.tipo === "valor" ? "1.000,00" : "Texto de teste"]));
   const r = await c.put(`/api/processos/${id}/campos/${e.id}`, { valores });
   assert.equal(r.status, 200, JSON.stringify(r.dados));
 }
-/** Conclui a etapa 1 (verificação no PAC) para liberar o DFD. */
+/** Registra uma solicitação na secretaria requisitante do processo (etapa 2). */
+async function registrarSolicitacao(c: Cliente, id: number) {
+  const p = (await c.get(`/api/processos/${id}`)).dados;
+  const r = await c.post(`/api/processos/${id}/solicitacoes`, { chave_envio: randomUUID(), secretaria: p.requisitante || "Secretaria de teste", descricao: "Pedido de teste." });
+  assert.equal(r.status, 201, JSON.stringify(r.dados));
+}
+/** Conclui as etapas 1 (verificação no PAC) e 2 (Solicitação) para liberar o DFD. */
 async function concluirPac(c: Cliente, id: number) {
   assert.equal((await c.put(`/api/processos/${id}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda de teste." } })).status, 200);
   assert.equal((await c.post(`/api/processos/${id}/checagens`, { item: "pc1", marcado: true })).status, 200);
+  await registrarSolicitacao(c, id);
 }
 async function usuario(orgao: number, email: string, papeis: string[]) {
   await q1("insert into usuarios (orgao_id, nome, email, senha_hash, papeis) values ($1,$2,$3,$4,$5)", [orgao, email.split("@")[0], email, await hashSenha(SENHA), papeis]);
@@ -164,13 +172,14 @@ test("cria processo e respeita ordem das etapas e papéis", async () => {
     assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
   }
   assert.equal((await req.get(`/api/processos/${procId}`)).dados.etapa_atual, 1);
-  // Conclui o DFD: campos e conferência.
-  await preencherCampos(req, procId, ETAPAS[1]);
-  for (const i of itensDe(ETAPAS[1], { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
+  // Registra a solicitação (etapa 2) e conclui o DFD: campos e conferência.
+  await registrarSolicitacao(req, procId);
+  await preencherCampos(req, procId, ETAPAS[2]);
+  for (const i of itensDe(ETAPAS[2], { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
     assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
   }
   const det = await req.get(`/api/processos/${procId}`);
-  assert.equal(det.dados.etapa_atual, 2);
+  assert.equal(det.dados.etapa_atual, 3);
   assert.equal(det.dados.checagens[0].usuario, "req");
   // Jurídico não atua na solicitação.
   const jur = await new Cliente().entrar("jur@a.gov.br");
@@ -226,8 +235,8 @@ test("solicitações de outras secretarias usam o mesmo processo e preservam o a
   const detalhe = (await req.get(p)).dados;
   assert.equal(detalhe.protocolo, original.protocolo);
   assert.equal(detalhe.requisitante, original.requisitante);
-  assert.deepEqual(detalhe.solicitacoes.map((s: { secretaria: string }) => s.secretaria), ["Saúde", "Educação"]);
-  assert.equal(detalhe.solicitacoes[0].referencia, "Memorando 42/2026");
+  assert.deepEqual(detalhe.solicitacoes.map((s: { secretaria: string }) => s.secretaria), ["Secretaria de teste", "Saúde", "Educação"]);
+  assert.equal(detalhe.solicitacoes[1].referencia, "Memorando 42/2026");
   const arquivo = `${p}/solicitacoes/${criada.dados.id}/arquivo`;
   assert.equal((await req.get(arquivo)).dados.toString(), texto);
   assert.equal((await outro.get(arquivo)).status, 404);
@@ -706,7 +715,12 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   await admin.post(`/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
   r = await admin.post(pac);
   assert.equal(r.dados.concluida, true);
-  assert.deepEqual(r.dados.proxima, { id: "dfd", nome: "DFD" });
+  assert.deepEqual(r.dados.proxima, { id: "solicitacao", nome: "Solicitação" });
+  // Etapa 2: sem solicitação não avança; registrada, o sistema confere.
+  const sol = await admin.post(`/api/processos/${id}/etapas/solicitacao/concluir`);
+  assert.deepEqual(sol.dados.pendencias.map((x: any) => x.codigo), ["solicitacao"]);
+  assert.equal((await admin.post(`/api/processos/${id}/solicitacoes`, { chave_envio: randomUUID(), secretaria: "SEDUC", descricao: "Cadeiras para a escola." })).status, 201);
+  assert.equal((await admin.post(`/api/processos/${id}/etapas/solicitacao/concluir`)).dados.concluida, true);
   det = (await admin.get(`/api/processos/${id}`)).dados;
   assert.equal(det.trilha.atual.id, "dfd");
   assert.equal(det.trilha.etapas[0].estado, "concluida");
@@ -747,7 +761,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
 
   r = await admin.post(rota);
   assert.deepEqual([...new Set(cods())], ["item"]);
-  for (const i of itensDe(ETAPAS[1], { tipo: "bens", via: "licitacao" }).filter((x) => !x.auto)) await admin.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
+  for (const i of itensDe(ETAPAS[2], { tipo: "bens", via: "licitacao" }).filter((x) => !x.auto)) await admin.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
   r = await admin.post(rota);
   assert.equal(r.dados.concluida, true);
   assert.deepEqual(r.dados.proxima, { id: "etp", nome: "Estudo Técnico Preliminar" });
@@ -758,7 +772,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   assert.equal(det.trilha.atual.id, "dfd");
 });
 
-test("etapas 7 e 8: fiscal com substituto diferente; protocolo exige dotação indicada e a Solicitação", async () => {
+test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indicada", async () => {
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const adm = await new Cliente().entrar("admin@a.gov.br");
   const pb = { tipo: "servicos", via: "dispensa" } as const;
@@ -787,13 +801,12 @@ test("etapas 7 e 8: fiscal com substituto diferente; protocolo exige dotação i
   r = await adm.post(`/api/processos/${id}/etapas/protocolo/concluir`);
   cods = r.dados.pendencias.map((x: any) => x.codigo);
   assert.equal(r.dados.concluida, false);
-  assert.ok(cods.includes("dotacao") && cods.includes("solicitacao") && cods.includes("minuta"), cods.join());
+  assert.ok(cods.includes("dotacao") && !cods.includes("solicitacao") && cods.includes("minuta"), cods.join());
   assert.equal((await adm.post(`/api/processos/${id}/minutas/protocolo/dos-campos`)).status, 200);
   const texto = (await adm.get(`/api/processos/${id}/minutas/protocolo`)).dados.vigente.texto as string;
   assert.match(texto, /^# ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES E CONTRATOS/);
-  assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo.*solicitação das secretarias/);
+  assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo.*solicitação das secretarias, DFD/);
   assert.equal((await adm.put(`/api/processos/${id}/campos/dot`, { valores: { ...det.campos.dot, dotacao: "02.001 3.3.90.39" } })).status, 200);
-  assert.equal((await lic.post(`/api/processos/${id}/solicitacoes`, { chave_envio: randomUUID(), secretaria: "Administração", descricao: "Dedetização anual." })).status, 201);
   for (const i of itensDe(ETAPAS[fiscal + 1], pb).filter((x) => !x.auto)) await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
   r = await adm.post(`/api/processos/${id}/etapas/protocolo/concluir`);
   assert.equal(r.dados.concluida, true, JSON.stringify(r.dados.pendencias));
@@ -1332,12 +1345,12 @@ test("exclusão retira o processo das consultas e conserva o protocolo e a audit
   assert.notEqual(posterior.dados.protocolo, r.dados.protocolo);
 });
 
-test("trilha: 7 etapas da fase interna antes da fase externa; os pedidos das secretarias ficam no DFD", async () => {
+test("trilha: fase interna (PAC, Solicitação, documentos e protocolo) antes da fase externa", async () => {
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const painel = async () => (await lic.get("/api/painel")).dados.processos.por_etapa as { id: string; numero: number; etapa: string; total: number }[];
   const antes = await painel();
-  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["dfd", 2], ["etp", 3], ["precos", 4], ["tr", 5], ["dot", 6], ["fiscal", 7], ["protocolo", 8], ["edital", 9], ["parecer", 10], ["pub", 11]]);
-  assert.deepEqual(ETAPAS.map((e) => e.fase), ["interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna", "externa", "externa", "externa"]);
+  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["solicitacao", 2], ["dfd", 3], ["etp", 4], ["precos", 5], ["tr", 6], ["dot", 7], ["fiscal", 8], ["protocolo", 9], ["edital", 10], ["parecer", 11], ["pub", 12]]);
+  assert.deepEqual(ETAPAS.map((e) => e.fase), ["interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna", "externa", "externa", "externa"]);
   const r = await lic.post("/api/processos", { objeto: "Compra de materiais para a educação", tipo: "bens", via: "licitacao", ano: 2099 });
   assert.equal(r.status, 201);
   const caminho = `/api/processos/${r.dados.id}`;

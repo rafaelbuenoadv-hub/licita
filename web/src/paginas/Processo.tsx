@@ -41,7 +41,7 @@ export function ProcessoPg() {
   if (!p) return <p className="muted">Carregando processo…</p>;
   const checks: Checks = Object.fromEntries(p.checagens.map((c: { item: string }) => [c.item, true]));
   const trilha = p.trilha as TrilhaProcesso;
-  const pedida = params.get("aba") === "solicitacao" ? "protocolo" : params.get("aba");
+  const pedida = params.get("aba");
   const aberta = trilha.etapas.find((etapa) => etapa.id === pedida) ?? trilha.atual;
   const ix = aberta.numero - 1;
   const e = ETAPAS[ix];
@@ -249,9 +249,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
         sugeridos={Object.keys(p.campos?.[e.id] ? {} : (p.sugestoes_campos?.[e.id] ?? {}))}
         mudar={(v) => { setVals(v); setSujo(true); }} salvar={() => salvarCampos()} />}
 
-      {e.id === "protocolo" && <section className="sec pedidos" id="pedidos-secretarias" tabIndex={-1}>
-        <span className="lbl">Solicitação das secretarias</span> <span className="small muted">{p.solicitacoes.length ? `${p.solicitacoes.length} ${p.solicitacoes.length === 1 ? "solicitação registrada" : "solicitações registradas"}` : "nenhuma solicitação ainda"}</span>
-        <p className="small muted">A solicitação é feita por último, depois de todos os documentos da fase interna: ela reúne o pedido de cada Secretaria, os itens, as quantidades e os orçamentos, e acompanha o processo no protocolo.</p>
+      {e.id === "solicitacao" && <section className="sec pedidos" id="pedidos-secretarias" tabIndex={-1}>
         <Solicitacoes key={p.id} processo={p} recarregar={recarregar} />
       </section>}
       {e.id === "protocolo" && <ProtocoloChecklist p={p} checks={checks} irPara={irPara} />}
@@ -262,11 +260,11 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
             <li key={i.id} className={q ? "done" : ""}>
               <input type="checkbox" id={"c-" + i.id} checked={!!q} disabled={i.auto || !lib || !atua || salvando !== null || p.situacao === "cancelado"} onChange={(ev) => marcar(i.id, ev.target.checked)} />
               <label htmlFor={"c-" + i.id}><span>{i.texto}</span>
-                <span className="b">{i.auto ? (q ? "marcado pelo sistema: todos os campos obrigatórios estão preenchidos e salvos" : "marcado pelo sistema quando todos os campos obrigatórios estiverem preenchidos e salvos") : [i.base, q && `conferido por ${q.usuario ?? "—"} em ${dataHora(q.em)}`].filter(Boolean).join(" · ")}</span></label>
+                <span className="b">{i.auto ? (i.id.endsWith(".campos") ? (q ? "marcado pelo sistema: todos os campos obrigatórios estão preenchidos e salvos" : "marcado pelo sistema quando todos os campos obrigatórios estiverem preenchidos e salvos") : (q ? "marcado pelo sistema" : "marcado pelo sistema quando a primeira solicitação for registrada")) : [i.base, q && `conferido por ${q.usuario ?? "—"} em ${dataHora(q.em)}`].filter(Boolean).join(" · ")}</span></label>
             </li>);
         })}</ul>
       </div>
-      {e.id === "precos" && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} irAosItens={() => irPara("protocolo")} />}
+      {e.id === "precos" && <Orcamentos p={p} recarregar={recarregar} setAviso={setAviso} irAosItens={() => irPara("solicitacao")} />}
       {e.id === "precos" && p.via === "dispensa" && <Fracionamento id={p.id} />}
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>
         <ul className="aten">{e.atencao.map((a: string) => <li key={a}>{a}</li>)}</ul></div>
@@ -331,7 +329,7 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
   const inclusao = (v: string) => v === "incluso" ? "incluído" : v === "nao_incluso" ? "não incluído" : "não informado";
   return (
     <div className="sec"><span className="lbl">Orçamentos</span>
-      <p className="small muted">Consulte as propostas do processo. Os itens e as cotações são registrados na Solicitação, feita na etapa 8.</p>
+      <p className="small muted">Consulte as propostas do processo. Os itens e as cotações são registrados na Solicitação, feita na etapa 2.</p>
       {lista.length === 0 ? <p className="muted">Nenhum orçamento anexado.</p> :
         <div className="tw"><table className="t">
           <thead><tr><th>Orçamento</th><th>Fornecedor</th><th className="r">Valor (R$)</th><th /></tr></thead>
@@ -369,7 +367,7 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
         </table></div>}
       {alertas.length > 0 && <div role="status"><span className="lbl">Pontos de atenção na comparação</span>
         <ul className="pends">{alertas.map((a, k) => <li key={k} className="aviso"><span>{a.texto}</span></li>)}</ul></div>}
-      <button className="btn sm" type="button" onClick={irAosItens}>Ir à Solicitação (etapa 8)</button>
+      <button className="btn sm" type="button" onClick={irAosItens}>Ir à Solicitação (etapa 2)</button>
     </div>
   );
 }

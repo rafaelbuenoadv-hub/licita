@@ -90,7 +90,7 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   for (const a of apoios) l.push(`DOCUMENTO DE APOIO À SOLICITAÇÃO DE ${a.secretaria}: ${a.nome}`,
     a.texto ? corta(a.texto) : "Arquivo anexado à solicitação.");
   l.push(`Observações: ${p.obs || "nenhuma"}`, "", "ANDAMENTO");
-  l.push(`Solicitações das secretarias registradas (feitas por último, na etapa 8 — Protocolo): ${solicitacoes.length}`);
+  l.push(`Solicitações das secretarias registradas (etapa 2 — Solicitação): ${solicitacoes.length}`);
   ETAPAS.forEach((x, i) => {
     const its = itensDe(x, p);
     l.push(`${TRILHA_PROCESSO[i].numero}. ${x.nome} (${FASES[x.fase].nome}): ${its.filter((it) => c[it.id]).length} de ${its.length} itens conferidos`);
@@ -99,7 +99,7 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   const preenchidos = camposParaIA(p, campos);
   if (preenchidos) l.push("", "CAMPOS PREENCHIDOS PELA SECRETARIA NAS ETAPAS (fonte principal: use estes dados como estão, sem contradizê-los; quantidade e valor devem ser os mesmos em todas as peças)", preenchidos);
   if (solicitacao) {
-    l.push("", "ABA ABERTA: Solicitação", "Ajude a registrar os pedidos das secretarias, os itens e os orçamentos. A Solicitação é feita por último, na etapa 8 (Protocolo), depois de todos os documentos.");
+    l.push("", "ABA ABERTA: Solicitação", "Ajude a registrar os pedidos das secretarias, os itens e os orçamentos. A Solicitação é a etapa 2, logo depois da verificação no PAC; os dados dela alimentam o DFD, o ETP e a pesquisa de preços.");
   } else {
     l.push("", `ETAPA ABERTA: ${e.nome}${e.doc ? ` — documento: ${e.doc}` : ""}`, e.oque, "", "CHECKLIST DA ETAPA");
     itensDe(e, p).forEach((i) => l.push(`${c[i.id] ? "[x]" : "[ ]"} ${i.texto}${i.base ? ` (${i.base})` : ""}`));

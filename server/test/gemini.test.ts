@@ -60,6 +60,8 @@ async function concluirPac(id: number) {
   if (r.status !== 200) throw new Error(await r.text());
   const m = await api("POST", `/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
   if (m.status !== 200) throw new Error(await m.text());
+  const s = await api("POST", `/api/processos/${id}/solicitacoes`, { chave_envio: crypto.randomUUID(), secretaria: "Obras", descricao: "Pedido de teste." });
+  if (s.status !== 201) throw new Error(await s.text());
 }
 const linhas = async (r: Response) => (await r.text()).trim().split("\n").map((l) => JSON.parse(l));
 

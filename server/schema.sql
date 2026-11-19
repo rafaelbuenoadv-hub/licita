@@ -664,3 +664,8 @@ create table if not exists pronto_pagamento_anexos (
   usuario_id int references usuarios(id) on delete set null,
   criado_em timestamptz not null default now()
 );
+
+-- Etapa 2 (Solicitação): processos que já têm solicitação registrada ficam com a etapa conferida.
+insert into checagens (processo_id, item, usuario_id)
+select distinct s.processo_id, 'solicitacao.registrada', s.usuario_id from solicitacoes_processo s
+on conflict do nothing;

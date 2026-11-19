@@ -393,6 +393,7 @@ export function rotasProcessos() {
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.incluida", detalhe: { id: nova.id, secretaria: d.secretaria } }, c);
       return { id: nova.id, nova: true };
     });
+    if (resultado.nova) await sincronizarCampos(p, req.usuario!.id, ETAPAS.filter((x) => x.id === "solicitacao"));
     res.status(resultado.nova ? 201 : 200).json({ id: resultado.id });
   });
 

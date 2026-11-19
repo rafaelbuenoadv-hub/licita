@@ -23,7 +23,9 @@ export async function sincronizarCampos(p: Proc, usuario: number, etapas: Etapa[
   for (const e of etapas) {
     const item = itemDosCampos(e);
     if (!item || !itensDe(e, p).includes(item)) continue;
-    const completo = camposFaltando(e, p, todos[e.id] ?? {}).length === 0;
+    const completo = e.id === "solicitacao"
+      ? Boolean((await q1<{ n: number }>("select count(*)::int as n from solicitacoes_processo where processo_id=$1", [p.id]))?.n)
+      : camposFaltando(e, p, todos[e.id] ?? {}).length === 0;
     if (completo) await q("insert into checagens (processo_id, item, usuario_id) values ($1,$2,$3) on conflict do nothing", [p.id, item.id, usuario]);
     else await q("delete from checagens where processo_id=$1 and item=$2", [p.id, item.id]);
   }
@@ -125,7 +127,7 @@ export async function documentoDosCampos(p: Proc, e: Etapa, campos: Record<strin
   }
   if (e.id === "protocolo") {
     l.push(`## ${++n}. Encaminhamento`,
-      "Encaminha-se o processo, com os documentos da fase interna (verificação no PAC, DFD, ETP, pesquisa de preços e memória de cálculo, Termo de Referência ou Projeto Básico com análise de riscos, indicação de dotação orçamentária, indicação do fiscal do contrato e solicitação das secretarias), ao Departamento de Licitações e Contratos, para as providências da fase externa.");
+      "Encaminha-se o processo, com os documentos da fase interna (verificação no PAC, solicitação das secretarias, DFD, ETP, pesquisa de preços e memória de cálculo, Termo de Referência ou Projeto Básico com análise de riscos, indicação de dotação orçamentária e indicação do fiscal do contrato), ao Departamento de Licitações e Contratos, para as providências da fase externa.");
   }
   if (e.id === "dot") {
     l.push(`## ${++n}. Pedido`, "Solicita-se à Contabilidade a reserva e a indicação da dotação orçamentária compatível com o objeto, para as parcelas que vencem no exercício (Lei nº 14.133/2021, art. 150).");

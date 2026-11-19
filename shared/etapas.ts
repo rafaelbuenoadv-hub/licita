@@ -79,6 +79,21 @@ Identificação do processo; Secretaria demandante; objeto
 Local e data; assinatura do responsável pela Secretaria`,
   },
   {
+    id: "solicitacao", nome: "Solicitação", doc: null,
+    fase: "interna", campos: [],
+    oque: "Registre o pedido de cada Secretaria: objeto, justificativa, itens com quantidade e valor, e os orçamentos. Esses dados preenchem os campos do DFD, do ETP e da pesquisa de preços.",
+    base: [{ rotulo: "Art. 18, I", url: U.a18 }, { rotulo: "Art. 23" }],
+    papeis: ["requisitante", "contratacao"],
+    itens: [
+      { id: "solicitacao.registrada", texto: "Ao menos uma solicitação de Secretaria registrada", base: "conferido pelo sistema", auto: true },
+    ],
+    atencao: [
+      "Descreva o objeto sem marca e com quantidades que tenham memória de cálculo.",
+      "Orçamentos com mais de 6 meses antes da divulgação do edital não servem para a pesquisa de preços (art. 23, § 1º, IV).",
+    ],
+    modelo: null,
+  },
+  {
     id: "dfd", nome: "DFD", doc: "Documento de Formalização da Demanda (DFD)",
     fase: "interna", campos: CAMPOS.dfd ?? [],
     oque: "A Secretaria formaliza, por escrito, a necessidade da contratação: o que, quanto, quando e por que é necessário. É o documento que abre o processo internamente e referencia o item do PAC. Deve ser assinado pelo responsável pela Secretaria ou por quem ele designar.",
@@ -293,12 +308,12 @@ Local e data; assinatura do responsável pela Secretaria`,
   {
     id: "protocolo", nome: "Protocolo", doc: "Encaminhamento ao Departamento de Licitações e Contratos",
     fase: "interna", campos: CAMPOS.protocolo,
-    oque: "Encerra a fase interna. Registre a Solicitação das secretarias (feita por último, depois de todos os documentos), confira o checklist e protocole o processo completo no Departamento de Licitações e Contratos. A partir daí a responsabilidade passa a ser do Departamento.",
+    oque: "Encerra a fase interna. Confira o checklist e protocole o processo completo no Departamento de Licitações e Contratos. A partir daí a responsabilidade passa a ser do Departamento.",
     base: [{ rotulo: "Art. 18, caput", url: U.a18 }, { rotulo: "Dec. 2.533/2024, art. 5º" }],
     papeis: ["requisitante", "contratacao"],
     itens: [
       campos("protocolo"),
-      it("f2", "Documentos das etapas 1 a 7 reunidos em ordem nos autos (verificação no PAC, DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação, indicação do fiscal)"),
+      it("f2", "Documentos das etapas anteriores reunidos em ordem nos autos (verificação no PAC, solicitação, DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação, indicação do fiscal)"),
     ],
     atencao: [
       "Processo protocolado incompleto, faltando algum documento das etapas anteriores, volta em diligência.",
@@ -306,7 +321,7 @@ Local e data; assinatura do responsável pela Secretaria`,
     ],
     modelo: `ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES E CONTRATOS
 Identificação do processo; Secretaria demandante; objeto
-1. Documentos da fase interna encaminhados (verificação no PAC, DFD, ETP, pesquisa de preços, TR/PB com análise de riscos, indicação de dotação, indicação do fiscal, solicitação das secretarias)
+1. Documentos da fase interna encaminhados (verificação no PAC, solicitação das secretarias, DFD, ETP, pesquisa de preços, TR/PB com análise de riscos, indicação de dotação, indicação do fiscal)
 2. Observações ao Departamento
 3. Pedido de providências da fase externa
 Local e data; assinatura do responsável pela Secretaria`,
