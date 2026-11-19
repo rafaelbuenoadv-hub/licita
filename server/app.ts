@@ -16,6 +16,7 @@ import { rotasPca } from "./routes/pca.js";
 import { rotasContratos } from "./routes/contratos.js";
 import { rotasPainel } from "./routes/painel.js";
 import { rotasMensagens } from "./routes/mensagens.js";
+import { rotasPronto } from "./routes/pronto.js";
 
 import { ErroHttp } from "./erros.js";
 export { ErroHttp };
@@ -48,6 +49,7 @@ export function criarApp() {
   api.use(rotasContratos());
   api.use(rotasPainel());
   api.use(rotasMensagens());
+  api.use(rotasPronto());
   api.use((_req, res) => { res.status(404).json({ erro: "Rota não encontrada." }); });
   app.use("/api", api);
 

@@ -1,3 +1,4 @@
+import { ProntoPagamentoPg, ProntoPagamentos } from "./paginas/ProntoPagamento";
 import { createContext, StrictMode, useContext, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
@@ -57,6 +58,7 @@ function App() {
             <div className="orgao">{eu.orgao_nome}</div>
             <NavLink to="/" end className={({ isActive }) => (isActive ? "ativo" : "")}>Painel</NavLink>
             <NavLink to="/processos" className={({ isActive }) => (isActive ? "ativo" : "")}>Processos</NavLink>
+            <NavLink to="/pronto" className={({ isActive }) => (isActive ? "ativo" : "")}>Pronto pagamento</NavLink>
             {tem(eu, "contratacao", "juridico") && <NavLink to="/revisoes" className={({ isActive }) => (isActive ? "ativo" : "")}>Revisão de processos</NavLink>}
             <NavLink to="/pca" className={({ isActive }) => (isActive ? "ativo" : "")}>Plano de contratações</NavLink>
             <NavLink to="/contratos" className={({ isActive }) => (isActive ? "ativo" : "")}>Contratos</NavLink>
@@ -70,6 +72,8 @@ function App() {
               <Route path="/processos" element={<Processos />} />
               <Route path="/processos/novo" element={<NovoProcesso />} />
               <Route path="/processos/:id" element={<ProcessoPg />} />
+              <Route path="/pronto" element={<ProntoPagamentos />} />
+              <Route path="/pronto/:id" element={<ProntoPagamentoPg />} />
               <Route path="/revisoes" element={<Revisoes />} />
               <Route path="/revisoes/:id" element={<Revisoes />} />
               <Route path="/pca" element={<Pca />} />

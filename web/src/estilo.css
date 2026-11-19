@@ -275,3 +275,14 @@ details.pedidos>summary .lbl{display:inline}
 .pac-resultados li.sel{background:var(--accent-soft)}
 .pac-resultados li>span{min-width:0;overflow-wrap:anywhere}
 .pac-resultados .btn{flex:0 0 auto}
+
+/* Pronto pagamento */
+.passos-pp{list-style:none;margin:12px 0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.passos-pp li{display:flex;gap:8px;align-items:flex-start;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.passos-pp .n{width:24px;height:24px;flex:0 0 24px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.passos-pp li.ok .n{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.passos-pp li.cur{border-color:var(--warn)} .passos-pp li.cur .n{border-color:var(--warn);color:var(--warn);font-weight:600}
+@media (max-width: 700px){ .passos-pp{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.sec.falta .itens-pp,.campo-etapa.falta input,.campo-etapa.falta textarea{border-color:var(--bad)}
+.itens-pp input{min-width:0}
+tr.clicavel{cursor:pointer} tr.clicavel:hover{background:var(--sunk)}

@@ -637,3 +637,30 @@ where regexp_replace(coalesce(o.cnpj, ''), '[^0-9]', '', 'g') = '77008068000141'
    or (regexp_replace(coalesce(o.cnpj, ''), '[^0-9]', '', 'g') = ''
        and lower(btrim(o.nome)) ~ '^((município|municipio|prefeitura( municipal)?) de )?ibaiti([[:space:]]*[-/][[:space:]]*pr)?$')
 on conflict (orgao_id, ano, ordem_oficial) do nothing;
+
+-- Pronto pagamento: pequenas compras e serviços de pronto pagamento (Lei nº 14.133/2021, art. 95, § 2º).
+create table if not exists pronto_pagamentos (
+  id serial primary key,
+  orgao_id int not null references orgaos(id) on delete cascade,
+  protocolo text not null,
+  ano int not null,
+  situacao text not null default 'pedido' check (situacao in ('pedido','autorizado','recebido','pago','cancelado')),
+  dados jsonb not null default '{}',
+  valor_total numeric(14,2) not null default 0,
+  autorizado_por int references usuarios(id) on delete set null,
+  autorizado_em timestamptz,
+  criado_por int references usuarios(id) on delete set null,
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+  unique (orgao_id, protocolo)
+);
+create index if not exists pronto_pagamentos_orgao on pronto_pagamentos(orgao_id, ano, atualizado_em desc);
+create table if not exists pronto_pagamento_anexos (
+  id serial primary key,
+  pronto_id int not null references pronto_pagamentos(id) on delete cascade,
+  tipo text not null default 'outro' check (tipo in ('orcamento','nota','comprovante','outro')),
+  nome text not null,
+  arquivo bytea not null,
+  usuario_id int references usuarios(id) on delete set null,
+  criado_em timestamptz not null default now()
+);

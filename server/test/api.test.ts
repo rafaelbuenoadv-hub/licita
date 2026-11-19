@@ -1469,3 +1469,102 @@ test("etapa 1: escolher o item na busca do PAC vincula o processo e preenche os 
   const outroAno = await admin.post("/api/processos", { objeto: "Teste de exercício", tipo: "bens", via: "licitacao", ano: 2025, pca_item_id: null });
   assert.equal((await admin.post(`/api/processos/${outroAno.dados.id}/pac`, { pca_item_id: merenda.id })).status, 400);
 });
+
+test("pronto pagamento: pedido, limite do art. 95, § 2º, autorização, recebimento, pagamento e documento", async () => {
+  const req = await new Cliente().entrar("req@a.gov.br");
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const jur = await new Cliente().entrar("jur@a.gov.br");
+  const fis = await new Cliente().entrar("fiscal@a.gov.br");
+  const b = await new Cliente().entrar("admin@b.gov.br");
+  assert.equal((await jur.post("/api/pronto", { ano: 2026 })).status, 403);
+  const novo = await req.post("/api/pronto", { ano: 2026 });
+  assert.equal(novo.status, 201, JSON.stringify(novo.dados));
+  assert.equal(novo.dados.protocolo, "PP 2026/0001");
+  const id = novo.dados.id, rota = `/api/pronto/${id}`;
+  assert.equal((await b.get(rota)).status, 404);
+  let p = (await req.get(rota)).dados;
+  assert.deepEqual(p.limite, { valor: 13098.41, fonte: "Decreto nº 12.807/2025", ano: 2026, exato: true });
+  assert.ok(p.pendencias.pedido.length > 0);
+
+  // Requisitante não autoriza; com o pedido incompleto, a autorização aponta o que falta.
+  assert.equal((await req.post(`${rota}/avancar`)).status, 403);
+  let r = await lic.post(`${rota}/avancar`);
+  assert.equal(r.dados.avancou, false);
+  assert.ok(r.dados.pendencias.some((x: { campo: string }) => x.campo === "objeto"));
+
+  const pedido = {
+    secretaria: "Educação", responsavel: "Fulana — Diretora", tipo: "compra", objeto: "Lâmpadas LED para a escola", justificativa: "Lâmpadas queimadas; compra imediata.",
+    itens: [{ descricao: "Lâmpada LED 9W", unidade: "un", quantidade: 1000, valor_unitario: 14 }],
+    fornecedor: "Elétrica Central", fornecedor_doc: "12.345.678/0001-90", fornecedor_contato: "", pesquisa_preco: "Três orçamentos anexados.", dotacao: "",
+  };
+  assert.equal((await req.put(rota, { dados: pedido })).status, 200);
+  r = await lic.post(`${rota}/avancar`);
+  assert.equal(r.dados.avancou, false);
+  assert.match(r.dados.pendencias[0].texto, /passa do limite do pronto pagamento \(R\$\s13\.098,41/);
+  assert.equal((await req.put(rota, { dados: { itens: [{ descricao: "Lâmpada LED 9W", unidade: "un", quantidade: 100, valor_unitario: 14 }] } })).status, 200);
+  // Campo de outra etapa não entra no pedido.
+  assert.equal((await req.put(rota, { dados: { nota_numero: "1" } })).status, 409);
+  r = await lic.post(`${rota}/avancar`);
+  assert.deepEqual(r.dados, { avancou: true, situacao: "autorizado" });
+  p = (await req.get(rota)).dados;
+  assert.equal(p.valor_total, 1400);
+  assert.equal(p.autorizado_por_nome, "lic");
+  // Depois de autorizado, o pedido fica travado.
+  assert.equal((await req.put(rota, { dados: { objeto: "Outro objeto" } })).status, 409);
+
+  // Recebimento: a nota não pode passar do autorizado.
+  assert.equal((await fis.put(rota, { dados: { nota_numero: "552", nota_data: "2026-11-10", nota_valor: 1500, recebido_por: "Fiscal", recebido_em: "2026-11-11" } })).status, 200);
+  r = await fis.post(`${rota}/avancar`);
+  assert.equal(r.dados.avancou, false);
+  assert.match(r.dados.pendencias[0].texto, /maior que o valor autorizado/);
+  assert.equal((await fis.put(rota, { dados: { nota_valor: 1400 } })).status, 200);
+  assert.deepEqual((await fis.post(`${rota}/avancar`)).dados, { avancou: true, situacao: "recebido" });
+
+  // Pagamento pelo setor de contratações; empenho é exigido quando a forma é empenho.
+  assert.equal((await fis.post(`${rota}/avancar`)).status, 403);
+  assert.equal((await lic.put(rota, { dados: { forma_pagamento: "empenho", pago_em: "2026-11-12" } })).status, 200);
+  assert.deepEqual((await lic.post(`${rota}/avancar`)).dados.pendencias.map((x: { campo: string }) => x.campo), ["empenho"]);
+  assert.equal((await lic.put(rota, { dados: { empenho: "3456/2026" } })).status, 200);
+  assert.deepEqual((await lic.post(`${rota}/avancar`)).dados, { avancou: true, situacao: "pago" });
+  assert.equal((await lic.put(rota, { dados: { empenho: "x" } })).status, 409);
+  assert.equal((await lic.post(`${rota}/cancelar`, { cancelar: true })).status, 409);
+
+  // Anexo e documentos.
+  const fd = new FormData();
+  fd.append("tipo", "nota");
+  fd.append("arquivo", new Blob([Buffer.from("%PDF-1.4 nota")]), "nota-552.pdf");
+  assert.equal((await fis.req("POST", `${rota}/anexos`, fd)).status, 201);
+  p = (await req.get(rota)).dados;
+  assert.deepEqual(p.anexos.map((a: { nome: string; tipo: string }) => [a.nome, a.tipo]), [["nota-552.pdf", "nota"]]);
+  const pdf = await req.get(`${rota}/documento.pdf?tipo=completo`);
+  assert.equal(pdf.status, 200);
+  assert.equal(pdf.dados.subarray(0, 5).toString(), "%PDF-");
+  assert.equal((await req.get(`${rota}/documento.docx`)).status, 200);
+  assert.deepEqual(p.historico.map((h: { acao: string }) => h.acao), ["pronto.criado", "pronto.autorizado", "pronto.recebido", "pronto.pago", "pronto.anexo"]);
+
+  // Segundo pedido ao mesmo fornecedor: aviso de possível fracionamento.
+  const outro = (await req.post("/api/pronto", { ano: 2026 })).dados;
+  assert.equal(outro.protocolo, "PP 2026/0002");
+  assert.equal((await req.put(`/api/pronto/${outro.id}`, { dados: { ...pedido, fornecedor: "Elétrica Central Ltda", itens: [{ descricao: "Reator", unidade: "un", quantidade: 1, valor_unitario: 12000 }] } })).status, 200);
+  const alerta = (await req.get(`/api/pronto/${outro.id}`)).dados.alertas.join(" ");
+  assert.match(alerta, /PP 2026\/0001.*passa do limite/);
+  const lista = (await req.get("/api/pronto?ano=2026")).dados;
+  assert.equal(lista.lista.length, 2);
+  assert.equal(lista.pagos, 1);
+});
+
+test("pronto pagamento: documento de autorização traz itens em quadro, limite e assinaturas", async () => {
+  const { documentoPP } = await import("../../shared/pronto-pagamento.js");
+  const texto = documentoPP({
+    protocolo: "PP 2026/0007", ano: 2026, situacao: "autorizado", orgao: "Município Teste", municipio: "Ibaiti/PR", autorizado_por: "Prefeito Teste", autorizado_em: "2026-11-19T10:00:00Z",
+    dados: { secretaria: "Saúde", responsavel: "Beltrano — Secretário", tipo: "servico", objeto: "Conserto de geladeira de vacinas", justificativa: "Urgente.", itens: [{ descricao: "Troca do compressor", unidade: "serv", quantidade: 1, valor_unitario: 1800 }],
+      fornecedor: "Refrigeração X", fornecedor_doc: "11.111.111/0001-11", fornecedor_contato: "", pesquisa_preco: "Dois orçamentos.", dotacao: "", nota_numero: "", nota_data: "", nota_valor: null,
+      recebido_por: "", recebido_em: "", recebimento_obs: "", forma_pagamento: "", empenho: "", pago_em: "", pagamento_obs: "" },
+  }, "autorizacao");
+  assert.match(texto, /^# SOLICITAÇÃO E AUTORIZAÇÃO DE PRONTO PAGAMENTO/);
+  assert.match(texto, /\| Item \| Descrição \| Un\. \| Qtd\. \| Valor unitário \| Valor total \|\n\|:---:\|/);
+  assert.match(texto, /\| 1 \| Troca do compressor \| serv \| 1 \| R\$\s1\.800,00 \| R\$\s1\.800,00 \|/);
+  assert.match(texto, /R\$\s13\.098,41 \(Decreto nº 12\.807\/2025\)/);
+  assert.match(texto, /Autorizado em 19\/11\/2026\.\n\n@ Prefeito Teste\n@ Ordenador da despesa/);
+  assert.ok(!texto.includes("Recebimento e atesto"));
+});
