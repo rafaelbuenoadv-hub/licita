@@ -286,3 +286,36 @@ details.pedidos>summary .lbl{display:inline}
 .sec.falta .itens-pp,.campo-etapa.falta input,.campo-etapa.falta textarea{border-color:var(--bad)}
 .itens-pp input{min-width:0}
 tr.clicavel{cursor:pointer} tr.clicavel:hover{background:var(--sunk)}
+
+/* Quadro de itens e cotações: item e descrição fixos à esquerda, valor estimado fixo à direita */
+.quadro-edicao-itens{border-collapse:separate;border-spacing:0}
+.quadro-edicao-itens :is(th,td){border-bottom:1px solid var(--line)}
+.quadro-edicao-itens .col-fixa-item{position:sticky;left:0;z-index:2;width:40px;min-width:40px;max-width:40px;background:var(--surface);text-align:center}
+.quadro-edicao-itens .col-fixa-desc{position:sticky;left:40px;z-index:2;background:var(--surface);box-shadow:6px 0 6px -6px rgba(0,0,0,.18)}
+.quadro-edicao-itens .col-fixa-fim{position:sticky;right:0;z-index:2;background:var(--surface);box-shadow:-6px 0 6px -6px rgba(0,0,0,.18);min-width:150px}
+.quadro-edicao-itens thead :is(.col-fixa-item,.col-fixa-desc,.col-fixa-fim){z-index:3}
+.quadro-edicao-itens .edicao-item-descricao{min-width:240px;max-width:300px}
+.quadro-edicao-itens .edicao-item-descricao textarea{min-height:0;resize:vertical}
+.quadro-edicao-itens .acoes-item{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;margin-top:4px;font-size:12.5px}
+.quadro-edicao-itens .acoes-item details{margin:0}
+.quadro-edicao-itens .edicao-item-medida{min-width:64px;width:72px}
+.quadro-edicao-itens th.col-cotacao{min-width:170px;max-width:210px;padding:8px}
+.quadro-edicao-itens th.col-cotacao.sem-anexo{box-shadow:inset 0 3px 0 var(--warn)}
+.quadro-edicao-itens .cotacao-anexo{display:flex;flex-wrap:nowrap;justify-content:space-between;gap:6px;align-items:center;font-size:12.5px;margin-top:6px}
+.quadro-edicao-itens .cotacao-anexo .anexo-ok{color:var(--accent);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quadro-edicao-itens .cotacao-anexo .btn{flex:0 0 auto}
+.quadro-edicao-itens .aviso-anexo{color:var(--warn);font-weight:600}
+.quadro-edicao-itens .cotacao-detalhes{margin-top:4px;font-size:12.5px}
+.quadro-edicao-itens .cotacao-detalhes summary{cursor:pointer;color:var(--muted)}
+.quadro-edicao-itens tfoot :is(th,td){border-top:2px solid var(--line);border-bottom:0;background:var(--sunk);vertical-align:top}
+.quadro-edicao-itens tfoot .total-fornecedor{text-align:right}
+.quadro-edicao-itens tfoot .col-fixa-fim,.quadro-edicao-itens tfoot .col-fixa-desc,.quadro-edicao-itens tfoot .col-fixa-item{background:var(--sunk)}
+.quadro-edicao-itens .edicao-item-estimativa p{margin:4px 0 0}
+@media (max-width: 700px){
+  .quadro-edicao-itens .col-fixa-desc{position:static;box-shadow:none}
+  .quadro-edicao-itens .edicao-item-descricao{min-width:190px}
+  .quadro-edicao-itens .col-fixa-fim{min-width:120px}
+}
+.quadro-edicao-itens .acoes-item>details{display:inline-block}
+.quadro-edicao-itens .acoes-item>details[open]{display:block;flex-basis:100%}
+@media (max-width: 700px){ .quadro-edicao-itens .col-fixa-fim{position:static;box-shadow:none} }
