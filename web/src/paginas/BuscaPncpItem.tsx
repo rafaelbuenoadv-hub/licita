@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SITUACOES_PNCP, UFS_PNCP, type ResultadoPncp } from "../../../shared/pncp";
 import { api, brl } from "../api";
 import { pncpDate, pncpProcedure } from "../comp/comprovantePncp";
 
-export function BuscaPncpItem({ descricao, ocupado, usar }: {
+export function BuscaPncpItem({ descricao, ocupado, usar, aberto = false }: {
   descricao: string;
   ocupado: boolean;
   usar: (r: ResultadoPncp) => Promise<void>;
+  /** Mostra a busca já aberta (na janela própria do PNCP) e busca pelo nome do item ao abrir. */
+  aberto?: boolean;
 }) {
   const [consulta, setConsulta] = useState<string | null>(null);
   const [uf, setUf] = useState("PR");
@@ -33,9 +35,12 @@ export function BuscaPncpItem({ descricao, ocupado, usar }: {
     }
   };
 
-  return <details className="cotacao-pncp">
-    <summary>Consultar preços no PNCP</summary>
-    <div className="stack">
+  const jaBuscou = useRef(false);
+  useEffect(() => {
+    if (aberto && !jaBuscou.current && descricao.trim().length >= 3) { jaBuscou.current = true; void buscar(); }
+  }, [aberto]);
+
+  const corpo = <div className="stack">
       <div className="form">
         <label className="wide">Descrição para busca<input maxLength={220} disabled={ocupado || buscando}
           value={consulta ?? descricao.slice(0, 220)} onChange={(e) => setConsulta(e.target.value)} onKeyDown={(e) => {
@@ -46,8 +51,12 @@ export function BuscaPncpItem({ descricao, ocupado, usar }: {
       <div><button className="btn sm" type="button" disabled={ocupado || buscando || (consulta ?? descricao).trim().length < 3} onClick={buscar}>
         {buscando ? "Buscando no PNCP…" : "Buscar no PNCP"}</button></div>
       {aviso && <p className="small" role="status">{aviso}</p>}
+      {buscando && <p className="small muted" role="status">Buscando "{(consulta ?? descricao).trim()}" no PNCP…</p>}
       <ReferenciasPncp resultados={resultados} inativo={ocupado || buscando} usar={usar} />
-    </div>
+    </div>;
+  return aberto ? corpo : <details className="cotacao-pncp">
+    <summary>Consultar preços no PNCP</summary>
+    {corpo}
   </details>;
 }
 

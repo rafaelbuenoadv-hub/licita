@@ -33,6 +33,7 @@ export function ItensOrcamentos(props: Props) {
   const { linhas, setLinhas } = props;
   const [editando, setEditando] = useState<number | "novo" | null>(null);
   const [orcamentosDe, setOrcamentosDe] = useState<{ k: number; pncp?: boolean } | null>(null);
+  const [pncpDe, setPncpDe] = useState<number | null>(null);
   const lidas = lerLinhas(linhas);
   // Índice de cada linha nos itens lidos (linhas vazias ficam de fora da leitura).
   const itemDa = (k: number): ItemSolicitacao | undefined => {
@@ -66,7 +67,7 @@ export function ItensOrcamentos(props: Props) {
               <td className="r num">{item?.valor_unitario != null ? brl(item.valor_unitario) : <span className="muted">A pesquisar</span>}</td>
               <td><div className="acoes-preco">
                 <button type="button" className="btn sm orc" onClick={() => setOrcamentosDe({ k })}>📊 {valores.length ? `Orçamentos (${valores.length})` : "Adicionar orçamento"}</button>
-                <button type="button" className="btn sm pncp" onClick={() => setOrcamentosDe({ k, pncp: true })}>🔍 Buscar no PNCP</button>
+                <button type="button" className="btn sm pncp" onClick={() => setPncpDe(k)}>🔍 Buscar no PNCP</button>
               </div></td>
               <td className="r num">{total != null ? brl(Math.round(total * 100) / 100) : "—"}</td>
               <td className="r"><div className="acoes-linha">
@@ -88,6 +89,7 @@ export function ItensOrcamentos(props: Props) {
           else setLinhas((lista) => lista.map((x, i) => (i === editando ? l : x)));
           setEditando(null);
         }} />}
+      {pncpDe !== null && linhas[pncpDe] && <ModalPncp {...props} k={pncpDe} fechar={() => setPncpDe(null)} abrirOrcamentos={() => { const k = pncpDe; setPncpDe(null); setOrcamentosDe({ k }); }} />}
       {orcamentosDe && linhas[orcamentosDe.k] && <ModalOrcamentos {...props} k={orcamentosDe.k} focarPncp={!!orcamentosDe.pncp} fechar={() => setOrcamentosDe(null)} />}
     </div>
   );
@@ -140,6 +142,21 @@ function ModalItem({ linha, salvar, fechar }: { linha?: LinhaItem; salvar: (l: L
         {erro && <p className="small aviso-anexo" role="alert">{erro}</p>}
         <div className="tools fim"><button type="button" className="btn" onClick={fechar}>Cancelar</button><button type="button" className="btn pri" onClick={confirmar}>✓ Salvar cadastro</button></div>
       </div>
+    </Janela>
+  );
+}
+
+/** Janela própria da busca no PNCP: já abre buscando pelo nome do item. Escolher um resultado lança o valor com o comprovante. */
+function ModalPncp({ k, linhas, ocupado, anexando, usarPncp, fechar, abrirOrcamentos }: Props & { k: number; fechar: () => void; abrirOrcamentos: () => void }) {
+  const linha = linhas[k];
+  const { nome, descricao } = separarDescricao(linha.descricao);
+  const doPncp = linha.cotacoes.filter((c) => cotacaoPreenchida(c) && c.fonte === "pncp");
+  return (
+    <Janela titulo="Buscar no PNCP" subtitulo={[nome, descricao].filter(Boolean).join(" — ")} fechar={fechar} largura={860}>
+      <p className="small muted">Preços de itens iguais em contratações publicadas no PNCP. Ao escolher um resultado, o valor entra nos orçamentos do item com o comprovante anexado.</p>
+      {doPncp.length > 0 && <p className="small"><b>{doPncp.length}</b> {doPncp.length === 1 ? "referência do PNCP já lançada" : "referências do PNCP já lançadas"} neste item.</p>}
+      <BuscaPncpItem aberto descricao={nome || linha.descricao} ocupado={ocupado || !!anexando} usar={(r) => usarPncp(k, r)} />
+      <div className="tools fim"><button type="button" className="btn" onClick={abrirOrcamentos}>Ver orçamentos do item</button><button type="button" className="btn pri" onClick={fechar}>Fechar</button></div>
     </Janela>
   );
 }
