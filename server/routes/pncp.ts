@@ -6,6 +6,22 @@ import { SITUACOES_PNCP, UFS_PNCP, type ResultadoPncp } from "../../shared/pncp.
 
 type Obj = Record<string, unknown>;
 
+/**
+ * A busca do portal do PNCP (/api/search) derruba parte das conexões de programas ("other side closed").
+ * As consultas se identificam como o sistema e repetem a tentativa quando a conexão cai.
+ */
+const CABECALHOS_PNCP = { Accept: "application/json", "User-Agent": "Licita/1.0 (sistema de compras municipal)" };
+/** Consulta ao PNCP com até três tentativas quando a conexão cai no meio (o PNCP derruba conexões com frequência). */
+async function consultarPncp(carregar: typeof fetch, url: string | URL, tempo: number) {
+  for (let tentativa = 1; ; tentativa++) {
+    try { return await carregar(url, { headers: CABECALHOS_PNCP, signal: AbortSignal.timeout(tempo) }); }
+    catch (e) {
+      if ((e as Error)?.name === "TimeoutError" || tentativa >= 3) throw e;
+      await new Promise((ok) => setTimeout(ok, 500 * tentativa));
+    }
+  }
+}
+
 const obj = (value: unknown): Obj =>
   value && typeof value === "object" ? (value as Obj) : {};
 
@@ -74,10 +90,11 @@ export async function buscarPncp(consulta: z.infer<typeof filtros>, carregar: ty
   }).toString();
   let notices: Obj[];
   try {
-    const resposta = await carregar(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(12000) });
+    const resposta = await consultarPncp(carregar, url, 12000);
     if (!resposta.ok) throw new Error(String(resposta.status));
     notices = list(await resposta.json()).slice(0, 10).map(obj);
-  } catch {
+  } catch (e) {
+    console.warn("PNCP: falha na busca de editais", { url: url.toString(), erro: e instanceof Error ? `${e.name}: ${e.message}` : String(e), causa: String((e as { cause?: unknown })?.cause ?? "") });
     throw new ErroHttp(502, "O PNCP está indisponível neste momento. Tente a consulta novamente.");
   }
   const tokens = [...new Set(normalize(query).split(/[^a-z0-9]+/).filter((token) => token.length >= 3))];
@@ -92,10 +109,7 @@ export async function buscarPncp(consulta: z.infer<typeof filtros>, carregar: ty
     if (!parsed) return [];
     try {
       const detail = `https://pncp.gov.br/api/pncp/v1/orgaos/${parsed.cnpj}/compras/${parsed.year}/${parsed.sequence}/itens?pagina=1&tamanhoPagina=50`;
-      const result = await carregar(detail, {
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(9000),
-      });
+      const result = await consultarPncp(carregar, detail, 9000);
       if (result.status === 404 || result.status === 204) return [];
       if (!result.ok) return null;
       const organization =
