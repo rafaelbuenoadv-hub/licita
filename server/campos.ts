@@ -1,6 +1,7 @@
 // Campos de preenchimento das etapas: gravação, sugestões com o que o processo já tem e documento montado sem IA.
 import { q, q1 } from "./db.js";
 import { secretariosDoProcesso } from "./portarias.js";
+import { documentoDfd } from "./modelo-dfd.js";
 import { totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
 import {
   ETAPAS, TIPOS, VIAS, camposFaltando, camposVisiveis, itemDosCampos, itensDe, textoDoCampo, temValor,
@@ -110,6 +111,7 @@ const dataExtenso = (d = new Date()) => `${d.getDate()} de ${MESES[d.getMonth()]
 
 /** Documento da etapa montado só com os campos preenchidos, no formato das minutas (# título, ## seções, @ assinatura). */
 export async function documentoDosCampos(p: Proc, e: Etapa, campos: Record<string, Valores>, autor: { nome: string; cargo: string }) {
+  if (e.id === "dfd") return documentoDfd(p, campos, autor);
   const valores = campos[e.id] ?? {};
   const orgao = await q1<{ nome: string; municipio: string | null; uf: string | null }>("select nome, municipio, uf from orgaos where id=$1", [p.orgao_id]);
   const titulo = (e.doc ?? e.nome).replace(/\s*\(.*\)$/, "").toUpperCase();

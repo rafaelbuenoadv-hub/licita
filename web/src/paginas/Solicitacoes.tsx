@@ -3,7 +3,7 @@ import { api, brl } from "../api";
 import { useEu } from "../main";
 import { Folha } from "../comp/Folha";
 import { aplicarPendencias, pendencias } from "../../../shared/etapas";
-import { camposDaSolicitacao, prazoDoProcesso, documentoDaSolicitacao, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { camposDaSolicitacao, planejamentoDoProcesso, prazoDoProcesso, documentoDaSolicitacao, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
 
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
@@ -82,7 +82,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const temOrcamento = itens.some((item) => item.cotacoes?.some((cotacao) => cotacao.orcamento_id != null));
   // Mesmo caminho do servidor: o quadro de itens entra no texto e os campos do modelo recebem o que foi digitado.
   const base = documentoDaSolicitacao(rascunhoPrevia ?? descricao, itens);
-  const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: objeto, justificativa, itens, prazo: prazoDoProcesso(processo.campos) });
+  const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: objeto, justificativa, itens, prazo: prazoDoProcesso(processo.campos), planejamento: planejamentoDoProcesso(processo.campos) });
   // Itens e quantidades saem do quadro de itens: não se pede para digitar de novo.
   const peloQuadro = (rotulo: string) => /^(preencher:\s*)?(itens( solicitados)?|quantidades( e prazo de atendimento)?)$/i.test(rotulo.normalize("NFD").replace(/\p{M}/gu, "").trim());
   const faltantes = pendencias(base).filter((x) => !automaticos[x.i] && !peloQuadro(x.rotulo));

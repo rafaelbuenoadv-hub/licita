@@ -9,7 +9,7 @@ export async function modeloSolicitacao(orgao: number) {
 }
 
 export async function preencherSolicitacao(
-  processo: { orgao_id: number; protocolo: string; objeto: string; prazo?: string },
+  processo: { orgao_id: number; protocolo: string; objeto: string; prazo?: string; planejamento?: string; local?: string },
   dados: { secretaria: string; referencia: string; descricao: string; objeto_solicitacao?: string; justificativa?: string; itens?: ItemSolicitacao[] },
 ) {
   // O quadro de itens entra antes de preencher os campos: assim um modelo com [[Itens]] não recebe o quadro duas vezes.

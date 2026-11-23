@@ -1,6 +1,6 @@
 import { anexosDaRequisicao, apoiosComTextoLocal, hashDoAnexo, incorporarApoios, nomeAnexoEnviado, parametrosApoios, receberAnexosSolicitacao, referenciasApoios, salvarApoios } from "../anexos-solicitacao.js";
 import { fornecedorNoTexto, limparNomeFornecedor, nomeDoArquivoSemExtensao, nomeFornecedorOrcamento, type OrcamentoLido } from "../../shared/orcamentos.js";
-import { documentoDaSolicitacao, prazoDoProcesso, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao } from "../../shared/solicitacao.js";
+import { documentoDaSolicitacao, planejamentoDoProcesso, prazoDoProcesso, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao } from "../../shared/solicitacao.js";
 import { modeloSolicitacao, preencherSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesCadastro } from "../portarias.js";
 import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
@@ -210,6 +210,13 @@ async function conferirOrcamentos(c: PoolClient, processo: number, itens: ItemSo
  */
 const textoDoFormulario = z.string().transform((t) => t.replace(/\r\n?/g, "\n"));
 
+/** Dados do processo que preenchem campos da Solicitação: prazo, alinhamento com o PAC e local. */
+async function contextoSolicitacao(p: Processo) {
+  const campos = await camposDo(p.id);
+  const orgao = await q1<{ municipio: string | null; uf: string | null }>("select municipio, uf from orgaos where id=$1", [p.orgao_id]);
+  return { ...p, prazo: prazoDoProcesso(campos), planejamento: planejamentoDoProcesso(campos), local: orgao?.municipio ? `${orgao.municipio}${orgao.uf ? `/${orgao.uf}` : ""}` : "" };
+}
+
 export function rotasProcessos() {
   const r = Router();
   r.use("/processos", exigeLogin);
@@ -370,7 +377,7 @@ export function rotasProcessos() {
       : "";
     const documentos = await apoiosComTextoLocal(apoios);
     const itens = calcularItens(d.itens);
-    const descricao = await preencherSolicitacao({ ...p, prazo: prazoDoProcesso(await camposDo(p.id)) }, { ...d, itens });
+    const descricao = await preencherSolicitacao(await contextoSolicitacao(p), { ...d, itens });
     if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     const resultado = await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and orgao_id=$2 and excluido_em is null for update", [p.id, p.orgao_id]);
@@ -416,7 +423,7 @@ export function rotasProcessos() {
     const pendentes = parametrosApoios(d, p.id, req.usuario!.id);
     const documentos = await apoiosComTextoLocal(apoios);
     const itens = d.itens && calcularItens(d.itens);
-    const descricao = await preencherSolicitacao({ ...p, prazo: prazoDoProcesso(await camposDo(p.id)) }, { ...s, descricao: d.descricao, itens: itens ?? s.itens });
+    const descricao = await preencherSolicitacao(await contextoSolicitacao(p), { ...s, descricao: d.descricao, itens: itens ?? s.itens });
     if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and excluido_em is null for update", [p.id]);

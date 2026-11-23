@@ -750,9 +750,13 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   assert.equal(montado.status, 200, JSON.stringify(montado.dados));
   const doc = (await admin.get(`/api/processos/${id}/minutas/dfd`)).dados.vigente;
   assert.equal(doc.origem, "campos");
-  assert.ok(doc.texto.startsWith(`# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA\n\nProtocolo ${protocolo}`));
-  assert.match(doc.texto, /## 4\. Justificativa da necessidade\n\nAs cadeiras atuais estão quebradas, conforme laudo anexo\./);
-  assert.match(doc.texto, /@ Denise da Silva Lima\n@ Secretário\(a\) Municipal de Educação \(Portaria nº 008\/2025\)$/);
+  assert.ok(doc.texto.startsWith("# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA — DFD\n\n"));
+  assert.ok(doc.texto.includes(`Protocolo ${protocolo} · Exercício 2028`));
+  assert.match(doc.texto, /## 1\. Identificação da área requisitante\n\n\| Informação \| Dados \|[\s\S]*\| Ato de nomeação \| Portaria nº 008\/2025 \|/);
+  assert.match(doc.texto, /## 3\. Justificativa da necessidade\n\nAs cadeiras atuais estão quebradas, conforme laudo anexo\./);
+  assert.match(doc.texto, /## 7\. Alinhamento com o Plano Anual de Contratações\n\nA contratação não consta do Plano Anual de Contratações e é incluída de forma extraordinária\. Justificativa: Cadeiras quebradas/);
+  assert.match(doc.texto, /## 9\. Declarações da área requisitante\n\na\) As informações/);
+  assert.match(doc.texto, /@ Denise da Silva Lima\n@ Secretário\(a\) Municipal de Educação\n@ Portaria de nomeação nº 008\/2025$/);
   // O ETP já recebe a justificativa e as quantidades do DFD.
   det = (await admin.get(`/api/processos/${id}`)).dados;
   assert.equal(det.sugestoes_campos.etp.i, dfd.justificativa);
@@ -979,20 +983,20 @@ test("solicitação com objeto genérico, justificativa e itens com quantidade e
   assert.equal(s.justificativa, "As cadeiras atuais estão quebradas.");
   assert.deepEqual(s.itens, itens);
   assert.ok(s.descricao.includes(`Protocolo ${protocolo}`));
-  assert.match(s.descricao, /## Objeto\nMobiliário escolar\n/);
-  assert.match(s.descricao, /## Justificativa da necessidade\nAs cadeiras atuais estão quebradas\.\n/);
-  assert.match(s.descricao, /## Itens solicitados\n\| Item \| Descrição \| Un\. \| Qtd\. \| Valor unitário \| Valor total \|\n\|:---:\|---\|:---:\|---:\|---:\|---:\|\n/);
+  assert.match(s.descricao, /## 2\. Objeto\nMobiliário escolar\n/);
+  assert.match(s.descricao, /## 3\. Justificativa da necessidade\nAs cadeiras atuais estão quebradas\.\n/);
+  assert.match(s.descricao, /## 4\. Itens solicitados\n\| Item \| Descrição \| Un\. \| Qtd\. \| Valor unitário \| Valor total \|\n\|:---:\|---\|:---:\|---:\|---:\|---:\|\n/);
   assert.match(s.descricao, /\| 1 \| Cadeira escolar \/ empilhável \| un \| 30 \| R\$\s300,00 \| R\$\s9\.000,00 \|/);
   assert.match(s.descricao, /\| 2 \| Mesa escolar individual \| un \| 30 \| R\$\s250,50 \| R\$\s7\.515,00 \|/);
   assert.match(s.descricao, /\| 3 \| Armário de aço \| — \| — \| — \| — \|/);
   assert.match(s.descricao, /\| \| \*\*Total estimado\*\* \| \| \| \| \*\*R\$\s16\.515,00\*\* \|/);
   assert.match(s.descricao, /@ Denise da Silva Lima/);
-  assert.equal(s.descricao.match(/## Itens solicitados/g).length, 1);
+  assert.equal(s.descricao.match(/Itens solicitados/g).length, 1);
 
   // Sem objeto próprio vale o do processo; sem itens o campo do modelo continua pendente.
   const r2 = await admin.post(rota, corpo({ secretaria: "Finanças" }));
   const s2 = (await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r2.dados.id);
-  assert.match(s2.descricao, /## Objeto\nAquisição de mobiliário para as escolas municipais\n/);
+  assert.match(s2.descricao, /## 2\. Objeto\nAquisição de mobiliário para as escolas municipais\n/);
   assert.ok(s2.descricao.includes("[[Itens]]") && s2.descricao.includes("[[Justificativa da contratação]]"));
   assert.deepEqual(s2.itens, []);
 
@@ -1628,7 +1632,7 @@ test("o que já foi informado no PAC e na Solicitação preenche os campos que p
   });
   assert.equal(r.status, 201, JSON.stringify(r.dados));
   const det = (await lic.get(rota)).dados;
-  assert.match(det.solicitacoes[0].descricao, /Cadeira escolar: 30 un\. Prazo: início previsto no PAC: Março\/2032/);
+  assert.match(det.solicitacoes[0].descricao, /Cadeira escolar: 30 un\. Prazo: conforme o PAC, início previsto para Março\/2032/);
   // DFD já sabe a justificativa, a quantidade e o prazo; o ETP, a justificativa.
   assert.equal(det.sugestoes_campos.dfd.justificativa, "Cadeiras quebradas.");
   assert.equal(det.sugestoes_campos.dfd.quantidade, "- Cadeira escolar: 30 un");

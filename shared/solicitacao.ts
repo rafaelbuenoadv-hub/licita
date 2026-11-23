@@ -1,8 +1,12 @@
 import { pendencias } from "./etapas.js";
+import { reaisPorExtenso } from "./extenso.js";
+
+const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const dataLocal = (local?: string) => { const d = new Date(); return `${local ? `${local}, ` : ""}${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}.`; };
 
 export const ASSINATURA_SOLICITACAO = [
   "@ [[Nome do secretário]]",
-  "@ Titular da área requisitante · [[Secretaria]]",
+  "@ Secretário(a) Municipal de [[Secretaria]]",
   "@ Portaria de nomeação nº [[Portaria de nomeação]]",
 ].join("\n");
 
@@ -13,21 +17,33 @@ export const MODELO_SOLICITACAO = {
   modelo: [
     "# SOLICITAÇÃO DE CONTRATAÇÃO",
     "Protocolo [[Protocolo]]",
+    "Ao Departamento de Licitações e Contratos",
     "",
-    "## Unidade requisitante",
+    "## 1. Unidade requisitante",
     "[[Secretaria]]",
     "",
-    "## Objeto",
+    "## 2. Objeto",
     "[[Objeto]]",
     "",
-    "## Justificativa da necessidade",
+    "## 3. Justificativa da necessidade",
     "[[Justificativa da contratação]]",
     "",
-    "## Itens solicitados",
+    "## 4. Itens solicitados",
     "[[Itens]]",
     "",
-    "## Quantidades e prazo",
+    "## 5. Quantidades e prazo de atendimento",
     "[[Quantidades e prazo de atendimento]]",
+    "",
+    "## 6. Estimativa de valor",
+    "Valor total estimado: [[Valor total por extenso]], apurado a partir das cotações e referências do quadro de itens, sem prejuízo da pesquisa de preços formal, com memória de cálculo (Lei nº 14.133/2021, art. 23).",
+    "",
+    "## 7. Alinhamento com o planejamento",
+    "[[Previsão no PAC]]",
+    "",
+    "## 8. Pedido",
+    "Diante do exposto, solicita-se a adoção das providências para a contratação, com a formalização da demanda, o Estudo Técnico Preliminar e os demais atos da fase preparatória (Lei nº 14.133/2021, art. 18). A Secretaria declara que a especificação não indica marca, que a demanda não foi fracionada e que as informações prestadas são verdadeiras.",
+    "",
+    "[[Local e data]]",
     "",
     ASSINATURA_SOLICITACAO,
   ].join("\n"),
@@ -254,11 +270,22 @@ export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[]) 
   return itens.length ? inserirItens(texto, itens, true) : texto;
 }
 
+/** Texto da verificação no PAC (etapa 1), para os documentos. */
+export function planejamentoDoProcesso(campos?: Record<string, Record<string, unknown>>) {
+  const v = (k: string) => { const x = campos?.pac?.[k]; return typeof x === "string" ? x.trim() : ""; };
+  if (v("consta") === "sim") {
+    return `A contratação está prevista no Plano Anual de Contratações${v("item_pac") ? ` (${v("item_pac")})` : ""}${v("mes_planejado") ? `, com início previsto para ${v("mes_planejado")}` : ""}.`
+      + (v("no_prazo") === "nao" && v("motivo_prazo") ? ` Alteração do cronograma: ${v("motivo_prazo")}` : "");
+  }
+  if (v("consta") === "nao") return `A contratação não consta do Plano Anual de Contratações e é incluída de forma extraordinária. Justificativa: ${v("justificativa_inclusao") || "a informar"}`;
+  return "";
+}
+
 /** Prazo que o processo já registra: data pretendida do DFD ou mês de início previsto no PAC. */
 export function prazoDoProcesso(campos?: Record<string, Record<string, unknown>>) {
   const dfd = campos?.dfd?.data_pretendida, mes = campos?.pac?.mes_planejado;
   if (typeof dfd === "string" && dfd.trim()) return dfd.trim();
-  return typeof mes === "string" && mes.trim() ? `início previsto no PAC: ${mes.trim()}` : "";
+  return typeof mes === "string" && mes.trim() ? `conforme o PAC, início previsto para ${mes.trim()}` : "";
 }
 
 export function camposDaSolicitacao(texto: string, dados: {
@@ -273,6 +300,10 @@ export function camposDaSolicitacao(texto: string, dados: {
   itens?: ItemSolicitacao[];
   /** Prazo já informado no processo (DFD ou mês previsto no PAC). */
   prazo?: string;
+  /** Texto da verificação no PAC. */
+  planejamento?: string;
+  /** Cidade/UF do órgão, para a linha de local e data. */
+  local?: string;
 }) {
   const itens = dados.itens ?? [];
   const prazo = dados.prazo?.trim() ?? "";
@@ -291,6 +322,10 @@ export function camposDaSolicitacao(texto: string, dados: {
     itens: quadroDeItens(itens),
     "itens solicitados": quadroDeItens(itens),
     "valor total": total == null ? "" : real(total),
+    "valor total por extenso": total == null ? "" : `${real(total)} (${reaisPorExtenso(total)})`,
+    "previsao no pac": dados.planejamento ?? "",
+    "alinhamento com o planejamento": dados.planejamento ?? "",
+    "local e data": dataLocal(dados.local),
     "valor estimado": total == null ? "" : real(total),
     referencia: dados.referencia,
     quantidades,
