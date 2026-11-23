@@ -1130,7 +1130,7 @@ test("leitura de proposta separa os itens novos e evita lançar duas linhas no m
   assert.equal(valorDasCotacoes(fontes, "menor"), 100);
 });
 
-test("preços lançados aparecem na solicitação e entram na estimativa após o vínculo", async () => {
+test("preços lançados entram na estimativa mesmo sem orçamento anexado; o anexo é opcional", async () => {
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const criado = await lic.post("/api/processos", { objeto: "Aquisição de materiais de expediente", tipo: "bens", via: "licitacao", ano: 2095 });
   assert.equal(criado.status, 201);
@@ -1147,20 +1147,20 @@ test("preços lançados aparecem na solicitação e entram na estimativa após o
   assert.equal(salva.status, 201, JSON.stringify(salva.dados));
   const antes = (await lic.get(processo)).dados.solicitacoes[0];
   assert.deepEqual(antes.itens[0].cotacoes, cotacoes);
-  assert.equal(antes.itens[0].valor_unitario, null);
+  assert.equal(antes.itens[0].valor_unitario, 15.25);
   const rota = `${caminho}/${salva.dados.id}`;
   const previa = documentoDaSolicitacao("# SOLICITAÇÃO\nRelação: [[Itens]]", antes.itens);
   assert.match(previa, /^# SOLICITAÇÃO\nRelação:\n\n\| Item \| Descrição .*Cotação 1\u2028Papelaria A \| Cotação 2\u2028Papelaria B \| Média \|/);
-  assert.match(previa, /Resma de papel .*R\$\s12,50\* \| R\$\s18,00\*/);
-  assert.doesNotMatch(previa, /Total estimado|\[\[Itens\]\]|Orçamentos por item/);
+  assert.match(previa, /Resma de papel .*R\$\s12,50 \| R\$\s18,00 \| R\$\s15,25 \| R\$\s61,00 \|/);
+  assert.doesNotMatch(previa, /\[\[Itens\]\]|Orçamentos por item|\*\) Cotação sem orçamento/);
   assert.equal(documentoDaSolicitacao(previa, antes.itens), previa);
 
   const wordAntes = await lic.get(`${rota}/docx`);
   assert.equal(wordAntes.status, 200);
   const textoAntes = await extrairTexto("solicitacao.docx", wordAntes.dados);
   assert.match(textoAntes, /Cotação 1\s*Papelaria A \| Cotação 2\s*Papelaria B \| Média/);
-  assert.match(textoAntes, /Resma de papel .*R\$\s12,50\* \| R\$\s18,00\*/);
-  assert.doesNotMatch(textoAntes, /Total estimado|Orçamentos por item/);
+  assert.match(textoAntes, /Resma de papel .*R\$\s12,50 \| R\$\s18,00 \| R\$\s15,25/);
+  assert.doesNotMatch(textoAntes, /Orçamentos por item/);
 
   const form = new FormData();
   form.set("arquivo", new Blob(["Proposta A para resmas de papel"]), "proposta-a.txt");
@@ -1172,17 +1172,17 @@ test("preços lançados aparecem na solicitação e entram na estimativa após o
   });
   assert.equal(atualizada.status, 200, JSON.stringify(atualizada.dados));
   const depois = (await lic.get(processo)).dados.solicitacoes[0];
-  assert.equal(depois.itens[0].valor_unitario, 12.5);
+  assert.equal(depois.itens[0].valor_unitario, 15.25);
   assert.equal(depois.itens[0].cotacoes[1].valor_unitario, 18);
-  assert.match(depois.descricao, /Total estimado\*{0,2} .*R\$\s50,00/);
+  assert.match(depois.descricao, /Total estimado\*{0,2} .*R\$\s61,00/);
   // Uma solicitação antiga com texto anterior ao quadro também mostra o orçamento salvo.
   await pool.query("update solicitacoes_processo set descricao=$1 where id=$2", ["# SOLICITAÇÃO\nCotação no anexo.\n\n@ Titular", salva.dados.id]);
   const wordDepois = await lic.get(`${rota}/docx`);
   assert.equal(wordDepois.status, 200);
   const textoDepois = await extrairTexto("solicitacao.docx", wordDepois.dados);
-  assert.match(textoDepois, /Resma de papel .*R\$\s12,50 \| R\$\s18,00\* \| R\$\s12,50 \| R\$\s50,00 \|/);
+  assert.match(textoDepois, /Resma de papel .*R\$\s12,50 \| R\$\s18,00 \| R\$\s15,25 \| R\$\s61,00 \|/);
   assert.match(textoDepois, /## Itens solicitados|Itens solicitados/);
-  assert.match(textoDepois, /Total estimado\*{0,2} .*R\$\s50,00[\s\S]+Titular/);
+  assert.match(textoDepois, /Total estimado\*{0,2} .*R\$\s61,00[\s\S]+Titular/);
   assert.doesNotMatch(textoDepois, /Orçamentos por item/);
   const pdf = await lic.get(`${rota}/pdf`);
   assert.equal(pdf.status, 200);
@@ -1218,7 +1218,7 @@ test("as cotações ficam lado a lado no quadro e os fornecedores comuns aparece
   assert.equal(muitos.match(/Material escolar/g)?.length, 1);
   assert.equal(muitos.match(/Loja Alfa/g)?.length, 1);
   assert.equal(muitos.match(/Total estimado/g)?.length, 1);
-  assert.match(muitos, /\n\| \| \*\*Total estimado da solicitação\*\* \|( \|)+ \*\*R\$\s15,00\*\* \|\n\nPreço de referência: média das cotações com orçamento anexado\.$/);
+  assert.match(muitos, /\n\| \| \*\*Total estimado da solicitação\*\* \|( \|)+ \*\*R\$\s15,00\*\* \|\n\nPreço de referência: média das cotações\.$/);
   assert.equal(documentoDaSolicitacao(muitos, [{ ...item, cotacoes: [a, b, cotacao("Loja Gama", 30), cotacao("Loja Delta", 40), cotacao("Loja Épsilon", 50)] }]), muitos);
   const distintos = documentoDaSolicitacao(texto, ["Alfa", "Beta", "Gama", "Delta"].map((nome, k) => ({
     ...item, descricao: `Item de ${k + 1}`, cotacoes: [cotacao(nome, (k + 1) * 10)],

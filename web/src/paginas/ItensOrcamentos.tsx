@@ -183,7 +183,6 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
   const lido = lerLinhas([linha]).itens[0];
   const comprovadas = lido?.cotacoes ?? [];
   const criterio = linha.criterio ?? "media";
-  const semAnexo = cotacoes.filter(({ c }) => c.orcamentoId == null && valorValido(c));
 
   const incluir = () => {
     const v = numBR(f.valor);
@@ -245,14 +244,14 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
                   <td className="r num">{valorValido(c) ? brl(numBR(c.valor)!) : <input aria-label="Valor unitário" className="valor-inline" inputMode="decimal" placeholder="informar" defaultValue={c.valor}
                     onBlur={(e) => alterarLinha({ cotacoes: linha.cotacoes.map((x, n) => (n === i ? { ...x, valor: e.target.value.trim() } : x)) })} />}</td>
                   <td className="small">{c.orcamentoId != null ? <a className="anexo-ok" href={`/api${caminho}/${c.orcamentoId}/arquivo`}>✓ {nomeArquivo(c.orcamentoId)}</a>
-                    : <button type="button" className="lnk aviso-anexo" onClick={() => { setAnexarEm(i); arquivo.current?.click(); }}>⚠ Anexar</button>}</td>
+                    : <button type="button" className="lnk" onClick={() => { setAnexarEm(i); arquivo.current?.click(); }}>Anexar (opcional)</button>}</td>
                   <td className="r"><button type="button" className="lnk perigo" aria-label="Remover valor" onClick={() => remover(i)}>🗑</button></td>
                 </tr>)}</tbody>
             </table></div>
           </section>
 
           <section className="orc-bloco">
-            <div className="row"><div><h3 className="orc-tit">Anexos dos orçamentos</h3><p className="small muted">Anexe a proposta, cotação ou documento que comprova o preço deste item.</p></div></div>
+            <div className="row"><div><h3 className="orc-tit">Anexos dos orçamentos</h3><p className="small muted">Opcional: anexe a proposta, cotação ou documento que comprova o preço deste item.</p></div></div>
             <div className="grade-anexo">
               <label>Vincular ao valor<select value={anexarEm} onChange={(e) => setAnexarEm(e.target.value === "" ? "" : Number(e.target.value))}>
                 <option value="">Novo orçamento (informar o valor depois)</option>
@@ -261,7 +260,6 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
               <button type="button" className="btn pri" disabled={ocupado || !!anexando} onClick={() => arquivo.current?.click()}>📎 {anexando === `item-${k}` ? "Anexando…" : "Anexar orçamento"}</button>
               <input ref={arquivo} hidden type="file" accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ""; if (a) void anexar(a); }} />
             </div>
-            {semAnexo.length > 0 && <p className="small aviso-anexo">{semAnexo.length} {semAnexo.length === 1 ? "valor ainda não tem" : "valores ainda não têm"} comprovante anexado e {semAnexo.length === 1 ? "fica" : "ficam"} fora do cálculo.</p>}
             <div ref={pncp} className={"orc-pncp" + (focarPncp ? " destaque" : "")}>
               <BuscaPncpItem descricao={nome || linha.descricao} ocupado={ocupado || !!anexando} usar={(r) => usarPncp(k, r)} />
             </div>
@@ -272,18 +270,15 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
           <div className="orc-consolidar"><b>Consolidar valor estimado</b><span className="small">Escolha o critério que será aplicado ao item e reaproveitado nos documentos.</span></div>
           {cartoes.map(([c, texto]) => {
             const v = valorDasCotacoes(comprovadas, c);
-            // Prévia com todos os valores digitados, enquanto faltam os comprovantes.
-            const previa = v == null ? valorDasCotacoes(cotacoes.filter(({ c: x }) => valorValido(x)).map(({ c: x }) => ({ orcamento_id: 0, fornecedor: x.fornecedor || "-", valor_unitario: numBR(x.valor) })), c) : null;
             const ativo = criterio === c && v != null;
             return <div key={c} className={"orc-cartao" + (ativo ? " ativo" : "")}>
               <span>{CRITERIOS_PRECO[c]}</span>
-              <b>{v != null ? brl(v) : previa != null ? <span className="previa">{brl(previa)}</span> : "R$ 0,00"}</b>
-              {previa != null && <span className="small aviso-anexo">Prévia: anexe os comprovantes para valer.</span>}
+              <b>{v != null ? brl(v) : "R$ 0,00"}</b>
               <span className="small muted">{texto}</span>
               <button type="button" className={"btn" + (ativo ? " pri" : "")} disabled={v == null} onClick={() => alterarLinha({ criterio: c })}>{ativo ? `✓ ${CRITERIOS_PRECO[c]} em uso` : `Usar ${CRITERIOS_PRECO[c].toLowerCase()}`}</button>
             </div>;
           })}
-          <p className="small muted">{comprovadas.filter((c) => c.orcamento_id != null && c.valor_unitario != null).length} de {cotacoes.length} {cotacoes.length === 1 ? "valor entra" : "valores entram"} no cálculo (só valores com comprovante anexado).</p>
+          <p className="small muted">{comprovadas.filter((c) => c.valor_unitario != null).length} {comprovadas.filter((c) => c.valor_unitario != null).length === 1 ? "valor" : "valores"} no cálculo. O anexo do orçamento é opcional.</p>
         </aside>
       </div>
       <div className="tools fim"><button type="button" className="btn" onClick={fechar}>Fechar</button></div>

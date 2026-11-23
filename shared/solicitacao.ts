@@ -57,7 +57,7 @@ export interface ItemSolicitacao {
 }
 
 export function valorDasCotacoes(cotacoes: CotacaoItem[], criterio: CriterioPreco = "media") {
-  const valores = cotacoes.flatMap((c) => c.orcamento_id != null && c.fornecedor.trim() && c.valor_unitario != null && c.valor_unitario > 0
+  const valores = cotacoes.flatMap((c) => c.fornecedor.trim() && c.valor_unitario != null && c.valor_unitario > 0
     ? [Math.round((c.valor_unitario + Number.EPSILON) * 100)] : []).sort((a, b) => a - b);
   if (!valores.length) return null;
   const meio = Math.floor(valores.length / 2);
@@ -86,7 +86,6 @@ const CABECALHO_ANTERIOR = `${CABECALHO_ITEM} Valor unitário | Valor total |`;
 const CABECALHO_COTACOES = `${CABECALHO_ITEM} Valor unitário estimado | Valor total |`;
 // Linha logo abaixo do quadro que faz parte dele: o total antigo (fora da tabela) ou a nota do preço de referência.
 const RODAPE_DO_QUADRO = /^(?:\*\*(?:Total estimado da solicitação|Subtotal dos itens com valor)\*\* R\$\s|Preço de referência: )/;
-const SEM_ANEXO = "*";
 const DESCRICAO_CRITERIO: Record<CriterioPreco, string> = { media: "média", mediana: "mediana", menor: "menor valor" };
 export const QUEBRA_NA_CELULA = "\u2028";
 const cabecalhoComFornecedores = (linha: string) => linha.replaceAll(QUEBRA_NA_CELULA, " ").startsWith(CABECALHO_ITEM + " Cotação 1 ");
@@ -100,8 +99,7 @@ function cotacoesPorFornecedor(itens: ItemSolicitacao[]) {
       const chave = normalizarCotacao(cotacao.fornecedor);
       const nome = celula(cotacao.fornecedor) || "Fornecedor a identificar";
       if (!fornecedores.has(chave)) fornecedores.set(chave, nome);
-      const pendencia = cotacao.orcamento_id == null ? SEM_ANEXO : "";
-      precos.set(chave, real(cotacao.valor_unitario) + pendencia);
+      precos.set(chave, real(cotacao.valor_unitario));
     }
     return precos;
   });
@@ -151,9 +149,8 @@ export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = f
     linhas.push(`| | **${rotulo}** |${" |".repeat(fornecedores.length + 3)} **${real(total)}** |`);
   }
   if (comparativo) {
-    const base = criterio ? `${DESCRICAO_CRITERIO[criterio]} das cotações com orçamento anexado` : "conforme o critério indicado para cada item";
-    const semAnexo = precos?.cotacoes.some((m) => [...m.values()].some((v) => v.endsWith(SEM_ANEXO)));
-    linhas.push("", `Preço de referência: ${base}.${semAnexo ? ` (${SEM_ANEXO}) Cotação sem orçamento anexado: não entra no cálculo.` : ""}`);
+    const base = criterio ? `${DESCRICAO_CRITERIO[criterio]} das cotações` : "conforme o critério indicado para cada item";
+    linhas.push("", `Preço de referência: ${base}.`);
   }
   return linhas.join("\n");
 }
