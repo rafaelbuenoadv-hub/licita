@@ -66,6 +66,8 @@ async function concluirPac(c: Cliente, id: number) {
   assert.equal((await c.post(`/api/processos/${id}/checagens`, { item: "pc1", marcado: true })).status, 200);
   await registrarSolicitacao(c, id);
 }
+/** Os testes usam a Secretaria de Obras como exemplo de titular sem portaria cadastrada. */
+const semPortariaObras = () => pool.query("update secretarios set portaria = null, fonte_portaria = '' where codigo_portal = 'obras'");
 async function usuario(orgao: number, email: string, papeis: string[]) {
   await q1("insert into usuarios (orgao_id, nome, email, senha_hash, papeis) values ($1,$2,$3,$4,$5)", [orgao, email.split("@")[0], email, await hashSenha(SENHA), papeis]);
 }
@@ -131,6 +133,10 @@ test("cadastro de secretários importa dados oficiais apenas para Ibaiti e prese
   assert.equal(planejamento.email, "convenios@ibaiti.pr.gov.br");
   assert.equal((await outro.put(`${caminho}/${planejamento.id}`, planejamento)).status, 404);
 
+  const obras = lista.find((s: { secretaria: string }) => s.secretaria.startsWith("Obras"));
+  assert.deepEqual([obras.nome, obras.portaria], ["Amanda Carvalho Vanzeli", "698/2026"]);
+  // Os testes seguintes usam Obras como exemplo de titular sem portaria cadastrada.
+  await pool.query("update secretarios set portaria = null, fonte_portaria = '' where id = $1", [obras.id]);
   const agricultura = lista.find((s: { secretaria: string }) => s.secretaria.startsWith("Agricultura"));
   assert.equal(agricultura.nome, "Fernando de Oliveira");
   assert.equal(agricultura.telefone, "");
@@ -295,6 +301,7 @@ test("PCA integral de Ibaiti é acessível e o item 39 é vinculado na abertura"
 });
 
 test("preenche portaria de nomeação pelo cadastro, sem usar ato de fiscal ou adivinhar o titular", async () => {
+  await semPortariaObras();
   const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
   const { lista } = (await admin.get("/api/admin/secretarios")).dados;
   const saude = lista.find((s: { secretaria: string }) => s.secretaria === "Saúde");
@@ -303,6 +310,7 @@ test("preenche portaria de nomeação pelo cadastro, sem usar ato de fiscal ou a
   await q1("update secretarios set portaria=null, fonte_portaria='' where id=$1", [saude.id]);
   await migrar();
   assert.equal((await admin.get("/api/admin/secretarios")).dados.lista.find((s: { id: number }) => s.id === saude.id).portaria, "009/2025");
+  await semPortariaObras();
   const { dados: { id } } = await admin.post("/api/processos", {
     objeto: "Contratação de teste com portarias", tipo: "bens", via: "licitacao",
     ano: 2028, requisitante: "SEMUSA", areas_adicionais: ["Secretaria de Educação (SEDUC)", "Obras"],
@@ -330,7 +338,7 @@ test("preenche portaria de nomeação pelo cadastro, sem usar ato de fiscal ou a
   const atualizado = (await admin.get(rota)).dados;
   assert.match(atualizado.vigente.texto, /Saúde — Amabily da Silva Laverde\. Portaria de nomeação nº 009\/2025/);
   assert.match(atualizado.vigente.texto, /Educação — Denise da Silva Lima\. Portaria de nomeação nº 008\/2025/);
-  assert.match(atualizado.vigente.texto, /Antônio Vincenzi.*PREENCHER: portaria de nomeação/);
+  assert.match(atualizado.vigente.texto, /Amanda Carvalho Vanzeli.*PREENCHER: portaria de nomeação/);
   assert.ok(atualizado.vigente.texto.startsWith(atual));
   assert.equal(atualizado.titulares_dfd.pode_inserir, false);
   assert.deepEqual((await admin.post(`${rota}/titulares`, { versao: atualizado.vigente.versao })).dados,
@@ -626,6 +634,7 @@ test("mensagens entre usuários do mesmo órgão", async () => {
 });
 
 test("abertura do processo: área requisitante traz o secretário e a portaria do cadastro", async () => {
+  await semPortariaObras();
   const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
   const outro = await new Cliente().entrar("admin@b.gov.br");
   assert.equal((await new Cliente().get("/api/secretarios")).status, 401);
@@ -639,7 +648,7 @@ test("abertura do processo: área requisitante traz o secretário e a portaria d
     ["SEDUC", "Denise da Silva Lima", "008/2025"],
     ["Secretaria Municipal de Educação", "Denise da Silva Lima", "008/2025"],
     ["Finanças", "Luiz Carlos Bernardi Gelinski", "003/2025"],
-    ["Obras", "Antônio Vincenzi", ""],
+    ["Obras", "Amanda Carvalho Vanzeli", ""],
     ["Setor inexistente", null, null],
     ["", null, null],
   ]);
@@ -686,6 +695,7 @@ test("minutas: nome do secretário e portaria entram sozinhos em qualquer peça,
 });
 
 test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo e montam o documento sem IA", async () => {
+  await semPortariaObras();
   const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
   const outro = await new Cliente().entrar("admin@b.gov.br");
   const { dados: { id, protocolo } } = await admin.post("/api/processos", { objeto: "Aquisição de 30 cadeiras escolares", tipo: "bens", via: "licitacao", ano: 2028, requisitante: "Almoxarifado", pca_item_id: null });
@@ -732,7 +742,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   const dados = { objeto: "Aquisição de 30 cadeiras escolares", tipo: "bens", via: "licitacao", ano: 2028, requisitante: "Obras", valor_estimado: 9000, pca_item_id: null };
   assert.equal((await admin.put(`/api/processos/${id}`, dados)).status, 200);
   r = await admin.post(rota);
-  assert.match(r.dados.pendencias.find((x: any) => x.codigo === "portaria").texto, /Antônio Vincenzi \(Obras, Viação e Serviços Urbanos\)/);
+  assert.match(r.dados.pendencias.find((x: any) => x.codigo === "portaria").texto, /Amanda Carvalho Vanzeli \(Obras, Viação e Serviços Urbanos\)/);
   assert.equal((await admin.put(`/api/processos/${id}`, { ...dados, requisitante: "SEDUC" })).status, 200);
 
   // O responsável vem do cadastro de secretários; o objeto, do processo.
@@ -1623,7 +1633,7 @@ test("pronto pagamento: o responsável e a assinatura vêm do cadastro de secret
   assert.equal((await admin.get(rota)).dados.dados.responsavel, t.texto);
   // Responsável apagado e Secretaria trocada: o sistema põe o titular da nova Secretaria.
   assert.equal((await admin.put(rota, { dados: { secretaria: "Obras", responsavel: "" } })).status, 200);
-  assert.match((await admin.get(rota)).dados.dados.responsavel, /^Antônio Vincenzi — Secretário\(a\) Municipal de Obras/);
+  assert.match((await admin.get(rota)).dados.dados.responsavel, /^Amanda Carvalho Vanzeli — Secretário\(a\) Municipal de Obras/);
   assert.equal((await admin.put(rota, { dados: { secretaria: "SEDUC", responsavel: t.texto } })).status, 200);
   const { documentoPP, VAZIO_PP } = await import("../../shared/pronto-pagamento.js");
   const texto = documentoPP({ protocolo: "PP 2026/0009", ano: 2026, situacao: "pedido", orgao: "Município", municipio: "", autorizado_por: null, autorizado_em: null, dados: { ...VAZIO_PP, secretaria: "SEDUC", responsavel: t.texto } }, "autorizacao");

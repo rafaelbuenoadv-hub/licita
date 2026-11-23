@@ -701,3 +701,11 @@ create table if not exists pncp_dias_sincronizados (
   em timestamptz not null default now(),
   primary key (uf, modalidade, dia)
 );
+
+-- Secretaria de Obras de Ibaiti: Amanda Carvalho Vanzeli (Portaria nº 698/2026, de 16/11/2026).
+-- Só altera o cadastro que ainda está com o titular anterior importado do portal (edições manuais são preservadas).
+update secretarios s set nome = 'Amanda Carvalho Vanzeli', portaria = '698/2026',
+  fonte_portaria = 'https://www.ibaiti.pr.gov.br/legislacao/detalhe/22702/pspan-stylebackground-colorrgb255255255colorrgb515151ortaria-n698-2026-retorno-amanda-carvalho-vanzeli-secretaria-de-obras-viacao-e-servicos-urbanosspanp/'
+from orgaos o
+where o.id = s.orgao_id and s.codigo_portal = 'obras' and s.nome = 'Antônio Vincenzi'
+  and regexp_replace(coalesce(o.cnpj, ''), '[^0-9]', '', 'g') = '77008068000141';
