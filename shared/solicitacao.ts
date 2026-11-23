@@ -44,6 +44,8 @@ export interface CotacaoItem {
   fonte?: FonteCotacao;
   link?: string;
   consultado_em?: string;
+  /** Validade da proposta, condições ou outras informações. */
+  obs?: string;
 }
 export interface ItemSolicitacao {
   descricao: string;

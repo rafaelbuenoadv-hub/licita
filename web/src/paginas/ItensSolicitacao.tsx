@@ -8,11 +8,12 @@ import type { ResultadoPncp } from "../../../shared/pncp";
 import { createPncpEvidence, pncpProcedure } from "../comp/comprovantePncp";
 import { BuscaPncpItem } from "./BuscaPncpItem";
 import { BuscaPncpLote } from "./BuscaPncpLote";
+import { ItensOrcamentos } from "./ItensOrcamentos";
 
-interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string }
+export interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string; obs?: string }
 // escolhas: destino definido à mão na conferência (índice do item, ou null para lançar como item novo).
 type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[]; escolhas?: Record<number, number | null> };
-const cotacaoPreenchida = (c: LinhaCotacao) => c.orcamentoId != null || !!c.fornecedor.trim() || !!c.valor.trim();
+export const cotacaoPreenchida = (c: LinhaCotacao) => c.orcamentoId != null || !!c.fornecedor.trim() || !!c.valor.trim();
 export interface LinhaItem {
   descricao: string;
   unidade: string;
@@ -31,7 +32,7 @@ export function linhasDosItens(itens: ItemSolicitacao[], orcamentos: OrcamentoLi
       orcamentoId: c.orcamento_id,
       fornecedor: limparNomeFornecedor(c.fornecedor) || nomeFornecedorOrcamento(orcamentos.find((o) => o.id === c.orcamento_id)),
       valor: c.valor_unitario == null ? "" : String(c.valor_unitario).replace(".", ","),
-      fonte: c.fonte, link: c.link, consultadoEm: c.consultado_em,
+      fonte: c.fonte, link: c.link, consultadoEm: c.consultado_em, obs: c.obs,
     }));
     if (!cotacoes.length) cotacoes.push(cotacaoVazia());
     return {
@@ -65,6 +66,7 @@ export function lerLinhas(linhas: LinhaItem[]): { itens: ItemSolicitacao[]; erro
         orcamento_id: c.orcamentoId, fornecedor, valor_unitario: valor,
         ...(c.fonte ? { fonte: c.fonte } : {}), ...(c.link ? { link: c.link.trim() } : {}),
         ...(c.consultadoEm ? { consultado_em: c.consultadoEm } : {}),
+        ...(c.obs?.trim() ? { obs: c.obs.trim().slice(0, 1000) } : {}),
       });
     }
     const dados = { descricao: l.descricao.trim(), unidade: l.unidade.trim(), quantidade };
@@ -77,7 +79,7 @@ export function lerLinhas(linhas: LinhaItem[]): { itens: ItemSolicitacao[]; erro
 
 const formatos = ".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv";
 const legivel = (nome: string) => /\.(pdf|jpe?g|png|docx|xlsx|txt|csv)$/i.test(nome);
-const dataConsulta = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
+export const dataConsulta = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
 
 function localizarCotacao(linha: LinhaItem, orcamento: number | null, fornecedor: string) {
   const nome = normalizarCotacao(fornecedor);
@@ -420,119 +422,8 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
           <span className="small">Confira a lista: só junte itens que são de fato o mesmo.</span></div>
       </>}
     </div>}
-    <div className="tw" tabIndex={0} aria-label="Tabela de itens e cotações">
-      <table className="t quadro-edicao-itens">
-        <thead><tr>
-          <th scope="col" className="col-fixa-item">Item</th><th scope="col" className="col-fixa-desc">Descrição</th><th scope="col">Un.</th><th scope="col">Qtd.</th>
-          {colunas.map((col, i) => {
-            const orcamento = orcamentos.find((o) => o.id === col.orcamentoId);
-            const nome = limparNomeFornecedor(col.fornecedor);
-            const semAnexo = !col.orcamentoId && (!col.fonte || col.fonte === "fornecedor");
-            return <th scope="col" key={i} className={"col-cotacao" + (semAnexo ? " sem-anexo" : "")}>
-              <span className="lbl">Fornecedor {i + 1}</span>
-              <input aria-label={`Fornecedor da cotação ${i + 1}`} maxLength={200} value={col.fornecedor}
-                placeholder={col.orcamentoId && !nome ? "Identifique o fornecedor" : col.fonte && col.fonte !== "fornecedor" ? "Fonte da referência" : "Nome do fornecedor"}
-                onChange={(e) => alterarColuna(col, { fornecedor: e.target.value })} />
-              <div className="cotacao-anexo">
-                {col.orcamentoId ? <a className="anexo-ok" title={orcamento?.nome} href={`/api${caminho}/${col.orcamentoId}/arquivo`}>✓ {orcamento?.nome ?? "Orçamento"}</a>
-                  : col.fonte && col.fonte !== "fornecedor" ? <span className="small muted">{FONTES_COTACAO[col.fonte]}</span>
-                  : <span className="aviso-anexo">⚠ Sem orçamento</span>}
-                <button className="btn sm" type="button" onClick={() => document.getElementById(`coluna-arquivo-${i}`)?.click()}>
-                  {anexando === `col-${i}` ? "Anexando…" : col.orcamentoId ? "Trocar" : "Anexar"}</button>
-                <input hidden id={`coluna-arquivo-${i}`} type="file" accept={formatos} onChange={(e) => {
-                  const arquivo = e.target.files?.[0];
-                  e.target.value = "";
-                  if (arquivo) void anexarNaColuna(i, col, arquivo);
-                }} />
-              </div>
-              {(!col.fonte || col.fonte === "fornecedor") && ia && orcamento && legivel(orcamento.nome) && <button type="button" className="lnk small" onClick={() => relerColuna(col, orcamento.id)}>Ler orçamento com IA</button>}
-              <details className="cotacao-detalhes">
-                <summary>Opções</summary>
-                <div className="stack" style={{ gap: 6 }}>
-                  <label>Fonte<select value={col.fonte ?? "fornecedor"} onChange={(e) => alterarColuna(col, { fonte: e.target.value as FonteCotacao })}>
-                    {Object.entries(FONTES_COTACAO).filter(([fonte]) => fonte !== "pncp" || col.fonte === "pncp").map(([fonte, rotulo]) => <option key={fonte} value={fonte}>{rotulo}</option>)}
-                  </select></label>
-                  <label>Data da consulta<input type="date" value={col.consultadoEm ?? ""} onChange={(e) => alterarColuna(col, { consultadoEm: e.target.value })} /></label>
-                  {col.fonte && col.fonte !== "fornecedor" && <label>Link da referência
-                    <input type="url" value={col.link ?? ""} onChange={(e) => alterarColuna(col, { link: e.target.value })} /></label>}
-                  {orcamentos.length > 0 && <label>Usar orçamento já anexado
-                    <select aria-label={`Orçamento da cotação ${i + 1}`} value={col.orcamentoId ?? ""} onChange={(e) => {
-                      const o = orcamentos.find((x) => String(x.id) === e.target.value);
-                      if (o) vincularOrcamento(col, o.id, o.dados, nomeFornecedorOrcamento(o));
-                      else alterarColuna(col, { orcamentoId: null });
-                    }}>
-                      <option value="">Nenhum</option>
-                      {orcamentos.map((o) => <option key={o.id} value={o.id}
-                        disabled={colunas.some((x) => x !== col && x.orcamentoId === o.id)}>{[nomeFornecedorOrcamento(o), o.nome].filter(Boolean).join(" · ")}</option>)}
-                    </select>
-                  </label>}
-                  {(colunas.length > 1 || !pendente(col)) && <button type="button" className="lnk small" onClick={() => removerColuna(col)}>Retirar esta cotação de todos os itens</button>}
-                </div>
-              </details>
-            </th>;
-          })}
-          <th scope="col" className="col-fixa-fim">Valor estimado</th>
-        </tr></thead>
-        <tbody>{linhas.map((linha, k) => {
-          const item = lidas.erro || lidas.itens.length !== linhas.length ? lerLinhas([linha]).itens[0] : lidas.itens[k];
-          const subtotal = item ? totalDoItem(item) : null;
-          return <tr key={k}>
-            <th scope="row" className="col-fixa-item">{k + 1}</th>
-            <td className="edicao-item-descricao col-fixa-desc">
-              <textarea aria-label={`Descrição do item ${k + 1}`} rows={Math.min(4, Math.max(2, Math.ceil(linha.descricao.length / 38)))} maxLength={500} value={linha.descricao}
-                placeholder="Descrição do item, sem marca" onChange={(e) => alterar(k, { descricao: e.target.value })} />
-              <div className="acoes-item">
-                <BuscaPncpItem descricao={linha.descricao} ocupado={ocupado || !!anexando} usar={(r) => usarPncp(k, r)} />
-                {linhas.length > 1 && <button type="button" className="lnk small" aria-label={`Remover item ${k + 1}`}
-                  onClick={() => setLinhas((lista) => lista.filter((_, i) => i !== k))}>Remover</button>}
-              </div>
-            </td>
-            <td className="edicao-item-medida"><input aria-label={`Unidade do item ${k + 1}`} maxLength={30} value={linha.unidade} placeholder="un"
-              onChange={(e) => alterar(k, { unidade: e.target.value })} /></td>
-            <td className="edicao-item-medida"><input aria-label={`Quantidade do item ${k + 1}`} inputMode="decimal" value={linha.quantidade}
-              onChange={(e) => alterar(k, { quantidade: e.target.value })} /></td>
-            {colunas.map((col, i) => {
-              const j = indiceNaLinha(linha, col);
-              return <td key={i} className="col-preco">
-                <input aria-label={`Preço unitário da cotação ${i + 1}${col.fornecedor.trim() ? ` (${col.fornecedor.trim()})` : ""} para o item ${k + 1}`}
-                  inputMode="decimal" placeholder="—" value={j >= 0 ? linha.cotacoes[j].valor : ""} onChange={(e) => alterarPreco(k, col, e.target.value)} />
-              </td>;
-            })}
-            <td className="edicao-item-estimativa col-fixa-fim">
-              <select aria-label={`Critério de preço do item ${k + 1}`} value={linha.criterio ?? "media"} onChange={(e) => alterar(k, { criterio: e.target.value as CriterioPreco })}>
-                {Object.entries(CRITERIOS_PRECO).map(([valor, rotulo]) => <option key={valor} value={valor}>{rotulo}</option>)}
-              </select>
-              <p><strong>{brl(item?.valor_unitario)}</strong> <span className="small muted">/ un.</span></p>
-              <p className="small muted">Subtotal {brl(subtotal)}</p>
-              {item?.valor_unitario == null && linha.cotacoes.some((c) => c.valor.trim()) && <p className="small aviso-anexo">Aguardando orçamento anexado</p>}
-            </td>
-          </tr>;
-        })}</tbody>
-        <tfoot><tr>
-          <th className="col-fixa-item" /><th className="col-fixa-desc r" scope="row">Total por fornecedor</th><td /><td />
-          {colunas.map((col, i) => {
-            let soma = 0, cotados = 0;
-            for (const linha of linhas) {
-              const j = indiceNaLinha(linha, col);
-              const preco = j >= 0 ? numBR(linha.cotacoes[j].valor) : null, qtd = numBR(linha.quantidade);
-              if (preco != null && !Number.isNaN(preco) && qtd != null && !Number.isNaN(qtd)) { soma += preco * qtd; cotados++; }
-            }
-            const comItens = linhas.filter((l) => l.descricao.trim()).length;
-            return <td key={i} className="col-preco total-fornecedor">
-              {cotados ? <><strong>{brl(Math.round(soma * 100) / 100)}</strong><div className="small muted">{cotados} de {comItens} {comItens === 1 ? "item" : "itens"}</div></> : <span className="small muted">—</span>}
-            </td>;
-          })}
-          <td className="col-fixa-fim"><strong>{brl(total)}</strong><div className="small muted">{parcial && total != null ? "itens com valor" : "total estimado"}</div></td>
-        </tr></tfoot>
-      </table>
-    </div>
-    <div className="row">
-      <div className="tools">
-        {linhas.length < 200 && <button type="button" className="btn sm" onClick={() => setLinhas((lista) => [...lista, linhaVazia()])}>Adicionar item</button>}
-        {colunas.length < 20 && <button type="button" className="btn sm" onClick={() => setPendentes((lista) => [...lista, colunaNova()])}>Adicionar fornecedor</button>}
-      </div>
-    </div>
-    <p className="small muted">Cada coluna é um fornecedor: digite o nome, anexe o orçamento no topo da coluna e lance o preço unitário de cada item. Deixe em branco o item que o fornecedor não cotou. Preço de fornecedor sem orçamento anexado não entra no valor estimado.</p>
+    <ItensOrcamentos linhas={linhas} setLinhas={setLinhas} orcamentos={orcamentos} caminho={caminho} ocupado={ocupado} anexando={anexando}
+      enviar={enviar} executar={executar} recarregar={recarregar} usarPncp={usarPncp} setAviso={setAviso} />
     {aviso && <p className="small" role="status">{aviso}</p>}
   </fieldset>;
 }

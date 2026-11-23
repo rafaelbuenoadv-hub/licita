@@ -319,3 +319,48 @@ tr.clicavel{cursor:pointer} tr.clicavel:hover{background:var(--sunk)}
 .quadro-edicao-itens .acoes-item>details{display:inline-block}
 .quadro-edicao-itens .acoes-item>details[open]{display:block;flex-basis:100%}
 @media (max-width: 700px){ .quadro-edicao-itens .col-fixa-fim{position:static;box-shadow:none} }
+
+/* Itens da contratação e orçamentos (modelo com janelas) */
+.itens-orc{display:flex;flex-direction:column;gap:12px}
+.itens-orc h3{margin:0}
+.vazio-itens{padding:18px;text-align:center;border:1px dashed var(--line);border-radius:10px}
+.tabela-itens-orc th{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:var(--sunk)}
+.tabela-itens-orc td{vertical-align:middle}
+.acoes-preco{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.btn.orc{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 40%,transparent);color:var(--accent);font-weight:600}
+.btn.pncp{background:color-mix(in srgb,#2563eb 10%,var(--surface));border-color:color-mix(in srgb,#2563eb 35%,transparent);color:#1d4ed8;font-weight:600}
+.acoes-linha{display:flex;gap:10px;justify-content:flex-end;font-size:16px}
+.lnk.perigo{color:var(--bad)}
+.valor-preliminar{align-self:flex-end;display:flex;gap:18px;align-items:center;background:#16362f;color:#fff;border-radius:12px;padding:12px 20px}
+.valor-preliminar span{font-size:13px;opacity:.85} .valor-preliminar b{font-size:18px}
+dialog.janela{width:min(720px,calc(100% - 24px));max-height:calc(100dvh - 24px);overflow:auto;border:1px solid var(--line);border-radius:14px;padding:20px;background:var(--surface);color:var(--ink);box-shadow:0 20px 50px rgba(0,0,0,.25)}
+dialog.janela::backdrop{background:#10182788}
+.janela-cab{display:flex;justify-content:space-between;gap:12px;margin-bottom:12px}
+.janela-cab h2{margin:0;font-size:18px} .janela-cab p{margin:2px 0 0}
+.janela .fechar{font-size:22px;line-height:1;text-decoration:none;color:var(--muted)}
+.janela label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;font-weight:600}
+.janela label :is(input,select,textarea){font-weight:400}
+.grade-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.tools.fim{justify-content:flex-end;margin-top:6px}
+.orc-grade{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;align-items:start}
+.orc-bloco{border:1px solid var(--ink);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.orc-bloco.sem-pad{padding:0;overflow:hidden} .orc-bloco.sem-pad .orc-tit{padding:12px 14px 0}
+.orc-tit{margin:0;font-size:14px}
+.orc-bloco table th{font-size:11.5px;text-transform:uppercase;color:var(--muted)}
+.centro{text-align:center;padding:18px !important}
+.valor-inline{width:110px;text-align:right}
+.grade-anexo{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
+.orc-pncp{border-top:1px solid var(--line);padding-top:8px}
+.orc-pncp.destaque{outline:2px solid color-mix(in srgb,#2563eb 45%,transparent);outline-offset:4px;border-radius:6px}
+.orc-lado{gap:12px}
+.orc-consolidar{background:#16362f;color:#fff;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:4px}
+.orc-cartao{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:6px;background:var(--surface)}
+.orc-cartao>span:first-child{font-size:13px}
+.orc-cartao b{font-size:20px}
+.orc-cartao.ativo{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+@media (max-width: 760px){
+  .orc-grade{grid-template-columns:minmax(0,1fr)}
+  .grade-2,.grade-anexo{grid-template-columns:minmax(0,1fr)}
+  dialog.janela{padding:14px}
+}
+.orc-cartao .previa{color:var(--muted)}
