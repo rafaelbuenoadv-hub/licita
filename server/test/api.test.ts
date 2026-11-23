@@ -794,6 +794,17 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   let r = await adm.post(`/api/processos/${id}/etapas/fiscal/concluir`);
   let cods = r.dados.pendencias.map((x: any) => x.codigo);
   assert.ok(cods.includes("substituto") && cods.includes("minuta") && !cods.includes("dotacao"), cods.join());
+  // ETP, pesquisa de preços e Termo de Referência montados com os campos, no modelo completo.
+  for (const [etapa, inicio, trecho] of [
+    ["etp", "# ESTUDO TÉCNICO PRELIMINAR — ETP", /## 14\. Posicionamento conclusivo \(art\. 18, § 1º, XIII\)\n\nTexto de teste/],
+    ["precos", "# RELATÓRIO DE PESQUISA DE PREÇOS E MEMÓRIA DE CÁLCULO", /## 3\. Parâmetros utilizados \(art\. 23, § 1º\)\n\n- I — Painel de preços/],
+    ["tr", "# TERMO DE REFERÊNCIA", /## 1\. Definição do objeto \(art\. 6º, XXIII, alínea "a"\)[\s\S]*## 11\. Análise de riscos \(art\. 18, X\)[\s\S]*Aprovo o presente Termo de Referência\./],
+  ] as const) {
+    assert.equal((await adm.post(`/api/processos/${id}/minutas/${etapa}/dos-campos`)).status, 200, etapa);
+    const doc = (await adm.get(`/api/processos/${id}/minutas/${etapa}`)).dados.vigente.texto as string;
+    assert.ok(doc.startsWith(inicio), doc.slice(0, 80));
+    assert.match(doc, trecho);
+  }
   assert.match((await adm.post(`/api/processos/${id}/minutas/fiscal/dos-campos`)).status === 200 ? (await adm.get(`/api/processos/${id}/minutas/fiscal`)).dados.vigente.texto : "", /^# INDICAÇÃO DO FISCAL DO CONTRATO\n/);
   assert.equal((await adm.put(`/api/processos/${id}/campos/fiscal`, { valores: { ...(await lic.get(`/api/processos/${id}`)).dados.campos.fiscal, substituto_nome: "Outra pessoa" } })).status, 200);
   for (const i of itensDe(ETAPAS[fiscal], pb).filter((x) => !x.auto)) await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
