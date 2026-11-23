@@ -1689,3 +1689,41 @@ test("PNCP: o índice local é alimentado pela API oficial e a busca usa o índi
   assert.ok(chamadas.at(-1)!.startsWith("/api/pncp/v1/orgaos/11111111000111/compras/2031/7/itens"));
   await pool.query("delete from pncp_editais; delete from pncp_dias_sincronizados;");
 });
+
+test("PDF completo da solicitação: documento, orçamentos dos fornecedores e, na sequência, as consultas ao PNCP", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de cadeiras", tipo: "bens", via: "licitacao", ano: 2033 });
+  const processo = `/api/processos/${id}`;
+  const enviar = async (nome: string, conteudo: Buffer) => {
+    const fd = new FormData();
+    fd.append("arquivo", new Blob([conteudo]), nome);
+    const r = await lic.req("POST", `${processo}/orcamentos?origem=solicitacao`, fd);
+    assert.equal(r.status, 201, JSON.stringify(r.dados));
+    return r.dados.ids[0] as number;
+  };
+  const proposta = await PDFDocument.create(); proposta.addPage(); proposta.addPage();
+  const idPdf = await enviar("proposta-fornecedor.pdf", Buffer.from(await proposta.save()));
+  const sharp = (await import("sharp")).default;
+  const idPng = await enviar("Comprovante-PNCP.png", await sharp({ create: { width: 300, height: 200, channels: 3, background: "#fff" } }).png().toBuffer());
+  const idTxt = await enviar("cotacao.txt", Buffer.from("Cadeira: R$ 300,00"));
+  const s = await lic.post(`${processo}/solicitacoes`, {
+    chave_envio: randomUUID(), secretaria: "Educação", descricao: "# SOLICITAÇÃO\n[[Itens]]",
+    itens: [{ descricao: "Cadeira", unidade: "un", quantidade: 10, cotacoes: [
+      { orcamento_id: idPng, fornecedor: "Município X · item 1", valor_unitario: 280, fonte: "pncp" },
+      { orcamento_id: idPdf, fornecedor: "Móveis Paraná", valor_unitario: 300, fonte: "fornecedor" },
+      { orcamento_id: idTxt, fornecedor: "Comercial Ibaiti", valor_unitario: 310, fonte: "fornecedor" },
+    ] }],
+  });
+  assert.equal(s.status, 201, JSON.stringify(s.dados));
+  const simples = await lic.get(`${processo}/solicitacoes/${s.dados.id}/pdf`);
+  const completo = await lic.get(`${processo}/solicitacoes/${s.dados.id}/pdf-completo`);
+  assert.equal(completo.status, 200);
+  assert.equal(completo.tipo, "application/pdf");
+  const paginasSimples = (await PDFDocument.load(simples.dados)).getPageCount();
+  // + índice + 2 páginas da proposta em PDF + 1 página de aviso do .txt + 1 página do comprovante do PNCP (por último).
+  assert.equal((await PDFDocument.load(completo.dados)).getPageCount(), paginasSimples + 5);
+  const { ordemDosAnexos } = await import("../solicitacao-completa.js");
+  const ordem = ordemDosAnexos((await lic.get(processo)).dados.solicitacoes[0].itens,
+    [idPng, idPdf, idTxt].map((x) => ({ id: x, nome: String(x), arquivo: Buffer.from("") })));
+  assert.deepEqual(ordem.map((e) => [e.codigo, e.fornecedor]), [["A1", "Móveis Paraná"], ["A2", "Comercial Ibaiti"], ["B1", "Município X · item 1"]]);
+});

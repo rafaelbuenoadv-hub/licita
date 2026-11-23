@@ -15,6 +15,7 @@ import { minutaParaDocx } from "../docx.js";
 import { minutaParaPdf } from "../pdf.js";
 import { lerTimbrado, timbradosDoOrgao } from "../timbrados.js";
 import { extrairTexto } from "../extrair.js";
+import { ordemDosAnexos, solicitacaoCompleta, type AnexoSolicitacao } from "../solicitacao-completa.js";
 import { conferirEtapa, proximaEtapa } from "../conferencia.js";
 import { camposDo, documentoDosCampos, sincronizarCampos, sugestoesDosCampos } from "../campos.js";
 import {
@@ -459,6 +460,21 @@ export function rotasProcessos() {
     const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
     const arquivo = await exportar(documentoDaSolicitacao(s.descricao, s.itens), MODELO_SOLICITACAO.doc, timbrado);
     enviarArquivo(res, `solicitacao-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.${formato}`, arquivo);
+  });
+
+  // PDF completo: a solicitação e, na sequência, os orçamentos anexados e os comprovantes das consultas ao PNCP.
+  r.get("/processos/:id/solicitacoes/:sid/pdf-completo", async (req, res) => {
+    const p = await processoDo(req);
+    const sid = z.coerce.number().int().min(1).max(2147483647).parse(req.params.sid);
+    const s = await q1<{ descricao: string; itens: ItemSolicitacao[] }>(
+      "select descricao, itens from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid]);
+    if (!s?.descricao) throw new ErroHttp(404, "Texto da solicitação não encontrado.");
+    const ids = [...new Set((s.itens ?? []).flatMap((i) => (i.cotacoes ?? []).map((c) => c.orcamento_id)).filter((x): x is number => x != null))];
+    const arquivos = ids.length ? await q<AnexoSolicitacao>("select id, nome, arquivo from orcamentos where processo_id=$1 and id = any($2)", [p.id, ids]) : [];
+    const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
+    const documento = await minutaParaPdf(documentoDaSolicitacao(s.descricao, s.itens), MODELO_SOLICITACAO.doc, timbrado);
+    const arquivo = await solicitacaoCompleta(documento, ordemDosAnexos(s.itens ?? [], arquivos));
+    enviarArquivo(res, `solicitacao-completa-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.pdf`, arquivo);
   });
 
   r.get("/processos/:id/solicitacoes/:sid/arquivo", async (req, res) => {

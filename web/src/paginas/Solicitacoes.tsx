@@ -430,6 +430,8 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                     {s.descricao && <>
                       <a className="btn sm" href={`/api${caminho}/${s.id}/docx${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>Baixar Word</a>
                       <a className="btn sm" href={`/api${caminho}/${s.id}/pdf${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>Baixar PDF</a>
+                      {comprovantes.size > 0 && <a className="btn sm pri" title="A solicitação seguida dos orçamentos anexados e das consultas ao PNCP"
+                        href={`/api${caminho}/${s.id}/pdf-completo${timbrado ? `?timbrado=${encodeURIComponent(timbrado)}` : ""}`}>PDF completo (com orçamentos e PNCP)</a>}
                     </>}
                   </div>
                 </td>
