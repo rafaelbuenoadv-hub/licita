@@ -84,9 +84,8 @@ Local e data; assinatura do responsável pela Secretaria`,
     oque: "Registre o pedido de cada Secretaria: objeto, justificativa, itens com quantidade e valor, e os orçamentos. Esses dados preenchem os campos do DFD, do ETP e da pesquisa de preços.",
     base: [{ rotulo: "Art. 18, I", url: U.a18 }, { rotulo: "Art. 23" }],
     papeis: ["requisitante", "contratacao"],
-    itens: [
-      { id: "solicitacao.registrada", texto: "Ao menos uma solicitação de Secretaria registrada", base: "conferido pelo sistema", auto: true },
-    ],
+    // Etapa sem conferência obrigatória: registrar a solicitação é recomendado, mas não trava o andamento.
+    itens: [],
     atencao: [
       "Descreva o objeto sem marca e com quantidades que tenham memória de cálculo.",
       "Orçamentos com mais de 6 meses antes da divulgação do edital não servem para a pesquisa de preços (art. 23, § 1º, IV).",
@@ -463,7 +462,8 @@ export interface TrilhaProcesso { atual: EtapaNaTrilha; etapas: EtapaNaTrilha[] 
 export function trilhaDoProcesso(p: ProcessoBase, c: Checks): TrilhaProcesso {
   const indice = atual(p, c);
   const etapas = TRILHA_PROCESSO.map((etapa, i): EtapaNaTrilha => {
-    const estado = feita(ETAPAS[i], p, c) ? "concluida" : i === indice ? "atual" : liberada(i, p, c) ? "disponivel" : "bloqueada";
+    // Etapa sem conferência (Solicitação) só aparece concluída depois de liberada pelas anteriores.
+    const estado = feita(ETAPAS[i], p, c) && liberada(i, p, c) ? "concluida" : i === indice ? "atual" : liberada(i, p, c) ? "disponivel" : "bloqueada";
     return { ...etapa, estado };
   });
   return { atual: etapas[indice], etapas };

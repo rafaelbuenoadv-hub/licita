@@ -171,9 +171,9 @@ test("cria processo e respeita ordem das etapas e papéis", async () => {
   for (const i of itensDe(ETAPAS[0], { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
     assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
   }
-  assert.equal((await req.get(`/api/processos/${procId}`)).dados.etapa_atual, 1);
-  // Registra a solicitação (etapa 2) e conclui o DFD: campos e conferência.
-  await registrarSolicitacao(req, procId);
+  // A etapa 2 (Solicitação) não trava: o processo segue direto para o DFD.
+  assert.equal((await req.get(`/api/processos/${procId}`)).dados.etapa_atual, 2);
+  // Conclui o DFD: campos e conferência.
   await preencherCampos(req, procId, ETAPAS[2]);
   for (const i of itensDe(ETAPAS[2], { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
     assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
@@ -235,8 +235,8 @@ test("solicitações de outras secretarias usam o mesmo processo e preservam o a
   const detalhe = (await req.get(p)).dados;
   assert.equal(detalhe.protocolo, original.protocolo);
   assert.equal(detalhe.requisitante, original.requisitante);
-  assert.deepEqual(detalhe.solicitacoes.map((s: { secretaria: string }) => s.secretaria), ["Secretaria de teste", "Saúde", "Educação"]);
-  assert.equal(detalhe.solicitacoes[1].referencia, "Memorando 42/2026");
+  assert.deepEqual(detalhe.solicitacoes.map((s: { secretaria: string }) => s.secretaria), ["Saúde", "Educação"]);
+  assert.equal(detalhe.solicitacoes[0].referencia, "Memorando 42/2026");
   const arquivo = `${p}/solicitacoes/${criada.dados.id}/arquivo`;
   assert.equal((await req.get(arquivo)).dados.toString(), texto);
   assert.equal((await outro.get(arquivo)).status, 404);
@@ -716,9 +716,9 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   r = await admin.post(pac);
   assert.equal(r.dados.concluida, true);
   assert.deepEqual(r.dados.proxima, { id: "solicitacao", nome: "Solicitação" });
-  // Etapa 2: sem solicitação não avança; registrada, o sistema confere.
+  // Etapa 2: a solicitação não é obrigatória para avançar.
   const sol = await admin.post(`/api/processos/${id}/etapas/solicitacao/concluir`);
-  assert.deepEqual(sol.dados.pendencias.map((x: any) => x.codigo), ["solicitacao"]);
+  assert.deepEqual([sol.dados.concluida, sol.dados.pendencias], [true, []]);
   assert.equal((await admin.post(`/api/processos/${id}/solicitacoes`, { chave_envio: randomUUID(), secretaria: "SEDUC", descricao: "Cadeiras para a escola." })).status, 201);
   assert.equal((await admin.post(`/api/processos/${id}/etapas/solicitacao/concluir`)).dados.concluida, true);
   det = (await admin.get(`/api/processos/${id}`)).dados;

@@ -53,10 +53,6 @@ export async function conferirEtapa(p: Proc, e: Etapa, checks: Checks, campos: R
   if (e.id === "protocolo") {
     if (!temValor(campos.dot?.dotacao)) l.push({ codigo: "dotacao", texto: "A dotação indicada pela Contabilidade ainda não foi registrada na etapa \"Dotação orçamentária\". Sem ela o processo não é protocolado.", onde: "campos", alvo: "dotacao", bloqueia: true });
   }
-  if (e.id === "solicitacao") {
-    const pedidos = await q1<{ n: number }>("select count(*)::int as n from solicitacoes_processo where processo_id=$1", [p.id]);
-    if (!pedidos?.n) l.push({ codigo: "solicitacao", texto: "Registre a solicitação de ao menos uma Secretaria, com os itens e os orçamentos.", onde: "campos", alvo: "solicitacao", bloqueia: true });
-  }
   if (e.id === "fiscal") {
     const nome = (x: unknown) => typeof x === "string" ? x.trim().toLowerCase() : "";
     if (nome(v.fiscal_nome) && nome(v.fiscal_nome) === nome(v.substituto_nome)) l.push({ codigo: "substituto", texto: "O fiscal substituto deve ser outra pessoa.", onde: "campos", alvo: "substituto_nome", bloqueia: true });
