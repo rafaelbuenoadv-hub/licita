@@ -3,7 +3,7 @@ import { api, brl } from "../api";
 import { useEu } from "../main";
 import { Folha } from "../comp/Folha";
 import { aplicarPendencias, pendencias } from "../../../shared/etapas";
-import { camposDaSolicitacao, documentoDaSolicitacao, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { camposDaSolicitacao, prazoDoProcesso, documentoDaSolicitacao, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
 
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
@@ -32,6 +32,7 @@ interface Props {
     solicitacoes: Solicitacao[];
     orcamentos: OrcamentoLido[];
     secretarias: string[];
+    campos?: Record<string, Record<string, unknown>>;
   };
   recarregar: () => Promise<unknown>;
 }
@@ -81,8 +82,10 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const temOrcamento = itens.some((item) => item.cotacoes?.some((cotacao) => cotacao.orcamento_id != null));
   // Mesmo caminho do servidor: o quadro de itens entra no texto e os campos do modelo recebem o que foi digitado.
   const base = documentoDaSolicitacao(rascunhoPrevia ?? descricao, itens);
-  const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: objeto, justificativa, itens });
-  const faltantes = pendencias(base).filter((x) => !automaticos[x.i]);
+  const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: objeto, justificativa, itens, prazo: prazoDoProcesso(processo.campos) });
+  // Itens e quantidades saem do quadro de itens: não se pede para digitar de novo.
+  const peloQuadro = (rotulo: string) => /^(preencher:\s*)?(itens( solicitados)?|quantidades( e prazo de atendimento)?)$/i.test(rotulo.normalize("NFD").replace(/\p{M}/gu, "").trim());
+  const faltantes = pendencias(base).filter((x) => !automaticos[x.i] && !peloQuadro(x.rotulo));
   const previa = aplicarPendencias(base, { ...automaticos, ...(rascunhoPrevia === null ? valores : {}) }).texto;
   const editandoPrevia = rascunhoPrevia !== null;
 
@@ -124,8 +127,10 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       setChave(crypto.randomUUID());
       setSecretaria(areas[0] ?? "");
       setReferencia("");
-      setObjeto("");
-      setJustificativa("");
+      // O que o processo já informou (objeto, justificativa do PAC ou do DFD) vem preenchido.
+      const ja = (etapa: string, campo: string) => { const x = processo.campos?.[etapa]?.[campo]; return typeof x === "string" ? x.trim() : ""; };
+      setObjeto(ja("dfd", "objeto") || processo.objeto || "");
+      setJustificativa(ja("dfd", "justificativa") || ja("pac", "justificativa_inclusao"));
       setLinhas([linhaVazia()]);
       trocarTexto(novo === "manual" ? modelo : "");
       setArquivo(null);

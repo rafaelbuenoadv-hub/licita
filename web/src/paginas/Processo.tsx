@@ -171,6 +171,14 @@ function Dados({ p, recarregar, setAviso, abrir }: { p: any; recarregar: () => P
   );
 }
 
+/** Valores da etapa: o que já foi salvo e, nos campos em branco, o que o processo já informou em outra etapa. */
+function mesclarCampos(p: any, etapa: string) {
+  const salvos: Valores = p.campos?.[etapa] ?? {}, sug: Valores = p.sugestoes_campos?.[etapa] ?? {};
+  const vazio = (x: unknown) => x === undefined || (Array.isArray(x) ? x.length === 0 : !String(x).trim());
+  const sugeridos = Object.keys(sug).filter((k) => vazio(salvos[k]));
+  return { valores: { ...salvos, ...Object.fromEntries(sugeridos.map((k) => [k, sug[k]])) } as Valores, sugeridos };
+}
+
 /* ---------- etapa aberta ---------- */
 function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) {
   const { eu } = useEu();
@@ -186,8 +194,8 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
   };
   const prox = ETAPAS[ix + 1];
   const editavel = lib && atua && p.situacao !== "cancelado";
-  const [vals, setVals] = useState<Valores>(() => ({ ...(p.sugestoes_campos?.[e.id] ?? {}), ...(p.campos?.[e.id] ?? {}) }));
-  const [sujo, setSujo] = useState(() => Object.keys(p.sugestoes_campos?.[e.id] ?? {}).length > 0 && !p.campos?.[e.id]);
+  const [vals, setVals] = useState<Valores>(() => mesclarCampos(p, e.id).valores);
+  const [sujo, setSujo] = useState(() => mesclarCampos(p, e.id).sugeridos.length > 0);
   const [gravandoCampos, setGravandoCampos] = useState(false);
   const salvarCampos = async (silencioso = false) => {
     setGravandoCampos(true);
@@ -243,10 +251,10 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
       </div>
       {e.id === "pac" && <ItemPac p={p} editavel={editavel} setAviso={setAviso} aoVincular={async () => {
         const novo = await recarregar();
-        if (novo) { setVals({ ...(novo.sugestoes_campos?.pac ?? {}), ...(novo.campos?.pac ?? {}) }); setSujo(false); }
+        if (novo) { const m = mesclarCampos(novo, "pac"); setVals(m.valores); setSujo(m.sugeridos.length > 0); }
       }} />}
       {e.campos.length > 0 && <CamposEtapa e={e} p={p} valores={vals} editavel={editavel} sujo={sujo} gravando={gravandoCampos}
-        sugeridos={Object.keys(p.campos?.[e.id] ? {} : (p.sugestoes_campos?.[e.id] ?? {}))}
+        sugeridos={mesclarCampos(p, e.id).sugeridos.filter((k) => vals[k] === p.sugestoes_campos?.[e.id]?.[k])}
         mudar={(v) => { setVals(v); setSujo(true); }} salvar={() => salvarCampos()} />}
 
       {e.id === "solicitacao" && <section className="sec pedidos" id="pedidos-secretarias" tabIndex={-1}>

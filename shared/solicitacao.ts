@@ -255,6 +255,13 @@ export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[]) 
   return itens.length ? inserirItens(texto, itens, true) : texto;
 }
 
+/** Prazo que o processo já registra: data pretendida do DFD ou mês de início previsto no PAC. */
+export function prazoDoProcesso(campos?: Record<string, Record<string, unknown>>) {
+  const dfd = campos?.dfd?.data_pretendida, mes = campos?.pac?.mes_planejado;
+  if (typeof dfd === "string" && dfd.trim()) return dfd.trim();
+  return typeof mes === "string" && mes.trim() ? `início previsto no PAC: ${mes.trim()}` : "";
+}
+
 export function camposDaSolicitacao(texto: string, dados: {
   secretaria: string;
   referencia: string;
@@ -265,8 +272,13 @@ export function camposDaSolicitacao(texto: string, dados: {
   objeto_solicitacao?: string;
   justificativa?: string;
   itens?: ItemSolicitacao[];
+  /** Prazo já informado no processo (DFD ou mês previsto no PAC). */
+  prazo?: string;
 }) {
   const itens = dados.itens ?? [];
+  const prazo = dados.prazo?.trim() ?? "";
+  const quantidades = itens.filter((i) => i.descricao.trim() && i.quantidade != null)
+    .map((i) => `${i.descricao.trim()}: ${numero(i.quantidade!)} ${i.unidade || ""}`.trim()).join("; ");
   const total = totalDosItens(itens);
   const justificativa = dados.justificativa?.trim() ?? "";
   const valores: Record<string, string> = {
@@ -282,6 +294,11 @@ export function camposDaSolicitacao(texto: string, dados: {
     "valor total": total == null ? "" : real(total),
     "valor estimado": total == null ? "" : real(total),
     referencia: dados.referencia,
+    quantidades,
+    "quantidades e prazo de atendimento": quantidades && prazo ? `${quantidades}. Prazo: ${prazo}` : quantidades ? `Conforme o quadro de itens: ${quantidades}.` : prazo ? `Prazo: ${prazo}` : "",
+    prazo,
+    "prazo de atendimento": prazo,
+    "prazo de entrega": prazo,
     "nome do secretario": dados.titular?.nome ?? "",
     "portaria de nomeacao": dados.titular?.portaria ?? "",
   };

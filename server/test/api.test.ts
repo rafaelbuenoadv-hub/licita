@@ -1614,3 +1614,28 @@ test("pronto pagamento: o responsável e a assinatura vêm do cadastro de secret
   const texto = documentoPP({ protocolo: "PP 2026/0009", ano: 2026, situacao: "pedido", orgao: "Município", municipio: "", autorizado_por: null, autorizado_em: null, dados: { ...VAZIO_PP, secretaria: "SEDUC", responsavel: t.texto } }, "autorizacao");
   assert.match(texto, /@ Denise da Silva Lima\n@ Secretário\(a\) Municipal de Educação\n@ Portaria de nomeação nº 008\/2025/);
 });
+
+test("o que já foi informado no PAC e na Solicitação preenche os campos que pedem a mesma informação", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de cadeiras escolares", tipo: "bens", via: "licitacao", ano: 2032, requisitante: "Educação" });
+  const rota = `/api/processos/${id}`;
+  assert.equal((await lic.put(`${rota}/campos/pac`, { valores: { consta: "sim", item_pac: "Item 9", mes_planejado: "Março/2032", no_prazo: "sim" } })).status, 200);
+  assert.equal((await lic.post(`${rota}/checagens`, { item: "pc1", marcado: true })).status, 200);
+  const r = await lic.post(`${rota}/solicitacoes`, {
+    chave_envio: randomUUID(), secretaria: "Educação", justificativa: "Cadeiras quebradas.",
+    descricao: "## Quantidades e prazo\n[[Quantidades e prazo de atendimento]]",
+    itens: [{ descricao: "Cadeira escolar", unidade: "un", quantidade: 30, valor_unitario: 300 }],
+  });
+  assert.equal(r.status, 201, JSON.stringify(r.dados));
+  const det = (await lic.get(rota)).dados;
+  assert.match(det.solicitacoes[0].descricao, /Cadeira escolar: 30 un\. Prazo: início previsto no PAC: Março\/2032/);
+  // DFD já sabe a justificativa, a quantidade e o prazo; o ETP, a justificativa.
+  assert.equal(det.sugestoes_campos.dfd.justificativa, "Cadeiras quebradas.");
+  assert.equal(det.sugestoes_campos.dfd.quantidade, "- Cadeira escolar: 30 un");
+  assert.equal(det.sugestoes_campos.dfd.data_pretendida, "Início previsto no PAC: Março/2032.");
+  // Campo salvo em branco continua recebendo a sugestão.
+  assert.equal((await lic.put(`${rota}/campos/dfd`, { valores: { justificativa: "", objeto: "Cadeiras" } })).status, 200);
+  const depois = (await lic.get(rota)).dados;
+  assert.equal(depois.sugestoes_campos.dfd.justificativa, "Cadeiras quebradas.");
+  assert.equal(depois.sugestoes_campos.dfd.objeto, undefined);
+});
