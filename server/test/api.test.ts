@@ -1639,3 +1639,38 @@ test("o que já foi informado no PAC e na Solicitação preenche os campos que p
   assert.equal(depois.sugestoes_campos.dfd.justificativa, "Cadeiras quebradas.");
   assert.equal(depois.sugestoes_campos.dfd.objeto, undefined);
 });
+
+test("PNCP: o índice local é alimentado pela API oficial e a busca usa o índice, sem o portal", async () => {
+  const { sincronizarDia, buscarNoIndice } = await import("../pncp-indice.js");
+  process.env.PNCP_PAUSA_MS = "0";
+  const chamadas: string[] = [];
+  let pediuCalma = false;
+  const falso = (async (entrada: string | URL) => {
+    const url = new URL(String(entrada));
+    chamadas.push(url.pathname + url.search);
+    if (url.pathname === "/api/consulta/v1/contratacoes/publicacao") {
+      if (!pediuCalma) { pediuCalma = true; return new Response("", { status: 429, headers: { "retry-after": "0" } }); }
+      return Response.json({ totalPaginas: 1, data: [
+        { numeroControlePNCP: "11111111000111-1-000007/2031", objetoCompra: "Aquisição de PEDRA BRITA e pó de pedra", modalidadeNome: "Pregão - Eletrônico",
+          situacaoCompraNome: "Divulgada no PNCP", dataPublicacaoPncp: "2031-03-10T09:00:00", valorTotalEstimado: 5000,
+          orgaoEntidade: { razaoSocial: "MUNICIPIO X" }, unidadeOrgao: { ufSigla: "PR", municipioNome: "Cidade X" } },
+        { numeroControlePNCP: "22222222000122-1-000008/2031", objetoCompra: "Papel higiênico", modalidadeNome: "Dispensa",
+          orgaoEntidade: { razaoSocial: "MUNICIPIO Y" }, unidadeOrgao: { ufSigla: "PR", municipioNome: "Cidade Y" } },
+      ] });
+    }
+    if (url.pathname === "/api/search/") throw new Error("o portal não deve ser usado");
+    return Response.json([{ numeroItem: 1, descricao: "Pó de pedra", quantidade: 10, unidadeMedida: "m3", valorUnitarioEstimado: 95.5 }]);
+  }) as typeof fetch;
+  assert.equal(await sincronizarDia("PR", 6, new Date(Date.UTC(2031, 2, 10)), falso), 2);
+  assert.ok(chamadas[0].includes("dataInicial=20310310") && chamadas[0].includes("uf=PR"));
+  assert.equal(chamadas.length, 2, "repetiu a consulta depois do 429");
+  const achados = await buscarNoIndice("PÓ DE PEDRA", "PR", "todos");
+  assert.deepEqual(achados?.map((x) => x.controle), ["11111111000111-1-000007/2031"]);
+  assert.equal(await buscarNoIndice("pedra", "SC", "todos"), null);
+  const r = await buscarPncp({ q: "pó de pedra", uf: "PR", status: "todos" }, falso);
+  assert.equal(r.fonte, "indice");
+  assert.equal(r.resultados[0].unitValue, 95.5);
+  assert.equal(r.resultados[0].municipality, "Cidade X");
+  assert.ok(chamadas.at(-1)!.startsWith("/api/pncp/v1/orgaos/11111111000111/compras/2031/7/itens"));
+  await pool.query("delete from pncp_editais; delete from pncp_dias_sincronizados;");
+});

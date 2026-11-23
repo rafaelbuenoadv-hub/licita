@@ -669,3 +669,35 @@ create table if not exists pronto_pagamento_anexos (
 insert into checagens (processo_id, item, usuario_id)
 select distinct s.processo_id, 'solicitacao.registrada', s.usuario_id from solicitacoes_processo s
 on conflict do nothing;
+
+-- Cópia local dos editais publicados no PNCP (API oficial de consulta), para a busca de preços.
+-- A busca do portal do PNCP recusa programas; a API oficial só lista por data, então o sistema mantém o índice.
+create table if not exists pncp_editais (
+  controle text primary key,
+  cnpj text not null,
+  ano int not null,
+  sequencial int not null,
+  objeto text not null default '',
+  objeto_norm text not null default '',
+  orgao text not null default '',
+  uf text not null default '',
+  municipio text not null default '',
+  modalidade text not null default '',
+  situacao text not null default '',
+  numero_compra text not null default '',
+  processo text not null default '',
+  publicado_em timestamptz,
+  abertura_em timestamptz,
+  encerramento_em timestamptz,
+  valor numeric(16,2),
+  atualizado_em timestamptz not null default now()
+);
+create index if not exists pncp_editais_uf_data on pncp_editais(uf, publicado_em desc);
+create table if not exists pncp_dias_sincronizados (
+  uf text not null,
+  modalidade int not null,
+  dia date not null,
+  registros int not null default 0,
+  em timestamptz not null default now(),
+  primary key (uf, modalidade, dia)
+);

@@ -3,15 +3,10 @@ import { z } from "zod";
 import { exigeLogin } from "../auth.js";
 import { ErroHttp } from "../erros.js";
 import { SITUACOES_PNCP, UFS_PNCP, type ResultadoPncp } from "../../shared/pncp.js";
+import { CABECALHOS_PNCP, buscarNoIndice, situacaoDoIndice, type EditalIndice } from "../pncp-indice.js";
 
 type Obj = Record<string, unknown>;
 
-/**
- * A busca do portal do PNCP (/api/search) derruba parte das conexões de programas ("other side closed").
- * As consultas se identificam como o sistema e repetem a tentativa quando a conexão cai.
- */
-const CABECALHOS_PNCP = { Accept: "application/json", "User-Agent": "Licita/1.0 (sistema de compras municipal)" };
-/** Consulta ao PNCP com até três tentativas quando a conexão cai no meio (o PNCP derruba conexões com frequência). */
 async function consultarPncp(carregar: typeof fetch, url: string | URL, tempo: number) {
   for (let tentativa = 1; ; tentativa++) {
     try { return await carregar(url, { headers: CABECALHOS_PNCP, signal: AbortSignal.timeout(tempo) }); }
@@ -80,9 +75,22 @@ const filtros = z.object({
   status: z.enum(Object.keys(SITUACOES_PNCP) as [keyof typeof SITUACOES_PNCP, ...(keyof typeof SITUACOES_PNCP)[]]).default("todos"),
 });
 
-export async function buscarPncp(consulta: z.infer<typeof filtros>, carregar: typeof fetch = fetch): Promise<{ resultados: ResultadoPncp[]; incompleta: boolean }> {
+export async function buscarPncp(
+  consulta: z.infer<typeof filtros>, carregar: typeof fetch = fetch,
+  local: (texto: string, uf: string, status: string) => Promise<EditalIndice[] | null> = buscarNoIndice,
+): Promise<{ resultados: ResultadoPncp[]; incompleta: boolean; fonte: "indice" | "portal" }> {
   const query = consulta.q;
   const uf = consulta.uf === "BR" ? "" : consulta.uf;
+  // 1º: cópia local dos editais (API oficial). 2º, só para estados fora do índice: a busca do portal, que costuma recusar programas.
+  const doIndice = await local(query, uf, consulta.status);
+  if (doIndice) {
+    const notices = doIndice.map((e) => ({
+      numero_controle_pncp: e.controle, orgao_nome: e.orgao, uf: e.uf, municipio_nome: e.municipio, modalidade_nome: e.modalidade,
+      situacao_nome: e.situacao, numero_compra: e.numero_compra, numero_processo: e.processo,
+      data_publicacao_pncp: e.publicado_em ?? "", data_abertura_proposta: e.abertura_em ?? "",
+    }));
+    return { ...(await itensDosEditais(notices, query, uf, carregar)), fonte: "indice" };
+  }
   const url = new URL("https://pncp.gov.br/api/search/");
   url.search = new URLSearchParams({
     q: query, tipos_documento: "edital", ordenacao: "-data", pagina: "1", tam_pagina: "10", status: consulta.status,
@@ -95,8 +103,12 @@ export async function buscarPncp(consulta: z.infer<typeof filtros>, carregar: ty
     notices = list(await resposta.json()).slice(0, 10).map(obj);
   } catch (e) {
     console.warn("PNCP: falha na busca de editais", { url: url.toString(), erro: e instanceof Error ? `${e.name}: ${e.message}` : String(e), causa: String((e as { cause?: unknown })?.cause ?? "") });
-    throw new ErroHttp(502, "O PNCP está indisponível neste momento. Tente a consulta novamente.");
+    throw new ErroHttp(502, uf ? `A busca do portal do PNCP recusou a consulta. Para ${uf}, o sistema ainda não mantém a cópia local dos editais: tente de novo ou escolha PR.` : "A busca do portal do PNCP recusou a consulta. Escolha um estado (PR tem a cópia local dos editais) ou tente de novo.");
   }
+  return { ...(await itensDosEditais(notices, query, uf, carregar)), fonte: "portal" };
+}
+
+async function itensDosEditais(notices: Obj[], query: string, uf: string, carregar: typeof fetch): Promise<{ resultados: ResultadoPncp[]; incompleta: boolean }> {
   const tokens = [...new Set(normalize(query).split(/[^a-z0-9]+/).filter((token) => token.length >= 3))];
   const lotes = await Promise.all(notices.map(async (notice) => {
     const code = str(notice, [
@@ -187,8 +199,10 @@ export async function buscarPncp(consulta: z.infer<typeof filtros>, carregar: ty
 export function rotasPncp() {
   const r = Router();
   r.get("/pncp-search", exigeLogin, async (req, res) => {
+    const consulta = filtros.parse(req.query);
+    const resposta = await buscarPncp(consulta);
     res.set("Cache-Control", "private, max-age=300");
-    res.json(await buscarPncp(filtros.parse(req.query)));
+    res.json({ ...resposta, indice: resposta.fonte === "indice" ? await situacaoDoIndice(consulta.uf) : null });
   });
   return r;
 }
