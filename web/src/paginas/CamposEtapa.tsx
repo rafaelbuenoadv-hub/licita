@@ -4,9 +4,11 @@ import { consultarPca, type ItemConsultaPca } from "../../../shared/consulta-pca
 import { ETAPAS, camposFaltando, camposVisiveis, feita, temValor, type Campo, type Checks, type Etapa, type Valores } from "../../../shared/etapas";
 
 /** Campos de preenchimento da etapa, conforme a capacitação da fase interna. */
-export function CamposEtapa({ e, p, valores, editavel, sujo, gravando, sugeridos, mudar, salvar }: {
+export function CamposEtapa({ e, p, valores, editavel, sujo, gravando, sugeridos, mudar, salvar, gerar, gerando }: {
   e: Etapa; p: any; valores: Valores; editavel: boolean; sujo: boolean; gravando: boolean; sugeridos: string[];
   mudar: (v: Valores) => void; salvar: () => void;
+  /** Salva os campos e mescla no modelo do documento da etapa (sem IA). */
+  gerar?: () => void; gerando?: boolean;
 }) {
   const visiveis = camposVisiveis(e, p, valores);
   const faltam = new Set(camposFaltando(e, p, valores).map((c) => c.id));
@@ -23,8 +25,10 @@ export function CamposEtapa({ e, p, valores, editavel, sujo, gravando, sugeridos
         ))}
       </fieldset>
       {editavel && <div className="tools">
-        <button className="btn pri" type="button" disabled={!sujo || gravando} onClick={salvar}>{gravando ? "Salvando…" : sujo ? "Salvar campos" : "Campos salvos"}</button>
-        {sujo && <span className="small muted">Há alterações não salvas. "Concluir e avançar" também salva.</span>}
+        <button className={gerar ? "btn" : "btn pri"} type="button" disabled={!sujo || gravando || gerando} onClick={salvar}>{gravando && !gerando ? "Salvando…" : sujo ? "Salvar campos" : "Campos salvos"}</button>
+        {gerar && <button className="btn pri" type="button" disabled={gravando || gerando} onClick={gerar}
+          title="Salva os campos e mescla no modelo do documento da etapa">{gerando ? "Gerando documento…" : "📄 Salvar e gerar documento"}</button>}
+        {sujo && <span className="small muted">Há alterações não salvas.{gerar ? " \"Salvar e gerar documento\" salva e monta a minuta." : " \"Concluir e avançar\" também salva."}</span>}
       </div>}
     </div>
   );

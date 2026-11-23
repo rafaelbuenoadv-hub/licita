@@ -197,6 +197,20 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
   const [vals, setVals] = useState<Valores>(() => mesclarCampos(p, e.id).valores);
   const [sujo, setSujo] = useState(() => mesclarCampos(p, e.id).sugeridos.length > 0);
   const [gravandoCampos, setGravandoCampos] = useState(false);
+  const [gerandoDoc, setGerandoDoc] = useState(false);
+  const [versaoMinuta, setVersaoMinuta] = useState(0);
+  /** Salva os campos, mescla no modelo do documento e mostra a minuta gerada. */
+  const gerarDocumento = async () => {
+    setGerandoDoc(true);
+    try {
+      if (sujo && !(await salvarCampos(true))) return;
+      const r = await api.post(`/processos/${p.id}/minutas/${e.id}/dos-campos`);
+      setVersaoMinuta((v) => v + 1);
+      setAviso({ t: r.nova ? `${e.doc ?? e.nome}: documento gerado com os campos (versão ${r.versao}). Confira a minuta abaixo.` : "O documento já está igual aos campos preenchidos.", tipo: "ok" });
+      setTimeout(() => document.getElementById("minuta-etapa")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+    } catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
+    finally { setGerandoDoc(false); }
+  };
   const salvarCampos = async (silencioso = false) => {
     setGravandoCampos(true);
     try {
@@ -255,7 +269,8 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
       }} />}
       {e.campos.length > 0 && <CamposEtapa e={e} p={p} valores={vals} editavel={editavel} sujo={sujo} gravando={gravandoCampos}
         sugeridos={mesclarCampos(p, e.id).sugeridos.filter((k) => vals[k] === p.sugestoes_campos?.[e.id]?.[k])}
-        mudar={(v) => { setVals(v); setSujo(true); }} salvar={() => salvarCampos()} />}
+        mudar={(v) => { setVals(v); setSujo(true); }} salvar={() => salvarCampos()}
+        gerar={e.modelo && editavel ? gerarDocumento : undefined} gerando={gerandoDoc} />}
 
       {e.id === "solicitacao" && <section className="sec pedidos" id="pedidos-secretarias" tabIndex={-1}>
         <Solicitacoes key={p.id} processo={p} recarregar={recarregar} />
@@ -276,7 +291,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
       {e.id === "precos" && p.via === "dispensa" && <Fracionamento id={p.id} />}
       <div className="sec"><span className="lbl">Erros que costumam voltar do jurídico</span>
         <ul className="aten">{e.atencao.map((a: string) => <li key={a}>{a}</li>)}</ul></div>
-      {e.modelo && <Minuta p={p} e={e} editavel={editavel} setAviso={setAviso} camposSujos={sujo} salvarCampos={() => salvarCampos(true)} />}
+      {e.modelo && <Minuta key={versaoMinuta} p={p} e={e} editavel={editavel} setAviso={setAviso} camposSujos={sujo} salvarCampos={() => salvarCampos(true)} />}
       {conf && conf.length > 0 && <div className="sec" role="status" aria-live="polite"><span className="lbl">Pendências da etapa</span>
         <p className="small muted">{conf.filter((x) => x.bloqueia).length} {conf.filter((x) => x.bloqueia).length === 1 ? "ajuste impede" : "ajustes impedem"} a conclusão. Resolva e clique de novo em "Concluir e avançar".</p>
         <ul className="pends">{conf.map((x, i) => (
