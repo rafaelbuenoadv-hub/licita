@@ -459,7 +459,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
       </>}
     </div>}
     <ItensOrcamentos linhas={linhas} setLinhas={setLinhas} orcamentos={orcamentos} caminho={caminho} ocupado={ocupado} anexando={anexando}
-      enviar={enviar} executar={executar} recarregar={recarregar} usarPncp={usarPncp} setAviso={setAviso} importacaoOrcamento={importacaoOrcamento} />
+      enviar={enviar} executar={executar} recarregar={recarregar} usarPncp={usarPncp} setAviso={setAviso} importacaoOrcamento={importacaoOrcamento} selecionarOrcamento={(id) => setOrcamentoParaLer(String(id))} />
     {aviso && <p className="small" role="status">{aviso}</p>}
   </fieldset>;
 }

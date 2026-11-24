@@ -364,3 +364,10 @@ dialog.janela::backdrop{background:#10182788}
   dialog.janela{padding:14px}
 }
 .orc-cartao .previa{color:var(--muted)}
+
+/* Cotações lado a lado na tabela de itens, inclusive arquivos aguardando vínculo manual. */
+.tabela-itens-orc th.coluna-cotacao{min-width:165px;max-width:230px;background:var(--sunk);text-align:left;white-space:normal;text-transform:none;letter-spacing:normal}
+.tabela-itens-orc th.coluna-cotacao>*{display:block;margin-top:4px;overflow-wrap:anywhere}
+.tabela-itens-orc th.coluna-cotacao .lbl{margin-top:0}
+.tabela-itens-orc .preco-cotacao{background:color-mix(in srgb,var(--sunk) 40%,transparent)}
+.tabela-itens-orc .preco-cotacao>span,.tabela-itens-orc .preco-cotacao>.small{display:block;margin-top:4px}
