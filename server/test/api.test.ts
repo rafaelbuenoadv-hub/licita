@@ -1744,3 +1744,47 @@ test("PDF completo da solicitação: documento, orçamentos dos fornecedores e, 
     [idPng, idPdf, idTxt].map((x) => ({ id: x, nome: String(x), arquivo: Buffer.from("") })));
   assert.deepEqual(ordem.map((e) => [e.codigo, e.fornecedor]), [["A1", "Móveis Paraná"], ["A2", "Comercial Ibaiti"], ["B1", "Município X · item 1"]]);
 });
+
+test("relatório de cotação (Banco de Preços) é lido sem IA, e anexar PDF com texto não depende da IA", async () => {
+  const { lerRelatorioCotacao } = await import("../leitura-sem-ia.js");
+  const texto = [
+    "Relatório de Cotação: COTAÇÃO DE PEDRAS",
+    "Método Matemático Aplicado: Média Aritmética dos preços obtidos - Preço calculado",
+    " Item 1", "", "PÓ DE PEDRA 750 M³", "",
+    "      PREÇOS /      QUANTIDADE      PREÇO      PERCENTUAL      PREÇO EST.      % VALOR      TOTAL",
+    "          3/4            750      R$ 110,32 (un)      -      R$ 110,32      12,7%      R$ 82.740,00",
+    " Item 2", "", "PEDRA BRITA N. 01", "",
+    "      PREÇOS /      QUANTIDADE      PREÇO      PERCENTUAL      PREÇO EST.      % VALOR      TOTAL",
+    "          3/3          1.000      R$ 94,23 (un)      -      R$ 94,23      14,5%      R$ 94.230,00",
+    "Valor Global:     R$ 176.970,00",
+    "Item 2: PEDRA BRITA N. 01", "", "Quantidade        Descrição", "", "1.000 Metros Cúbicos        PEDRA BRITA N. 01",
+    "http://www.bancodeprecos.com.br/CertificadoAutenticidade",
+  ].join("\n");
+  const r = lerRelatorioCotacao(texto)!;
+  assert.equal(r.fornecedor, "Banco de Preços — Relatório de Cotação");
+  assert.equal(r.valor_total, 176970);
+  assert.deepEqual(r.itens.map((i) => [i.descricao, i.quantidade, i.unidade, i.valor_unitario, i.valor_total]), [
+    ["PÓ DE PEDRA", 750, "M³", 110.32, 82740],
+    ["PEDRA BRITA N. 01", 1000, "M³", 94.23, 94230],
+  ]);
+  assert.equal(lerRelatorioCotacao("Proposta comercial\nItem 1 Cadeira R$ 10,00"), null);
+
+  // Documento de apoio em PDF com texto: lido no servidor (este ambiente de teste não tem IA configurada).
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de pedras", tipo: "bens", via: "licitacao", ano: 2034 });
+  const doc = await PDFDocument.create();
+  const { StandardFonts } = await import("pdf-lib");
+  doc.addPage().drawText("Relatorio de cotacao de pedras: po de pedra R$ 110,32", { x: 50, y: 700, size: 12, font: await doc.embedFont(StandardFonts.Helvetica) });
+  const fd = new FormData();
+  fd.append("arquivo", new Blob([Buffer.from(await doc.save())]), "relatorio.pdf");
+  const r1 = await lic.req("POST", `/api/processos/${id}/anexos`, fd);
+  assert.equal(r1.status, 201, JSON.stringify(r1.dados));
+  assert.ok(r1.dados.caracteres > 20);
+  // PDF sem texto (digitalizado): aviso claro, não erro interno.
+  const vazio = await PDFDocument.create(); vazio.addPage();
+  const fd2 = new FormData();
+  fd2.append("arquivo", new Blob([Buffer.from(await vazio.save())]), "digitalizado.pdf");
+  const r2 = await lic.req("POST", `/api/processos/${id}/anexos`, fd2);
+  assert.equal(r2.status, 422);
+  assert.match(r2.dados.erro, /não tem texto selecionável/);
+});

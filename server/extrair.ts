@@ -1,7 +1,8 @@
 import mammoth from "mammoth";
 import readXlsxFile from "read-excel-file/node";
 import { ErroHttp } from "./erros.js";
-import { textoDePdf } from "./ia.js";
+import { iaDisponivel, textoDePdf } from "./ia.js";
+import { textoLocalDoPdf } from "./orcamento-pdf.js";
 
 /** Extrai texto de .docx, .pdf, .txt, .md ou .csv. Tabelas do Word viram linhas "| a | b |". */
 export async function extrairTexto(nome: string, buf: Buffer) {
@@ -22,7 +23,14 @@ export async function extrairTexto(nome: string, buf: Buffer) {
       )];
     }).join("\n");
   } else if (n.endsWith(".pdf")) {
-    texto = await textoDePdf(buf);
+    // PDF com texto: lido no servidor. Só o PDF digitalizado (sem texto) pede a IA, e a falha dela não vira erro interno.
+    texto = await textoLocalDoPdf(buf).catch(() => "");
+    if (!texto.trim()) {
+      if (!iaDisponivel()) throw new ErroHttp(422, "Este PDF não tem texto selecionável (é digitalizado). Anexe a versão em PDF com texto, Word ou planilha.");
+      texto = await textoDePdf(buf).catch(() => {
+        throw new ErroHttp(422, "Este PDF não tem texto selecionável (é digitalizado) e a leitura por IA não está disponível. Anexe a versão em PDF com texto, Word ou planilha.");
+      });
+    }
   } else if (/\.(txt|md|csv)$/.test(n)) {
     texto = buf.toString("utf8");
   } else {

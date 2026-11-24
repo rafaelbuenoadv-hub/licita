@@ -99,3 +99,66 @@ export function lerOrcamentoSemIA(texto: string): DadosOrcamento | null {
   const valor_total = totalDoTexto.find((v) => Math.abs(v - soma) <= 0.05) ?? soma;
   return { fornecedor: null, cnpj, data: null, validade: null, itens: itens.slice(0, 300), valor_total, frete: "nao_informado", instalacao: "nao_informado", prazo_entrega: null, observacoes: null };
 }
+
+/**
+ * "Relatório de Cotação" de pesquisa de preços (formato do Banco de Preços e semelhantes): cada item traz a descrição,
+ * a linha "propostas / quantidade / preço estimado (un) / … / total" e as fontes consultadas. Lança cada item com o
+ * preço estimado calculado no relatório (média ou mediana das fontes, conforme o método do próprio relatório).
+ */
+/** Unidade escrita por extenso no detalhamento do item ("1.000 Metros Cúbicos"). */
+function unidadeNoDetalhe(linhas: string[], numero: string) {
+  const ini = linhas.findIndex((l) => new RegExp(`^\\s*Item\\s+${numero}:`).test(l));
+  if (ini < 0) return "";
+  for (let k = ini + 1; k < Math.min(linhas.length, ini + 15); k++) {
+    const m = /^\s*[\d.]+(?:,\d+)?\s+([A-Za-zÀ-ú³²]+(?:\s+[A-Za-zÀ-ú³²]+)?)\s{2,}/.exec(linhas[k]);
+    if (!m) continue;
+    const u = m[1].normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+    return /metros? cubicos?/.test(u) ? "M³" : /metros? quadrados?/.test(u) ? "M²" : /^metros?$/.test(u) ? "M" : /tonelada/.test(u) ? "T"
+      : /quilo/.test(u) ? "KG" : /litro/.test(u) ? "L" : /unidade/.test(u) ? "UN" : m[1].toUpperCase();
+  }
+  return "";
+}
+
+export function lerRelatorioCotacao(texto: string): DadosOrcamento | null {
+  if (!/Relat[óo]rio de Cota[çc][ãa]o/i.test(texto) || !/PRE[ÇC]O\s+EST/i.test(texto)) return null;
+  const linhas = texto.replace(/\r/g, "").split("\n");
+  const itens: ItemOrcamento[] = [];
+  for (let i = 0; i < linhas.length; i++) {
+    if (!/^\s*Item\s+\d+\s*$/.test(linhas[i])) continue;
+    // Descrição: primeira linha com texto depois de "Item N".
+    let j = i + 1;
+    while (j < linhas.length && !linhas[j].trim()) j++;
+    const bruta = (linhas[j] ?? "").trim();
+    // Linha de números: "3/4   750   R$ 110,32 (un)   -   R$ 110,32   12,7%   R$ 82.740,00"
+    let k = j + 1, m: RegExpExecArray | null = null;
+    for (; k < Math.min(linhas.length, j + 25); k++) {
+      m = /^\s*\d+\s*\/\s*\d+\s+([\d.,]+)\s+R\$\s*([\d.,]+)\s*\(([^)]+)\)(?:.*?R\$\s*([\d.,]+)\s*$)?/.exec(linhas[k]);
+      if (m || /^\s*Item\s+\d+\s*$/.test(linhas[k])) break;
+    }
+    if (!m) continue;
+    const quantidade = valorDe(m[1]), unitario = valorDe(m[2]), total = m[4] ? valorDe(m[4]) : null;
+    // Unidade real no detalhamento ("750 Metros Cúbicos"), senão a do relatório.
+    const descricao = bruta.replace(/\s+[\d.]+(?:,\d+)?\s*(?:M³|M3|M²|M2|UN|UND|KG|T|TON|L|LT|M)\.?\s*$/i, "").trim() || bruta;
+    const unidadeDetalhe = unidadeNoDetalhe(linhas, linhas[i].trim().split(/\s+/)[1]);
+    const unidadeTexto = unidadeDetalhe || /\s(M³|M3)\s*$/i.test(bruta) ? "M³" : /\s(M²|M2)\s*$/i.test(bruta) ? "M²" : /\s(KG)\s*$/i.test(bruta) ? "KG" : /\s(T|TON)\s*$/i.test(bruta) ? "T" : "";
+    itens.push({
+      descricao: descricao.slice(0, 500),
+      unidade: unidadeTexto || (m[3].trim().toLowerCase() === "un" ? "UN" : m[3].trim().toUpperCase()),
+      quantidade, valor_unitario: unitario,
+      valor_total: total ?? (quantidade != null && unitario != null ? Math.round(quantidade * unitario * 100) / 100 : null),
+    });
+    i = k;
+  }
+  if (!itens.length) return null;
+  const global = /Valor Global:\s*R\$\s*([\d.,]+)/i.exec(texto);
+  const titulo = /Relat[óo]rio de Cota[çc][ãa]o:\s*([^\n]+)/i.exec(texto)?.[1]?.trim();
+  const metodo = /M[ée]todo Matem[áa]tico Aplicado:\s*([^\n-]+)/i.exec(texto)?.[1]?.trim();
+  const periodo = /Pesquisa realizada entre ([^\n]+)/i.exec(texto)?.[1]?.trim();
+  return {
+    fornecedor: /bancodeprecos/i.test(texto) ? "Banco de Preços — Relatório de Cotação" : "Relatório de Cotação",
+    cnpj: null, data: null, validade: null, itens,
+    valor_total: global ? valorDe(global[1]) : null,
+    frete: "nao_informado", instalacao: "nao_informado", prazo_entrega: null,
+    observacoes: [titulo && `Pesquisa: ${titulo}`, metodo && `Método: ${metodo}`, periodo && `Período: ${periodo}`].filter(Boolean).join(" · ") || null,
+  };
+}
