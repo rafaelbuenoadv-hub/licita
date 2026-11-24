@@ -30,13 +30,39 @@ const numeroDe = (q: string | number | null | undefined) => {
 };
 const comuns = (a: Set<string>, b: Set<string>) => [...a].filter((x) => b.has(x)).length;
 
+/** Diferença de até uma letra entre palavras longas (erro de digitação: "rechão" × "rachão"). */
+function quaseIgual(a: string, b: string) {
+  if (a === b) return true;
+  if (a.length < 5 || b.length < 5 || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, erros = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++erros > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return erros + (a.length - i) + (b.length - j) <= 1;
+}
+const palavrasComuns = (a: Set<string>, b: Set<string>) => [...a].filter((x) => [...b].some((y) => quaseIgual(x, y))).length;
+
+/** Unidade em forma comparável: M3 = M³ = m³; UN = UND = UNID = UNIDADE; KG = KILO… */
+export function unidadeComparavel(u: string | null | undefined) {
+  const t = normalizarCotacao(u ?? "").replace(/³/g, "3").replace(/²/g, "2").replace(/[.\s]/g, "");
+  const mapa: Record<string, string> = {
+    un: "un", und: "un", unid: "un", unidade: "un", unidades: "un", pc: "un", pca: "un", peca: "un", pecas: "un",
+    m3: "m3", metrocubico: "m3", metroscubicos: "m3", m2: "m2", metroquadrado: "m2", metrosquadrados: "m2",
+    kg: "kg", kilo: "kg", quilo: "kg", quilograma: "kg", quilogramas: "kg", t: "t", ton: "t", tonelada: "t", toneladas: "t",
+    l: "l", lt: "l", litro: "l", litros: "l", cx: "cx", caixa: "cx", pct: "pct", pacote: "pct", m: "m", metro: "m", metros: "m",
+  };
+  return mapa[t] ?? t;
+}
+
 /** Semelhança de 0 a 1 entre dois itens; -1 quando as unidades são diferentes (não podem ser o mesmo item). */
 export function semelhanca(a: Comparavel, b: Comparavel) {
-  const ua = normalizarCotacao(a.unidade ?? ""), ub = normalizarCotacao(b.unidade ?? "");
+  const ua = unidadeComparavel(a.unidade), ub = unidadeComparavel(b.unidade);
   if (ua && ub && ua !== ub) return -1;
   const sa = assinatura(a.descricao), sb = assinatura(b.descricao);
   if (!sa.palavras.size || !sb.palavras.size) return 0;
-  const iguais = comuns(sa.palavras, sb.palavras);
+  const iguais = palavrasComuns(sa.palavras, sb.palavras);
   // Uma só palavra em comum ("pedra") quando um dos itens tem mais palavras não basta ("pó de pedra" × "pedra brita").
   const palavras = iguais / Math.min(sa.palavras.size, sb.palavras.size) * (iguais === 1 && Math.max(sa.palavras.size, sb.palavras.size) >= 2 ? 0.6 : 1);
   // Números decidem a variante do item (faixa de BTU, bitola): conjuntos diferentes derrubam a semelhança.
