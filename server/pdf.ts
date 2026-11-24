@@ -2,7 +2,7 @@ import PDFDocument from "pdfkit";
 import { quantidadeColunasCotacoes, QUEBRA_NA_CELULA } from "../shared/solicitacao.js";
 import type { Timbrado } from "./docx.js";
 
-type Trecho = { texto: string; negrito: boolean; pendente: boolean; largura: number };
+type Trecho = { texto: string; negrito: boolean; pendente: boolean; riscado: boolean; largura: number };
 const MARGEM = 54;
 const NORMAL = "Times-Roman";
 const NEGRITO = "Times-Bold";
@@ -38,17 +38,18 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
     const linhas: Trecho[][] = [[]];
     let soma = 0;
     const novaLinha = () => { linhas.push([]); soma = 0; };
-    const partes = valor.split(/(\[\[.+?\]\]|\*\*.+?\*\*)/g);
+    const partes = valor.split(/(\[\[.+?\]\]|\*\*.+?\*\*|~~.+?~~)/g);
     for (const parte of partes) {
       const pendente = parte.startsWith("[[") && parte.endsWith("]]");
       const forte = parte.startsWith("**") && parte.endsWith("**");
-      const conteudo = pendente || forte ? parte.slice(2, -2) : parte;
+      const riscado = parte.startsWith("~~") && parte.endsWith("~~");
+      const conteudo = pendente || forte || riscado ? parte.slice(2, -2) : parte;
       const bold = negrito || forte;
       doc.font(bold ? NEGRITO : NORMAL).fontSize(tamanho);
       const inserir = (palavra: string, medida: number) => {
         if (soma + medida > max && soma > 0) novaLinha();
         if (soma === 0 && !palavra.trim()) return;
-        linhas.at(-1)!.push({ texto: palavra, negrito: bold, pendente, largura: medida });
+        linhas.at(-1)!.push({ texto: palavra, negrito: bold, pendente, riscado, largura: medida });
         soma += medida;
       };
       for (const palavra of conteudo.match(/\S+|\s+/g) ?? []) {
@@ -63,7 +64,7 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
       const trechos: Trecho[] = [];
       for (const trecho of linha) {
         const anterior = trechos.at(-1);
-        if (anterior && anterior.negrito === trecho.negrito && anterior.pendente === trecho.pendente) {
+        if (anterior && anterior.negrito === trecho.negrito && anterior.pendente === trecho.pendente && anterior.riscado === trecho.riscado) {
           anterior.texto += trecho.texto;
           anterior.largura += trecho.largura;
         } else trechos.push(trecho);
@@ -76,7 +77,7 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
     for (const trecho of linha) {
       if (trecho.pendente && trecho.largura > 0) doc.rect(x, yy, trecho.largura, tamanho + 2).fill("#fff176");
       doc.fillColor("#171717").font(trecho.negrito ? NEGRITO : NORMAL).fontSize(tamanho)
-        .text(trecho.texto, x, yy, { lineBreak: false });
+        .text(trecho.texto, x, yy, { lineBreak: false, strike: trecho.riscado });
       x += trecho.largura;
     }
   }

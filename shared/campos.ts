@@ -95,7 +95,7 @@ export const CAMPOS: Record<string, Campo[]> = {
     { id: "metodo", rotulo: "Método de cálculo", tipo: "opcao", opcoes: [["media", "Média"], ["mediana", "Mediana"], ["menor", "Menor preço"], ["outro", "Outro (explicar na memória de cálculo)"]] },
     { id: "memoria", rotulo: "Memória de cálculo", tipo: "area", ajuda: "Fontes consultadas, datas e horas de acesso, o cálculo adotado e a razão da escolha." },
     { id: "analise_critica", rotulo: "Análise crítica dos preços", tipo: "area",
-      ajuda: "Preços descartados por inexequíveis ou excessivamente elevados, com a justificativa (Dec. 2.533/2024, art. 11, §§ 2º e 3º). Se nenhum foi descartado, diga isso." },
+      ajuda: "Marque os preços descartados na tabela de orçamentos e informe o motivo e a justificativa. O relatório registra os descartes automaticamente; use este campo para complementar a análise (Dec. 2.533/2024, art. 11, §§ 2º e 3º)." },
     { id: "bdi", rotulo: "BDI e encargos sociais", tipo: "texto", cond: "obra", ajuda: "Percentuais adotados e onde está a composição." },
     { id: "data_base", rotulo: "Data-base do orçamento", tipo: "texto", ajuda: "Mês e ano de referência dos preços, igual em todas as peças." },
     { id: "valor_total", rotulo: "Valor estimado total (R$)", tipo: "valor" },

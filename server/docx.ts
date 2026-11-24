@@ -12,12 +12,13 @@ const FONTE = "Times New Roman";
 function runs(t: string, extra: { bold?: boolean; size?: number } = {}): TextRun[] {
   const out: TextRun[] = [];
   const size = extra.size ?? 24;
-  const re = /\[\[(.+?)\]\]|\*\*(.+?)\*\*/g;
+  const re = /\[\[(.+?)\]\]|\*\*(.+?)\*\*|~~(.+?)~~/g;
   let ult = 0, m: RegExpExecArray | null;
   while ((m = re.exec(t))) {
     if (m.index > ult) out.push(new TextRun({ text: t.slice(ult, m.index), font: FONTE, ...extra, size }));
     if (m[1] !== undefined) out.push(new TextRun({ text: m[1], font: FONTE, highlight: "yellow", ...extra, size }));
-    else out.push(new TextRun({ text: m[2], font: FONTE, size, bold: true }));
+    else if (m[2] !== undefined) out.push(new TextRun({ text: m[2], font: FONTE, size, bold: true }));
+    else out.push(new TextRun({ text: m[3], font: FONTE, ...extra, size, strike: true }));
     ult = m.index + m[0].length;
   }
   if (ult < t.length) out.push(new TextRun({ text: t.slice(ult), font: FONTE, ...extra, size }));

@@ -152,6 +152,7 @@ const itensSolicitacao = z.array(z.object({
     link: z.string().trim().max(1500).optional(),
     consultado_em: z.iso.date().optional(),
     obs: z.string().trim().max(1000).optional(),
+    descarte: z.object({ motivo: z.enum(["inexequivel", "elevado"]), justificativa: z.string().trim().min(1, "Justifique o descarte do preço.").max(2000) }).optional(),
   })).max(20).optional(),
 })).max(200);
 
@@ -166,6 +167,7 @@ export function calcularItens(itens: ItemSolicitacao[]) {
     const fornecedores = new Set<string>();
     const anexos = new Set<number>();
     for (const cotacao of item.cotacoes) {
+      if (cotacao.descarte && (cotacao.valor_unitario == null || !cotacao.fornecedor.trim())) throw new ErroHttp(400, `O descarte do item ${indice + 1} exige um preço e uma fonte identificada.`);
       const nome = normalizarCotacao(cotacao.fornecedor);
       if (cotacao.valor_unitario != null && !nome) throw new ErroHttp(400, `Informe o fornecedor da cotação do item ${indice + 1}.`);
       const anexo = cotacao.orcamento_id;

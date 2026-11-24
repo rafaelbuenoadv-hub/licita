@@ -385,3 +385,12 @@ dialog.janela::backdrop{background:#10182788}
 .subtopico-orcamentos[open]>summary{border-bottom:1px solid var(--line)}
 .subtopico-orcamentos .itens-sol{min-width:0;width:100%;margin:0}
 @media(max-width:600px){.subtopico-orcamentos>summary>.small{float:none;display:block;margin:5px 0 0 18px}}
+
+/* Valores mantidos como evidência, mas retirados da formação do preço. */
+.valor-descartado{text-decoration:line-through;text-decoration-thickness:2px;color:var(--muted)}
+.descarte-preco{margin-top:8px;text-align:left;white-space:normal;font-family:inherit;font-variant-numeric:normal;min-width:150px}
+.descarte-preco label{display:flex;flex-direction:column;gap:4px;margin-top:7px;font-size:12px}
+.descarte-preco .marcar-descarte{flex-direction:row;align-items:center;gap:6px;cursor:pointer}
+.tabela-itens-orc .descarte-preco input[type=checkbox],.descarte-preco input[type=checkbox]{min-width:0;width:15px;height:15px;margin:0;flex-shrink:0}
+.descarte-preco select,.descarte-preco textarea{width:100%;min-width:0;font-size:12px;white-space:normal}
+.descarte-preco .fora-calculo{display:block;margin-top:5px;color:var(--muted);font-weight:600}

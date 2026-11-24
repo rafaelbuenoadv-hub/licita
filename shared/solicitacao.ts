@@ -53,6 +53,8 @@ export const CRITERIOS_PRECO = { media: "Média", mediana: "Mediana", menor: "Me
 export type CriterioPreco = keyof typeof CRITERIOS_PRECO;
 export const FONTES_COTACAO = { fornecedor: "Orçamento de fornecedor", banco_precos: "Banco de Preços", loja: "Loja na internet", pncp: "Valor do PNCP", outra: "Outras fontes" };
 export type FonteCotacao = keyof typeof FONTES_COTACAO;
+export const MOTIVOS_DESCARTE = { inexequivel: "Preço inexequível", elevado: "Preço excessivamente elevado" };
+export interface DescartePreco { motivo: keyof typeof MOTIVOS_DESCARTE; justificativa: string }
 export interface CotacaoItem {
   orcamento_id: number | null;
   fornecedor: string;
@@ -62,6 +64,7 @@ export interface CotacaoItem {
   consultado_em?: string;
   /** Validade da proposta, condições ou outras informações. */
   obs?: string;
+  descarte?: DescartePreco;
 }
 export interface ItemSolicitacao {
   descricao: string;
@@ -73,7 +76,7 @@ export interface ItemSolicitacao {
 }
 
 export function valorDasCotacoes(cotacoes: CotacaoItem[], criterio: CriterioPreco = "media") {
-  const valores = cotacoes.flatMap((c) => c.fornecedor.trim() && c.valor_unitario != null && c.valor_unitario > 0
+  const valores = cotacoes.flatMap((c) => !c.descarte && c.fornecedor.trim() && c.valor_unitario != null && c.valor_unitario > 0
     ? [Math.round((c.valor_unitario + Number.EPSILON) * 100)] : []).sort((a, b) => a - b);
   if (!valores.length) return null;
   const meio = Math.floor(valores.length / 2);
@@ -91,7 +94,8 @@ export const TIPOS_ANEXOS_SOLICITACAO = ".pdf,.docx,.xlsx,.txt,.md,.csv,.jpg,.jp
 const real = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const numero = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 4 });
 const celula = (texto: string) => texto.replace(/\s*\n\s*/g, " ").replace(/\|/g, "/").trim();
-export const totalDoItem = (i: ItemSolicitacao) => (i.quantidade != null && i.valor_unitario != null ? Math.round(i.quantidade * i.valor_unitario * 100) / 100 : null);
+export const valorReferenciaDoItem = (i: ItemSolicitacao) => i.cotacoes?.some((c) => c.descarte) ? valorDasCotacoes(i.cotacoes, i.criterio) : i.valor_unitario;
+export const totalDoItem = (i: ItemSolicitacao) => { const v = valorReferenciaDoItem(i); return i.quantidade != null && v != null ? Math.round(i.quantidade * v * 100) / 100 : null; };
 /** Soma dos itens que têm quantidade e valor; null quando nenhum tem. */
 export function totalDosItens(itens: ItemSolicitacao[]) {
   const t = itens.map(totalDoItem).filter((x): x is number => x != null);
@@ -101,7 +105,7 @@ const CABECALHO_ITEM = "| Item | Descrição | Un. | Qtd. |";
 const CABECALHO_ANTERIOR = `${CABECALHO_ITEM} Valor unitário | Valor total |`;
 const CABECALHO_COTACOES = `${CABECALHO_ITEM} Valor unitário estimado | Valor total |`;
 // Linha logo abaixo do quadro que faz parte dele: o total antigo (fora da tabela) ou a nota do preço de referência.
-const RODAPE_DO_QUADRO = /^(?:\*\*(?:Total estimado da solicitação|Subtotal dos itens com valor)\*\* R\$\s|Preço de referência: )/;
+const RODAPE_DO_QUADRO = /^(?:\*\*(?:Total estimado da solicitação|Subtotal dos itens com valor)\*\* R\$\s|Preço de referência: |Análise crítica dos preços: |Preço descartado — item )/;
 const DESCRICAO_CRITERIO: Record<CriterioPreco, string> = { media: "média", mediana: "mediana", menor: "menor valor" };
 export const QUEBRA_NA_CELULA = "\u2028";
 const cabecalhoComFornecedores = (linha: string) => linha.replaceAll(QUEBRA_NA_CELULA, " ").startsWith(CABECALHO_ITEM + " Cotação 1 ");
@@ -115,11 +119,19 @@ function cotacoesPorFornecedor(itens: ItemSolicitacao[]) {
       const chave = normalizarCotacao(cotacao.fornecedor);
       const nome = celula(cotacao.fornecedor) || "Fornecedor a identificar";
       if (!fornecedores.has(chave)) fornecedores.set(chave, nome);
-      precos.set(chave, real(cotacao.valor_unitario));
+      precos.set(chave, cotacao.descarte ? `~~${real(cotacao.valor_unitario)}~~` : real(cotacao.valor_unitario));
     }
     return precos;
   });
   return { fornecedores: [...fornecedores], cotacoes };
+}
+
+export const SEM_DESCARTES = "Nenhum preço foi descartado por inexequibilidade ou por ser excessivamente elevado.";
+export function analiseCriticaDosPrecos(itens: ItemSolicitacao[]) {
+  const descartes = itens.flatMap((item, k) => (item.cotacoes ?? []).flatMap((c) => c.descarte ? [
+    `Preço descartado — item ${k + 1} (${celula(item.descricao)}): ${celula(c.fornecedor)}; valor ${c.valor_unitario == null ? "não informado" : real(c.valor_unitario)}; motivo: ${MOTIVOS_DESCARTE[c.descarte.motivo]}; justificativa: ${celula(c.descarte.justificativa) || "a informar"}`,
+  ] : []));
+  return descartes.length ? ["Preços riscados no quadro comparativo foram desconsiderados no cálculo do valor de referência.", ...descartes].join("\n") : SEM_DESCARTES;
 }
 
 export function quantidadeColunasCotacoes(texto: string) {
@@ -133,7 +145,7 @@ export function quantidadeColunasCotacoes(texto: string) {
  * Quadro de itens no formato das minutas (linhas com barras verticais). A linha separadora leva o alinhamento
  * de cada coluna (":---:" centralizada, "---:" à direita), que a tela, o Word e o PDF respeitam.
  */
-export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = false) {
+export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = false, incluirAnalise = true) {
   if (!itens.length) return "";
   const total = totalDosItens(itens);
   const temCotacoes = itens.some((i) => i.cotacoes !== undefined);
@@ -155,7 +167,8 @@ export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = f
     ...itens.map((item, k) => {
       const subtotal = totalDoItem(item);
       const qtd = item.quantidade == null ? "—" : numero(item.quantidade);
-      const unitario = item.valor_unitario == null ? "—" : real(item.valor_unitario);
+      const v = valorReferenciaDoItem(item);
+      const unitario = v == null ? "—" : real(v);
       const cotacoes = fornecedores.map(([chave]) => ` ${precos?.cotacoes[k].get(chave) ?? "—"} |`).join("");
       return `| ${k + 1} | ${celula(item.descricao)} | ${celula(item.unidade) || "—"} | ${qtd} |${cotacoes} ${unitario} | ${subtotal == null ? "—" : real(subtotal)} |`;
     }),
@@ -168,6 +181,7 @@ export function quadroDeItens(itens: ItemSolicitacao[], incluirPrecosCotados = f
     const base = criterio ? `${DESCRICAO_CRITERIO[criterio]} das cotações` : "conforme o critério indicado para cada item";
     linhas.push("", `Preço de referência: ${base}.`);
   }
+  if (incluirPrecosCotados && incluirAnalise) linhas.push("", `Análise crítica dos preços: ${analiseCriticaDosPrecos(itens)}`);
   return linhas.join("\n");
 }
 const TITULO_ITENS = "## Itens solicitados";
@@ -206,7 +220,10 @@ function quadrosDosItens(linhas: string[], itens: ItemSolicitacao[]) {
       || cabecalho.startsWith(CABECALHO_COTACOES + " ") || cabecalhoComFornecedores(cabecalho) || mesmosItens) {
       let proxima = fim;
       while (proxima < linhas.length && !linhas[proxima].trim()) proxima++;
-      if (RODAPE_DO_QUADRO.test(linhas[proxima]?.trim() ?? "")) fim = proxima + 1;
+      while (RODAPE_DO_QUADRO.test(linhas[proxima]?.trim() ?? "")) {
+        fim = ++proxima;
+        while (proxima < linhas.length && !linhas[proxima].trim()) proxima++;
+      }
       quadros.push({ inicio, fim });
     }
     inicio = fim;

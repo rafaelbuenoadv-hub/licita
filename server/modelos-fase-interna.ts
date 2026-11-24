@@ -3,7 +3,7 @@
 import { q, q1 } from "./db.js";
 import { secretariosDoProcesso } from "./portarias.js";
 import { ehMunicipioIbaiti } from "./municipio-ibaiti.js";
-import { FONTES_COTACAO, CRITERIOS_PRECO, planejamentoDoProcesso, quadroDeItens, totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
+import { analiseCriticaDosPrecos, SEM_DESCARTES, FONTES_COTACAO, CRITERIOS_PRECO, planejamentoDoProcesso, quadroDeItens, totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
 import { reaisPorExtenso } from "../shared/extenso.js";
 import { ETAPAS, TIPOS, VIAS, textoDoCampo, type Tipo, type Valores, type Via } from "../shared/etapas.js";
 
@@ -45,7 +45,7 @@ async function contexto(p: Proc, campos: Record<string, Valores>, autor: Autor) 
   const local = `${orgao?.municipio ?? ""}${orgao?.uf ? `/${orgao.uf}` : ""}`;
   return {
     orgao, ibaiti: !!orgao && ehMunicipioIbaiti(orgao), itens, areas, requisitante, autor,
-    total: totalDosItens(itens) ?? p.valor_estimado,
+    total: itens.length ? totalDosItens(itens) : p.valor_estimado,
     data: `${local}${local ? ", " : ""}${hoje.getDate()} de ${MESES[hoje.getMonth()]} de ${hoje.getFullYear()}.`,
   };
 }
@@ -118,7 +118,7 @@ export async function documentoPrecos(p: Proc, campos: Record<string, Valores>, 
   if (unica) l.push(`Justificativa do uso de fonte única: ${unica}`);
   l.push("## 4. Data-base", pr("data_base") ? `Os preços têm como data-base ${pr("data_base")}, que será adotada em todas as peças do processo.` : falta("data-base do orçamento"));
   l.push("## 5. Quadro comparativo de preços");
-  if (c.itens.length) l.push(quadroDeItens(c.itens, true).replace("Total estimado da solicitação", "Total estimado"));
+  if (c.itens.length) l.push(quadroDeItens(c.itens, true, false).replace("Total estimado da solicitação", "Total estimado"));
   else l.push(falta("quadro de preços por item"));
   const fontes = c.itens.flatMap((i) => (i.cotacoes ?? []).filter((x) => x.valor_unitario != null));
   const vistas = new Map<string, (typeof fontes)[number]>();
@@ -133,10 +133,13 @@ export async function documentoPrecos(p: Proc, campos: Record<string, Valores>, 
   l.push("## 7. Método de cálculo e memória",
     `Método adotado: ${pr("metodo") || (criterio ? CRITERIOS_PRECO[criterio] : falta("método de cálculo"))}.`,
     pr("memoria") || falta("memória de cálculo"));
-  l.push("## 8. Análise crítica dos preços", pr("analise_critica") || falta("análise crítica: preços descartados e por quê, ou que nenhum foi descartado"));
+  const analise = analiseCriticaDosPrecos(c.itens);
+  l.push("## 8. Análise crítica dos preços", analise);
+  const complemento = pr("analise_critica");
+  if (complemento && complemento !== analise && complemento !== SEM_DESCARTES && !complemento.startsWith("Preços riscados no quadro comparativo")) l.push(`Análise complementar: ${complemento}`);
   if (obra) l.push("## 9. BDI e encargos sociais", pr("bdi") || falta("BDI e encargos sociais"));
   const valorCampo = typeof campos.precos?.valor_total === "string" ? Number((campos.precos.valor_total as string).replace(/\./g, "").replace(",", ".")) : NaN;
-  const valor = Number.isFinite(valorCampo) && valorCampo > 0 ? valorCampo : c.total;
+  const valor = c.itens.length ? c.total : Number.isFinite(valorCampo) && valorCampo > 0 ? valorCampo : c.total;
   l.push(`## ${obra ? 10 : 9}. Valor estimado da contratação`,
     valor != null ? `O valor estimado da contratação é de **${valorComExtenso(valor)}**.` : falta("valor estimado"),
     "Declara-se que a pesquisa observou os parâmetros do art. 23 da Lei nº 14.133/2021 e que os documentos de suporte e a memória de cálculo integram os autos.");

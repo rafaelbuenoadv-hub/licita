@@ -3,7 +3,7 @@ import { q, q1 } from "./db.js";
 import { secretariosDoProcesso } from "./portarias.js";
 import { documentoDfd } from "./modelo-dfd.js";
 import { documentoEtp, documentoPrecos, documentoTr } from "./modelos-fase-interna.js";
-import { totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
+import { analiseCriticaDosPrecos, totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
 import {
   ETAPAS, TIPOS, VIAS, camposFaltando, camposVisiveis, itemDosCampos, itensDe, textoDoCampo, temValor,
   type Etapa, type Tipo, type Valores, type Via,
@@ -52,7 +52,7 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
   const contato = titular ? await q1<{ email: string; telefone: string }>(
     "select email, telefone from secretarios where orgao_id=$1 and secretaria=$2 limit 1", [p.orgao_id, titular.secretaria]) : undefined;
   const itens = solicitacoes.flatMap((s) => s.itens ?? []);
-  const total = totalDosItens(itens) ?? p.valor_estimado;
+  const total = itens.length ? totalDosItens(itens) : p.valor_estimado;
   const v = (etapa: string, campo: string) => { const x = campos[etapa]?.[campo]; return typeof x === "string" ? x : ""; };
   const pacTexto = itemPca
     ? `Contratação prevista no PAC ${p.ano}${itemPca.ordem_oficial ? `, item ${itemPca.ordem_oficial}` : ""}: ${itemPca.descricao}${itemPca.periodo_oficial ? `. Início previsto: ${itemPca.periodo_oficial}` : ""}.`
@@ -84,6 +84,7 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
       vi: valorTexto,
     },
     precos: {
+      analise_critica: itens.length ? analiseCriticaDosPrecos(itens) : "",
       parametros: (nOrcamentos?.n ?? 0) > 0 && p.tipo !== "obra" ? ["fornecedores"] : [],
       valor_total: total != null ? moeda(total) : "",
     },

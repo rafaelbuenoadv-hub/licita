@@ -1250,7 +1250,7 @@ test("as cotações ficam lado a lado no quadro e os fornecedores comuns aparece
   assert.equal(muitos.match(/Material escolar/g)?.length, 1);
   assert.equal(muitos.match(/Loja Alfa/g)?.length, 1);
   assert.equal(muitos.match(/Total estimado/g)?.length, 1);
-  assert.match(muitos, /\n\| \| \*\*Total estimado da solicitação\*\* \|( \|)+ \*\*R\$\s15,00\*\* \|\n\nPreço de referência: média das cotações\.$/);
+  assert.match(muitos, /\n\| \| \*\*Total estimado da solicitação\*\* \|( \|)+ \*\*R\$\s15,00\*\* \|\n\nPreço de referência: média das cotações\.\n\nAnálise crítica dos preços: Nenhum preço foi descartado[^\n]*$/);
   assert.equal(documentoDaSolicitacao(muitos, [{ ...item, cotacoes: [a, b, cotacao("Loja Gama", 30), cotacao("Loja Delta", 40), cotacao("Loja Épsilon", 50)] }]), muitos);
   const distintos = documentoDaSolicitacao(texto, ["Alfa", "Beta", "Gama", "Delta"].map((nome, k) => ({
     ...item, descricao: `Item de ${k + 1}`, cotacoes: [cotacao(nome, (k + 1) * 10)],
@@ -1975,4 +1975,61 @@ test("tópicos adicionais são opcionais, editáveis e integram Word e PDFs da s
   const removidoWord = await extrairTexto("solicitacao.docx", (await lic.get(`${url}/docx`)).dados);
   assert.doesNotMatch(removidoWord, /Tópicos adicionais|20 dias úteis/);
   assert.match(s.descricao, /Texto revisado/); assert.match(s.descricao, /@ Titular/);
+});
+
+test("preços descartados persistem riscados, ficam fora dos cálculos e são registrados no relatório", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de materiais escolares", tipo: "bens", via: "licitacao", ano: 2039, valor_estimado: 999999 });
+  const processo = `/api/processos/${id}`, rota = `${processo}/solicitacoes`;
+  const arquivo = new FormData(); arquivo.set("fornecedor", "Fonte baixa"); arquivo.set("valor", "10"); arquivo.set("arquivo", new Blob(["Proposta original preservada: R$ 10,00."]), "proposta.txt");
+  const proposta = await lic.post(`${processo}/orcamentos`, arquivo);
+  assert.equal(proposta.status, 201);
+  const cotacoes = [
+    { fornecedor: "Fonte baixa", orcamento_id: proposta.dados.ids[0], valor_unitario: 10, descarte: { motivo: "inexequivel", justificativa: "Não cobre o custo dos materiais." } },
+    { fornecedor: "Fornecedor A", orcamento_id: null, valor_unitario: 100 },
+    { fornecedor: "Fornecedor B", orcamento_id: null, valor_unitario: 120 },
+    { fornecedor: "Fonte elevada", orcamento_id: null, valor_unitario: 1000, descarte: { motivo: "elevado", justificativa: "Acima das referências equivalentes consultadas." } },
+  ];
+  const itens = [{ descricao: "Material escolar", unidade: "UN", quantidade: 2, valor_unitario: 99999, criterio: "media", cotacoes }];
+  const criar = (itens: unknown) => lic.post(rota, { chave_envio: randomUUID(), secretaria: "Educação", descricao: "# Solicitação\n[[Itens]]\n\n@ Titular", itens });
+  const invalido = structuredClone(itens); invalido[0].cotacoes[0].descarte!.justificativa = " ";
+  assert.equal((await criar(invalido)).status, 400);
+  const semPreco = structuredClone(itens); (semPreco[0].cotacoes[0] as any).valor_unitario = null;
+  assert.equal((await criar(semPreco)).status, 400);
+  const criada = await criar(itens); assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  const url = `${rota}/${criada.dados.id}`;
+  const ler = async () => (await lic.get(processo)).dados.solicitacoes.find((s: any) => s.id === criada.dados.id);
+  let s = await ler();
+  assert.equal(s.itens[0].valor_unitario, 110);
+  assert.equal(s.itens[0].cotacoes[0].valor_unitario, 10);
+  assert.equal(s.itens[0].cotacoes[3].valor_unitario, 1000);
+  assert.equal(s.itens[0].cotacoes[0].descarte.justificativa, "Não cobre o custo dos materiais.");
+  for (const formato of ["docx", "pdf", "pdf-completo"]) {
+    const r = await lic.get(`${url}/${formato}`); assert.equal(r.status, 200);
+    const texto = await extrairTexto(`solicitacao.${formato === "docx" ? "docx" : "pdf"}`, r.dados);
+    assert.match(texto, /110,00/); assert.match(texto, /220,00/); assert.match(texto, /Não cobre o custo/); assert.match(texto, /Acima das\s+referências/);
+    assert.doesNotMatch(texto, /~~|99\.999,00/);
+    if (formato === "docx") {
+      const { unzipSync } = await import("fflate");
+      const xml = Buffer.from(unzipSync(r.dados)["word/document.xml"]).toString();
+      assert.ok((xml.match(/<w:strike\b/g)?.length ?? 0) >= 2);
+    }
+  }
+  assert.match((await lic.get(`${processo}/orcamentos/${proposta.dados.ids[0]}/arquivo`)).dados.toString(), /Proposta original preservada/);
+  const { documentoPrecos } = await import("../modelos-fase-interna.js");
+  const p = (await lic.get(processo)).dados;
+  const relatorio = await documentoPrecos(p, { precos: { valor_total: "999999,00", analise_critica: "Nenhum preço foi descartado por inexequibilidade ou por ser excessivamente elevado." } }, { nome: "Pesquisador", cargo: "Compras" });
+  assert.match(relatorio, /## 8\. Análise crítica dos preços/); assert.match(relatorio, /Não cobre o custo/); assert.match(relatorio, /R\$\s220,00/);
+  assert.doesNotMatch(relatorio, /Nenhum preço foi descartado|999\.999,00/);
+  assert.match((await lic.get(processo)).dados.sugestoes_campos.precos.analise_critica, /Preço inexequível/);
+  const alterar = (itens: unknown) => lic.put(url, { anterior: s.descricao, descricao: s.descricao, itens_anteriores: s.itens, itens });
+  const todos = structuredClone(s.itens); todos[0].cotacoes.forEach((c: any) => { c.descarte = { motivo: "elevado", justificativa: "Fora da referência validada para este item." }; });
+  assert.equal((await alterar(todos)).status, 200); s = await ler();
+  assert.equal(s.itens[0].valor_unitario, null);
+  const semValidos = await documentoPrecos(p, {}, { nome: "Pesquisador", cargo: "Compras" });
+  assert.doesNotMatch(semValidos, /999\.999,00/);
+  const restaurados = structuredClone(s.itens); restaurados[0].cotacoes.forEach((c: any) => { delete c.descarte; });
+  assert.equal((await alterar(restaurados)).status, 200); s = await ler();
+  assert.equal(s.itens[0].valor_unitario, 307.5);
+  assert.match(s.descricao, /Nenhum preço foi descartado/); assert.doesNotMatch(s.descricao, /~~|Preço descartado — item/);
 });

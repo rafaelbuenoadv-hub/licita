@@ -4,11 +4,11 @@ import { QUEBRA_NA_CELULA } from "../../../shared/solicitacao";
 // Renderiza a marcação das minutas como folha de documento oficial.
 function inline(s: string, k: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /\[\[(.+?)\]\]|\*\*(.+?)\*\*/g;
+  const re = /\[\[(.+?)\]\]|\*\*(.+?)\*\*|~~(.+?)~~/g;
   let ult = 0, m: RegExpExecArray | null, i = 0;
   while ((m = re.exec(s))) {
     if (m.index > ult) out.push(s.slice(ult, m.index));
-    out.push(m[1] !== undefined ? <mark key={k + i++}>{m[1]}</mark> : <b key={k + i++}>{m[2]}</b>);
+    out.push(m[1] !== undefined ? <mark key={k + i++}>{m[1]}</mark> : m[2] !== undefined ? <b key={k + i++}>{m[2]}</b> : <s key={k + i++}>{m[3]}</s>);
     ult = m.index + m[0].length;
   }
   if (ult < s.length) out.push(s.slice(ult));

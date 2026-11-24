@@ -1,7 +1,7 @@
 import { useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { api, brl, numBR } from "../api";
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type DadosOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
-import { CRITERIOS_PRECO, FONTES_COTACAO, valorDasCotacoes, normalizarCotacao, totalDoItem, totalDosItens, type CriterioPreco, type FonteCotacao, type CotacaoItem, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { CRITERIOS_PRECO, FONTES_COTACAO, valorDasCotacoes, normalizarCotacao, totalDoItem, totalDosItens, type DescartePreco, type CriterioPreco, type FonteCotacao, type CotacaoItem, type ItemSolicitacao } from "../../../shared/solicitacao";
 
 import { destinosDoOrcamento, itensRepetidos } from "../../../shared/importar-orcamento";
 import type { ResultadoPncp } from "../../../shared/pncp";
@@ -10,7 +10,7 @@ import { BuscaPncpItem } from "./BuscaPncpItem";
 import { BuscaPncpLote } from "./BuscaPncpLote";
 import { ItensOrcamentos } from "./ItensOrcamentos";
 
-export interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string; obs?: string }
+export interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string; obs?: string; descarte?: DescartePreco }
 // escolhas: destino definido à mão na conferência (índice do item, ou null para lançar como item novo).
 type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[]; escolhas: Record<number, number | null> };
 export const cotacaoPreenchida = (c: LinhaCotacao) => c.orcamentoId != null || !!c.fornecedor.trim() || !!c.valor.trim();
@@ -32,7 +32,7 @@ export function linhasDosItens(itens: ItemSolicitacao[], orcamentos: OrcamentoLi
       orcamentoId: c.orcamento_id,
       fornecedor: limparNomeFornecedor(c.fornecedor) || nomeFornecedorOrcamento(orcamentos.find((o) => o.id === c.orcamento_id)),
       valor: c.valor_unitario == null ? "" : String(c.valor_unitario).replace(".", ","),
-      fonte: c.fonte, link: c.link, consultadoEm: c.consultado_em, obs: c.obs,
+      fonte: c.fonte, link: c.link, consultadoEm: c.consultado_em, obs: c.obs, descarte: c.descarte,
     }));
     if (!cotacoes.length) cotacoes.push(cotacaoVazia());
     return {
@@ -48,6 +48,7 @@ export function linhasDosItens(itens: ItemSolicitacao[], orcamentos: OrcamentoLi
 
 export function lerLinhas(linhas: LinhaItem[]): { itens: ItemSolicitacao[]; erro?: string } {
   const itens: ItemSolicitacao[] = [];
+  let erroDescarte: string | undefined;
   for (const [k, l] of linhas.entries()) {
     const preenchidas = l.cotacoes.filter(cotacaoPreenchida);
     if (!l.descricao.trim() && !l.unidade.trim() && !l.quantidade.trim() && !preenchidas.length && l.valorAnterior == null) continue;
@@ -62,8 +63,10 @@ export function lerLinhas(linhas: LinhaItem[]): { itens: ItemSolicitacao[]; erro
       if (Number.isNaN(valor) || (valor != null && (valor <= 0 || valor > 1e12))) return { itens, erro: `Item ${k + 1} — informe um preço unitário válido.` };
       const fornecedor = limparNomeFornecedor(c.fornecedor);
       if (valor != null && !fornecedor) return { itens, erro: `Item ${k + 1} — informe o nome do fornecedor da cotação.` };
+      if (c.descarte && (!valor || !c.descarte.justificativa.trim())) erroDescarte ??= `Item ${k + 1} — informe o preço e a justificativa do descarte de ${fornecedor || "cada fonte"}.`;
       cotacoes.push({
         orcamento_id: c.orcamentoId, fornecedor, valor_unitario: valor,
+        ...(c.descarte ? { descarte: { ...c.descarte, justificativa: c.descarte.justificativa.trim() } } : {}),
         ...(c.fonte ? { fonte: c.fonte } : {}), ...(c.link ? { link: c.link.trim() } : {}),
         ...(c.consultadoEm ? { consultado_em: c.consultadoEm } : {}),
         ...(c.obs?.trim() ? { obs: c.obs.trim().slice(0, 1000) } : {}),
@@ -74,7 +77,7 @@ export function lerLinhas(linhas: LinhaItem[]): { itens: ItemSolicitacao[]; erro
     itens.push(manterAnterior ? { ...dados, valor_unitario: l.valorAnterior ?? null }
       : { ...dados, cotacoes, criterio: l.criterio, valor_unitario: valorDasCotacoes(cotacoes, l.criterio) });
   }
-  return { itens };
+  return { itens, ...(erroDescarte ? { erro: erroDescarte } : {}) };
 }
 
 const formatos = ".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv";
