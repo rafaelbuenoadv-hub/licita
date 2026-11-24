@@ -140,7 +140,7 @@ export function lerRelatorioCotacao(texto: string): DadosOrcamento | null {
     // Unidade real no detalhamento ("750 Metros Cúbicos"), senão a do relatório.
     const descricao = bruta.replace(/\s+[\d.]+(?:,\d+)?\s*(?:M³|M3|M²|M2|UN|UND|KG|T|TON|L|LT|M)\.?\s*$/i, "").trim() || bruta;
     const unidadeDetalhe = unidadeNoDetalhe(linhas, linhas[i].trim().split(/\s+/)[1]);
-    const unidadeTexto = unidadeDetalhe || /\s(M³|M3)\s*$/i.test(bruta) ? "M³" : /\s(M²|M2)\s*$/i.test(bruta) ? "M²" : /\s(KG)\s*$/i.test(bruta) ? "KG" : /\s(T|TON)\s*$/i.test(bruta) ? "T" : "";
+    const unidadeTexto = unidadeDetalhe || (/\s(M³|M3)\s*$/i.test(bruta) ? "M³" : /\s(M²|M2)\s*$/i.test(bruta) ? "M²" : /\s(KG)\s*$/i.test(bruta) ? "KG" : /\s(T|TON)\s*$/i.test(bruta) ? "T" : "");
     itens.push({
       descricao: descricao.slice(0, 500),
       unidade: unidadeTexto || (m[3].trim().toLowerCase() === "un" ? "UN" : m[3].trim().toUpperCase()),

@@ -12,7 +12,7 @@ import { ItensOrcamentos } from "./ItensOrcamentos";
 
 export interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string; obs?: string }
 // escolhas: destino definido à mão na conferência (índice do item, ou null para lançar como item novo).
-type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[]; escolhas?: Record<number, number | null> };
+type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[]; escolhas: Record<number, number | null> };
 export const cotacaoPreenchida = (c: LinhaCotacao) => c.orcamentoId != null || !!c.fornecedor.trim() || !!c.valor.trim();
 export interface LinhaItem {
   descricao: string;
@@ -146,6 +146,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   const [aviso, setAviso] = useState("");
   const [leitura, setLeitura] = useState<LeituraOrcamento | null>(null);
   const [reler, setReler] = useState<{ id: number; fornecedor: string } | null>(null);
+  const [orcamentoParaLer, setOrcamentoParaLer] = useState("");
   // Colunas ainda sem preço lançado (fornecedor recém-adicionado): ficam só na tela até receberem um preço.
   const [pendentes, setPendentes] = useState<Coluna[]>(() => (colunasDosDados(linhas).length ? [] : [colunaNova()]));
   const lidas = lerLinhas(linhas);
@@ -185,11 +186,9 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     const dados = await lerOrcamento(id);
     const itens = dados.itens.filter((i) => i.descricao.trim());
     if (!itens.length) throw new Error("O orçamento foi anexado. A leitura não encontrou itens para lançar.");
-    // Já há itens cadastrados: a leitura só lança preços neles (nova cotação). Linha sem item correspondente fica desmarcada;
-    // para lançá-la como item novo, marque e escolha "Novo item".
-    const temItens = linhas.some((l) => l.descricao.trim());
-    const destinosIniciais = destinosDoOrcamento(linhas, itens);
-    setLeitura({ id, dados: { ...dados, fornecedor: limparNomeFornecedor(dados.fornecedor) || fornecedor, itens }, usar: destinosIniciais.map((d) => !temItens || d.indice != null) });
+    // A leitura nunca escolhe o destino: cada preço depende da indicação expressa do usuário.
+    setLeitura({ id, dados: { ...dados, fornecedor: limparNomeFornecedor(dados.fornecedor) || fornecedor, itens },
+      usar: itens.map(() => false), escolhas: {} });
     setReler(null);
   };
   const importar = (arquivo: File) => executar("importar", async () => {
@@ -201,14 +200,28 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     finally { await recarregar(); }
   });
 
-  const automaticos = leitura ? destinosDoOrcamento(linhas, leitura.dados.itens) : [];
-  const destinos = automaticos.map((d, k) => (leitura?.escolhas && k in leitura.escolhas
-    ? { indice: leitura.escolhas[k], ambigua: false, aproximado: false } : d));
+  const lerAnexado = () => {
+    const proposta = orcamentos.find((o) => String(o.id) === orcamentoParaLer);
+    if (!proposta) return;
+    void executar("importar", async () => {
+      setLeitura(null);
+      try { await conferirImportacao({ id: proposta.id, fornecedor: nomeFornecedorOrcamento(proposta) }); }
+      finally { await recarregar(); }
+    });
+  };
+  const destinos = leitura?.dados.itens.map((_, k) => ({
+    indice: leitura.escolhas[k] ?? null, ambigua: !Object.hasOwn(leitura.escolhas, k),
+  })) ?? [];
   const aplicarLeitura = () => {
     if (!leitura) return;
     const fornecedor = limparNomeFornecedor(leitura.dados.fornecedor);
     if (!fornecedor) {
       setAviso("Informe o fornecedor na conferência do orçamento para lançar os itens.");
+      return;
+    }
+    const escolhidos = leitura.usar.flatMap((usar, k) => usar && !destinos[k].ambigua && destinos[k].indice != null ? [destinos[k].indice] : []);
+    if (new Set(escolhidos).size !== escolhidos.length) {
+      setAviso("Há duas linhas deste orçamento relacionadas ao mesmo item. Escolha destinos diferentes ou desmarque uma delas.");
       return;
     }
     void executar("lancar", async () => {
@@ -361,6 +374,15 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   const descricoes = linhas.map((linha) => linha.descricao);
 
   const importacaoOrcamento = <>
+    {orcamentos.length > 0 && <div className="grade-anexo">
+      <label>Orçamento já anexado<select value={orcamentoParaLer} disabled={ocupado || !!anexando} onChange={(e) => setOrcamentoParaLer(e.target.value)}>
+        <option value="">Selecione o arquivo para leitura</option>
+        {orcamentos.map((o) => <option key={o.id} value={o.id}>{o.nome}</option>)}
+      </select></label>
+      <button type="button" className="btn" disabled={!orcamentoParaLer || ocupado || !!anexando} onClick={lerAnexado}>
+        {anexando === "importar" ? "Lendo orçamento…" : "Ler orçamento anexado"}
+      </button>
+    </div>}
     <div className="tools">
       <button className="btn pri" type="button" disabled={!!anexando || ocupado} onClick={() => seletorImportacao.current?.click()}>
         {anexando === "importar" ? "Lendo orçamento…" : "Anexar e ler orçamento"}</button>
@@ -378,29 +400,34 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
       </>
     </div>
     {leitura && <div className="cotacao-item stack">
-      <h4>Conferir orçamento</h4>
-      <label className="campo">Fornecedor da proposta
+      <h4>Conferir orçamento e relacionar itens</h4>
+      <p className="small muted">A leitura não relaciona itens automaticamente. Para cada linha que deseja aproveitar, escolha o item de destino e confirme o lançamento.</p>
+      <label className="campo">Fornecedor ou fonte do orçamento
         <input value={leitura.dados.fornecedor ?? ""} maxLength={200} placeholder="Informe a razão social ou o nome comercial"
           onChange={(e) => setLeitura({ ...leitura, dados: { ...leitura.dados, fornecedor: e.target.value } })} />
       </label>
       <div className="tw"><table className="t">
-        <thead><tr><th>Usar</th><th>Descrição</th><th>Un.</th><th>Qtd.</th><th>Preço unitário</th><th>Lançamento</th></tr></thead>
+        <thead><tr><th>Usar</th><th>Descrição</th><th>Un.</th><th>Qtd.</th><th>Preço unitário</th><th>Relacionar ao item</th></tr></thead>
         <tbody>{leitura.dados.itens.map((i, k) => <tr key={k}>
           <td><input type="checkbox" aria-label={`Usar linha ${k + 1} da proposta`} checked={leitura.usar[k] && !destinos[k].ambigua}
             disabled={destinos[k].ambigua} onChange={(e) => setLeitura({ ...leitura, usar: leitura.usar.map((v, n) => n === k ? e.target.checked : v) })} /></td>
           <td>{i.descricao}</td><td>{i.unidade || "—"}</td><td>{i.quantidade ?? "—"}</td><td>{brl(i.valor_unitario)}</td>
           <td><select aria-label={`Lançar a linha ${k + 1} da proposta em`} value={destinos[k].ambigua ? "" : destinos[k].indice == null ? "novo" : String(destinos[k].indice)}
-            onChange={(e) => setLeitura({ ...leitura, escolhas: { ...leitura.escolhas, [k]: e.target.value === "novo" ? null : Number(e.target.value) },
-              usar: leitura.usar.map((v, n) => (n === k ? true : v)) })}>
-            {destinos[k].ambigua && <option value="" disabled>Escolha o item</option>}
+            onChange={(e) => {
+              const escolhas = { ...leitura.escolhas };
+              if (!e.target.value) delete escolhas[k];
+              else escolhas[k] = e.target.value === "novo" ? null : Number(e.target.value);
+              setLeitura({ ...leitura, escolhas, usar: leitura.usar.map((v, n) => n === k ? !!e.target.value : v) });
+            }}>
+            <option value="">Selecione manualmente o item</option>
             <option value="novo">Novo item</option>
             {linhas.map((l, n) => l.descricao.trim() && <option key={n} value={n}>Item {n + 1} · {l.descricao.slice(0, 60)}</option>)}
           </select>
-          {"aproximado" in destinos[k] && destinos[k].aproximado && <div className="small muted">Descrição parecida: confira</div>}</td>
+          </td>
         </tr>)}</tbody>
       </table></div>
       <div className="tools">
-        <button className="btn pri" type="button" disabled={!leitura.usar.some((v, k) => v && !destinos[k].ambigua)} onClick={aplicarLeitura}>Lançar itens selecionados</button>
+        <button className="btn pri" type="button" disabled={!leitura.usar.some((v, k) => v && !destinos[k].ambigua)} onClick={aplicarLeitura}>Confirmar vínculos e lançar preços</button>
         <button className="btn" type="button" onClick={() => setLeitura(null)}>Fechar conferência</button>
       </div>
     </div>}
