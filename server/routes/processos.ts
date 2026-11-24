@@ -229,7 +229,7 @@ const textoDoFormulario = z.string().transform((t) => t.replace(/\r\n?/g, "\n"))
 async function contextoSolicitacao(p: Processo) {
   const campos = await camposDo(p.id);
   const orgao = await q1<{ municipio: string | null; uf: string | null }>("select municipio, uf from orgaos where id=$1", [p.orgao_id]);
-  return { ...p, prazo: prazoDoProcesso(campos), planejamento: planejamentoDoProcesso(campos), local: orgao?.municipio ? `${orgao.municipio}${orgao.uf ? `/${orgao.uf}` : ""}` : "" };
+  return { ...p, campos, prazo: prazoDoProcesso(campos), planejamento: planejamentoDoProcesso(campos), local: orgao?.municipio ? `${orgao.municipio}${orgao.uf ? `/${orgao.uf}` : ""}` : "" };
 }
 
 export function rotasProcessos() {
@@ -477,7 +477,7 @@ export function rotasProcessos() {
     );
     if (!s?.descricao) throw new ErroHttp(404, "Texto da solicitação não encontrado.");
     const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
-    const arquivo = await exportar(documentoDaSolicitacao(s.descricao, s.itens), MODELO_SOLICITACAO.doc, timbrado);
+    const arquivo = await exportar(documentoDaSolicitacao(s.descricao, s.itens, await camposDo(p.id)), MODELO_SOLICITACAO.doc, timbrado);
     enviarArquivo(res, `solicitacao-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.${formato}`, arquivo);
   });
 
@@ -491,7 +491,7 @@ export function rotasProcessos() {
     const ids = [...new Set((s.itens ?? []).flatMap((i) => (i.cotacoes ?? []).map((c) => c.orcamento_id)).filter((x): x is number => x != null))];
     const arquivos = ids.length ? await q<AnexoSolicitacao>("select id, nome, arquivo from orcamentos where processo_id=$1 and id = any($2)", [p.id, ids]) : [];
     const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
-    const documento = await minutaParaPdf(documentoDaSolicitacao(s.descricao, s.itens), MODELO_SOLICITACAO.doc, timbrado);
+    const documento = await minutaParaPdf(documentoDaSolicitacao(s.descricao, s.itens, await camposDo(p.id)), MODELO_SOLICITACAO.doc, timbrado);
     const arquivo = await solicitacaoCompleta(documento, ordemDosAnexos(s.itens ?? [], arquivos));
     enviarArquivo(res, `solicitacao-completa-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.pdf`, arquivo);
   });

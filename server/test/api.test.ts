@@ -1831,3 +1831,40 @@ test("proposta excluída da solicitação fica fora da tabela e pode ser restaur
   const externo = await anexar(`/api/processos/${outro.dados.id}`, "Loja C");
   assert.equal((await editar(s, s.itens, [externo])).status, 400);
 });
+
+test("verificação do PAC integra a solicitação e os arquivos exportados com os campos atuais", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const criado = await lic.post("/api/processos", { objeto: "Aquisição de cadeiras", tipo: "bens", via: "licitacao", ano: 2036, requisitante: "Educação" });
+  assert.equal(criado.status, 201);
+  const processo = `/api/processos/${criado.dados.id}`;
+  assert.equal((await lic.put(`${processo}/campos/pac`, { valores: { consta: "sim", item_pac: "Item 19 — Cadeiras", mes_planejado: "Março/2036", no_prazo: "nao", motivo_prazo: "Reposição antecipada para o início das aulas." } })).status, 200);
+  const criada = await lic.post(`${processo}/solicitacoes`, { chave_envio: randomUUID(), secretaria: "Educação", descricao: "# SOLICITAÇÃO DE CONTRATAÇÃO\nTexto manual preservado.\n\n## 7. Alinhamento com o planejamento\n[[Previsão no PAC]]\n\n## 8. Pedido\nSolicita-se a contratação.\n\n@ Responsável", itens: [{ descricao: "Cadeira", unidade: "UN", quantidade: 2, valor_unitario: 100 }] });
+  assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  let det = (await lic.get(processo)).dados;
+  const sol = det.solicitacoes.find((s: any) => s.id === criada.dados.id);
+  assert.match(sol.descricao, /## 7\. Verificação no Plano Anual de Contratações \(PAC\)/);
+  assert.match(sol.descricao, /Item 19 — Cadeiras/);
+  assert.match(sol.descricao, /Reposição antecipada para o início das aulas/);
+  assert.match(sol.descricao, /Texto manual preservado/);
+  assert.deepEqual(det.trilha.etapas.slice(0, 2).map((e: any) => e.id), ["pac", "solicitacao"]);
+  // Uma nova verificação deve entrar no documento baixado, mesmo antes de reeditar o texto salvo.
+  assert.equal((await lic.put(`${processo}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda extraordinária após ampliação da escola." } })).status, 200);
+  const word = await lic.get(`${processo}/solicitacoes/${sol.id}/docx`);
+  assert.equal(word.status, 200);
+  const textoWord = await extrairTexto("solicitacao.docx", word.dados);
+  assert.match(textoWord, /Verificação no Plano Anual de Contratações/);
+  assert.match(textoWord, /Demanda extraordinária após ampliação da escola/);
+  assert.doesNotMatch(textoWord, /Item 19|Reposição antecipada/);
+  assert.match(textoWord, /Texto manual preservado/);
+  for (const formato of ["pdf", "pdf-completo"]) {
+    const pdf = await lic.get(`${processo}/solicitacoes/${sol.id}/${formato}`);
+    assert.equal(pdf.status, 200);
+    const textoPdf = await extrairTexto("solicitacao.pdf", pdf.dados);
+    assert.match(textoPdf, /Verificação no Plano Anual de Contratações/);
+    assert.match(textoPdf, /Demanda extraordinária após ampliação da escola/);
+    assert.doesNotMatch(textoPdf, /Item 19|Reposição antecipada/);
+  }
+  det = (await lic.get(processo)).dados;
+  assert.equal(det.campos.pac.consta, "nao");
+  assert.deepEqual(det.trilha.etapas.slice(0, 2).map((e: any) => e.id), ["pac", "solicitacao"]);
+});

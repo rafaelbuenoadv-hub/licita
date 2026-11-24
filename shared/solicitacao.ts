@@ -37,7 +37,7 @@ export const MODELO_SOLICITACAO = {
     "## 6. Estimativa de valor",
     "Valor total estimado: [[Valor total por extenso]], apurado a partir das cotações e referências do quadro de itens, sem prejuízo da pesquisa de preços formal, com memória de cálculo (Lei nº 14.133/2021, art. 23).",
     "",
-    "## 7. Alinhamento com o planejamento",
+    "## 7. Verificação no Plano Anual de Contratações (PAC)",
     "[[Previsão no PAC]]",
     "",
     "## 8. Pedido",
@@ -266,8 +266,65 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[], modo: bool
 }
 
 /** Renderiza os preços cotados no quadro da prévia e dos arquivos exportados. */
-export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[]) {
-  return itens.length ? inserirItens(texto, itens, true) : texto;
+export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[], campos?: Record<string, Record<string, unknown>>) {
+  const documento = itens.length ? inserirItens(texto, itens, true) : texto;
+  return campos ? inserirVerificacaoPac(documento, campos) : documento;
+}
+
+/** Registro completo do PAC, reutilizado no corpo da Solicitação sem alterar a etapa no sistema. */
+export function verificacaoPacDoProcesso(campos?: Record<string, Record<string, unknown>>) {
+  const v = (id: string) => { const valor = campos?.pac?.[id]; return typeof valor === "string" ? valor.trim() : ""; };
+  const pendente = (rotulo: string) => `[[PREENCHER: ${rotulo}]]`;
+  if (v("consta") === "nao") return [
+    "O objeto não consta do Plano Anual de Contratações (PAC) vigente.",
+    `**Justificativa da inclusão extraordinária:** ${v("justificativa_inclusao") || pendente("Justificativa da inclusão extraordinária na etapa Verificar no PAC")}`,
+  ].join("\n\n");
+  if (v("consta") !== "sim") return "";
+  const linhas = [
+    "O objeto consta do Plano Anual de Contratações (PAC) vigente.",
+    `**Item do PAC:** ${v("item_pac") || pendente("Item do PAC")}`,
+    `**Mês previsto para o início:** ${v("mes_planejado") || pendente("Mês previsto no PAC")}`,
+    `**Início no mês planejado:** ${v("no_prazo") === "sim" ? "Sim." : v("no_prazo") === "nao" ? "Não." : pendente("Conferir o mês de início na etapa Verificar no PAC")}`,
+  ];
+  if (v("no_prazo") === "nao") linhas.push(`**Motivo da alteração do cronograma:** ${v("motivo_prazo") || pendente("Motivo da alteração do cronograma")}`);
+  return linhas.join("\n\n");
+}
+
+/** Incorpora o PAC em um único tópico e preserva o texto, as demais seções e a assinatura. */
+export function inserirVerificacaoPac(texto: string, campos: Record<string, Record<string, unknown>>) {
+  const registro = verificacaoPacDoProcesso(campos);
+  if (!texto.trim() || !registro) return texto;
+  const titulo = "Verificação no Plano Anual de Contratações (PAC)";
+  const titulosPac = new Set([
+    "alinhamento com o planejamento", "previsao no pac", "verificacao no pac", "verificacao do pac",
+    "verificacao no plano anual de contratacoes", "verificacao no plano anual de contratacoes pac",
+    "registro de verificacao no plano anual de contratacoes",
+  ]);
+  const assinaturaOuData = /^[ \t]*(?:@ |\[\[(?:PREENCHER:[ \t]*)?Local e data\]\][ \t]*$|(?:[^\n]*,[ \t]*)?\d{1,2} de [\p{L}]+ de \d{4}\.?[ \t]*$)/imu;
+  const cabecalhos = [...texto.matchAll(/^#{1,2}\s+([^\n]+)\n?/gm)];
+  const secoes = cabecalhos.flatMap((m, i) => {
+    if (!m[0].startsWith("## ")) return [];
+    const nome = normalizarCotacao(m[1].replace(/^\d+[.)]\s*/, "")).replace(/[^a-z0-9]+/g, " ").trim();
+    if (!titulosPac.has(nome)) return [];
+    const inicio = m.index!;
+    let fim = cabecalhos[i + 1]?.index ?? texto.length;
+    const marco = texto.slice(inicio + m[0].length, fim).search(assinaturaOuData);
+    if (marco >= 0) fim = inicio + m[0].length + marco;
+    const numero = /^(\d+[.)]\s*)/.exec(m[1])?.[1] ?? "";
+    return [{ inicio, fim, numero }];
+  });
+  if (secoes.length) {
+    let resultado = texto;
+    for (let i = secoes.length - 1; i >= 0; i--) {
+      const s = secoes[i];
+      resultado = resultado.slice(0, s.inicio) + (i === 0 ? `## ${s.numero}${titulo}\n\n${registro}\n\n` : "") + resultado.slice(s.fim);
+    }
+    return resultado.trimEnd();
+  }
+  const marco = texto.search(assinaturaOuData);
+  const antes = (marco < 0 ? texto : texto.slice(0, marco)).trimEnd();
+  const depois = marco < 0 ? "" : texto.slice(marco).trimStart();
+  return [antes, `## ${titulo}\n\n${registro}`, depois].filter(Boolean).join("\n\n");
 }
 
 /** Texto da verificação no PAC (etapa 1), para os documentos. */

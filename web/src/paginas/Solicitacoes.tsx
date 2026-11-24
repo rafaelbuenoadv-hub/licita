@@ -84,7 +84,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const itens = lidas.itens;
   const temOrcamento = itens.some((item) => item.cotacoes?.some((cotacao) => cotacao.orcamento_id != null));
   // Mesmo caminho do servidor: o quadro de itens entra no texto e os campos do modelo recebem o que foi digitado.
-  const base = documentoDaSolicitacao(rascunhoPrevia ?? descricao, itens);
+  const base = documentoDaSolicitacao(rascunhoPrevia ?? descricao, itens, processo.campos);
   const automaticos = camposDaSolicitacao(base, { ...processo, secretaria: areaEscolhida, referencia: referencia.trim(), titular, objeto_solicitacao: objeto, justificativa, itens, prazo: prazoDoProcesso(processo.campos), planejamento: planejamentoDoProcesso(processo.campos) });
   // Itens e quantidades saem do quadro de itens: não se pede para digitar de novo.
   const peloQuadro = (rotulo: string) => /^(preencher:\s*)?(itens( solicitados)?|quantidades( e prazo de atendimento)?)$/i.test(rotulo.normalize("NFD").replace(/\p{M}/gu, "").trim());
@@ -221,7 +221,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     try {
       if (modo === "anexo" && !arquivo) throw new Error("Selecione o documento da solicitação.");
       if (lidas.erro) throw new Error(lidas.erro);
-      const texto = documentoDaSolicitacao(previa, itens);
+      const texto = documentoDaSolicitacao(previa, itens, processo.campos);
       const dados = montarDados(texto);
       await enviarApoios(dados);
       setProgresso("Salvando a solicitação…");
@@ -391,7 +391,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                 </>}
               <p className="small muted">Use {edicao ? "Salvar alterações" : "Salvar solicitação"} para gravar as alterações.</p>
             </div>
-            <Folha texto={documentoDaSolicitacao(previa, itens)} />
+            <Folha texto={documentoDaSolicitacao(previa, itens, processo.campos)} />
           </details>}
           {faltantes.length > 0 && !editandoPrevia && <div className="pend">
             <div className="row"><h4>Campos pendentes</h4>
@@ -442,7 +442,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                     {podeAdicionar && <div className="tools">
                       <button type="button" className="btn sm" disabled={!!ocupado || cotando || !!modo} onClick={() => editar(s, true)}>Editar manualmente</button>
                     </div>}
-                    <Folha texto={documentoDaSolicitacao(s.descricao, s.itens)} />
+                    <Folha texto={documentoDaSolicitacao(s.descricao, s.itens, processo.campos)} />
                   </details>}
                   {(comprovantes.size > 0 || fontes.size > 0) && <details><summary>Comprovantes e fontes das cotações</summary>
                     <ul>
