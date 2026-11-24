@@ -74,6 +74,8 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
       justificativa: primeiro(solicitacoes.map((s) => s.justificativa).filter((x) => x?.trim()).join("\n\n"), v("pac", "justificativa_inclusao")),
       quantidade: quantidades,
       data_pretendida: v("pac", "mes_planejado") ? `Início previsto no PAC: ${v("pac", "mes_planejado")}.` : "",
+      modalidade: itemPca?.modalidade_prevista ?? ({ licitacao: "Pregão Eletrônico", dispensa: "Dispensa de Licitação", inexigibilidade: "Inexigibilidade de Licitação" } as const)[p.via],
+      etp: "sim",
     },
     etp: {
       i: primeiro(v("dfd", "justificativa"), ...solicitacoes.map((s) => s.justificativa)),

@@ -1,4 +1,4 @@
-// Valor em reais por extenso, para os documentos (ex.: R$ 1.250,50 → "mil duzentos e cinquenta reais e cinquenta centavos").
+// Valor em reais por extenso, para os documentos (ex.: R$ 1.250,50 → "mil, duzentos e cinquenta reais e cinquenta centavos").
 const UNIDADES = ["", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove", "dez", "onze", "doze", "treze", "quatorze", "quinze", "dezesseis", "dezessete", "dezoito", "dezenove"];
 const DEZENAS = ["", "", "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta", "oitenta", "noventa"];
 const CENTENAS = ["", "cento", "duzentos", "trezentos", "quatrocentos", "quinhentos", "seiscentos", "setecentos", "oitocentos", "novecentos"];
@@ -28,8 +28,8 @@ function inteiroPorExtenso(n: number): string {
   }
   // "e" antes do último grupo quando ele é menor que 100 ou é centena redonda (ex.: "mil e cinquenta", "dois mil e trezentos").
   const ultimo = grupos.find((g) => g > 0) ?? 0;
-  if (partes.length > 1 && (ultimo < 100 || ultimo % 100 === 0)) return `${partes.slice(0, -1).join(" ")} e ${partes.at(-1)}`;
-  return partes.join(" ");
+  if (partes.length > 1 && (ultimo < 100 || ultimo % 100 === 0)) return `${partes.slice(0, -1).join(", ")} e ${partes.at(-1)}`;
+  return partes.join(", ");
 }
 
 export function reaisPorExtenso(valor: number) {

@@ -753,19 +753,25 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   const dfd = {
     responsavel: det.sugestoes_campos.dfd.responsavel, contato: "(43) 3546-0000", objeto: "Cadeiras escolares, sem marca.",
     justificativa: "As cadeiras atuais estão quebradas, conforme laudo anexo.", quantidade: "30 unidades: uma por aluno da turma ampliada.",
-    data_pretendida: "Até o início do segundo semestre.",
+    data_pretendida: "Até o início do segundo semestre.", modalidade: "Pregão Eletrônico",
+    solucoes: "As compras anteriores foram feitas por pregão próprio, com bom resultado.", etp: "sim",
   };
   assert.equal((await admin.put(`/api/processos/${id}/campos/dfd`, { valores: dfd })).status, 200);
   const montado = await admin.post(`/api/processos/${id}/minutas/dfd/dos-campos`);
   assert.equal(montado.status, 200, JSON.stringify(montado.dados));
   const doc = (await admin.get(`/api/processos/${id}/minutas/dfd`)).dados.vigente;
   assert.equal(doc.origem, "campos");
-  assert.ok(doc.texto.startsWith("# DOCUMENTO DE FORMALIZAÇÃO DA DEMANDA — DFD\n\n"));
+  // Padrão do Departamento de Licitações e Contratos de Ibaiti.
+  assert.ok(doc.texto.startsWith("# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS\n\n# FORMALIZAÇÃO DE DEMANDA\n\n"));
   assert.ok(doc.texto.includes(`Protocolo ${protocolo} · Exercício 2028`));
-  assert.match(doc.texto, /## 1\. Identificação da área requisitante\n\n\| Informação \| Dados \|[\s\S]*\| Ato de nomeação \| Portaria nº 008\/2025 \|/);
-  assert.match(doc.texto, /## 3\. Justificativa da necessidade\n\nAs cadeiras atuais estão quebradas, conforme laudo anexo\./);
-  assert.match(doc.texto, /## 7\. Alinhamento com o Plano Anual de Contratações\n\nA contratação não consta do Plano Anual de Contratações e é incluída de forma extraordinária\. Justificativa: Cadeiras quebradas/);
-  assert.match(doc.texto, /## 9\. Declarações da área requisitante\n\na\) As informações/);
+  assert.match(doc.texto, /Decretos Municipais nº 2\.532\/2024, nº 2\.533\/2024, nº 2\.548\/2024 e nº 2\.549\/2024, a presente formalização de demanda/);
+  assert.match(doc.texto, /## INFORMAÇÕES GERAIS\n\n\*\*Objeto\*\*\n\nCadeiras escolares, sem marca\./);
+  assert.match(doc.texto, /\*\*Justificativa da necessidade:\*\*\n\nAs cadeiras atuais estão quebradas, conforme laudo anexo\./);
+  assert.match(doc.texto, /\*\*Secretarias Contempladas:\*\*\n\nSecretaria Municipal de Educação\./);
+  assert.match(doc.texto, /\*\*Estimativa de Valor:\*\*\n\nO valor estimado da contratação é de R\$\s9\.000,00 \(nove mil reais\), conforme estimativa preliminar/);
+  assert.match(doc.texto, /\*\*Necessidade do Estudo Técnico Preliminar e Matriz de riscos:\*\*\n\nA fase preparatória/);
+  assert.match(doc.texto, /\*\*Modalidade de Contratação:\*\*\n\nPregão Eletrônico/);
+  assert.match(doc.texto, /\*\*Disposições finais:\*\*\n\nCom a contratação de cadeiras escolares, sem marca, por meio de pregão Eletrônico, a Administração/);
   assert.match(doc.texto, /@ Denise da Silva Lima\n@ Secretário\(a\) Municipal de Educação\n@ Portaria de nomeação nº 008\/2025$/);
   // O ETP já recebe a justificativa e as quantidades do DFD.
   det = (await admin.get(`/api/processos/${id}`)).dados;

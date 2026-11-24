@@ -50,6 +50,14 @@ export const CAMPOS: Record<string, Campo[]> = {
     { id: "justificativa", rotulo: "Justificativa da necessidade", tipo: "area", ajuda: "Qual problema público a contratação resolve e o que acontece se ela não for feita." },
     { id: "quantidade", rotulo: "Quantidade estimada", tipo: "area", ajuda: "Quanto é necessário e a lógica do cálculo (consumo anterior, população atendida etc.)." },
     { id: "data_pretendida", rotulo: "Data pretendida", tipo: "area", ajuda: "Quando o objeto é necessário e por quê, em linha com o cronograma do PAC." },
+    { id: "modalidade", rotulo: "Modalidade de contratação", tipo: "texto",
+      ajuda: "Ex.: Pregão Eletrônico; Dispensa de Licitação; Adesão à Ata de Registro de Preços (Carona); Inexigibilidade." },
+    { id: "solucoes", rotulo: "Soluções sugeridas para contratação", tipo: "area",
+      ajuda: "Como o objeto foi contratado antes e por que a solução proposta (pregão próprio, adesão a ata, dispensa etc.) é a adequada agora." },
+    { id: "etp", rotulo: "Necessidade do Estudo Técnico Preliminar e da matriz de riscos", tipo: "opcao", opcoes: [
+      ["sim", "Exige Estudo Técnico Preliminar e análise de riscos"],
+      ["dispensado", "ETP dispensado: obra ou serviço comum de engenharia, sem prejuízo técnico (Lei nº 14.133/2021, art. 18, § 3º; Dec. 2.533/2024, art. 8º)"],
+    ] },
   ],
   etp: [
     { id: "i", rotulo: "I — Descrição da necessidade", tipo: "area", minimo: true, ajuda: "O problema a resolver, sob a perspectiva do interesse público e não do órgão." },
