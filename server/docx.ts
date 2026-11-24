@@ -1,5 +1,5 @@
 import {
-  AlignmentType, BorderStyle, Document, ShadingType, VerticalAlign, Footer, Header, ImageRun, Packer, PageOrientation, Paragraph, Table, TableCell, TableLayoutType, TableRow, TextRun, WidthType,
+  type ISectionOptions, AlignmentType, BorderStyle, Document, ShadingType, VerticalAlign, Footer, Header, ImageRun, Packer, PageOrientation, Paragraph, Table, TableCell, TableLayoutType, TableRow, TextRun, WidthType,
 } from "docx";
 import { quantidadeColunasCotacoes, QUEBRA_NA_CELULA } from "../shared/solicitacao.js";
 
@@ -83,7 +83,7 @@ function imagemTimbrado(imagem: ImagemTimbrado, largura: number) {
   });
 }
 
-export async function minutaParaDocx(texto: string, titulo: string, timbrado?: Timbrado) {
+export function secaoDaMinuta(texto: string, timbrado?: Timbrado): ISectionOptions {
   const colunasCotacoes = quantidadeColunasCotacoes(texto);
   // Com três cotações ou mais (mais média e valor total), o quadro só cabe sem quebrar valores em página deitada.
   const tamanhoPagina = colunasCotacoes >= 3 ? {
@@ -126,16 +126,18 @@ export async function minutaParaDocx(texto: string, titulo: string, timbrado?: T
   }
   fechaTabela();
   if (!filhos.length) filhos.push(new Paragraph({ children: [] }));
-  const doc = new Document({
-    title: titulo,
-    creator: "Licita",
+  return {
+    properties: { page: { size: tamanhoPagina, margin: { top: timbrado ? 2250 : 1418, bottom: 1134, left: 1701, right: 1134, header: 520, footer: 460 } } },
+    headers: timbrado ? { default: new Header({ children: [imagemTimbrado(timbrado.cabecalho, 565)] }) } : undefined,
+    footers: timbrado ? { default: new Footer({ children: [imagemTimbrado(timbrado.rodape, 565)] }) } : undefined,
+    children: filhos,
+  };
+}
+
+export async function minutaParaDocx(texto: string, titulo: string, timbrado?: Timbrado) {
+  return Packer.toBuffer(new Document({
+    title: titulo, creator: "Licita",
     styles: { default: { document: { run: { font: FONTE, size: 24 } } } },
-    sections: [{
-      properties: { page: { size: tamanhoPagina, margin: { top: timbrado ? 2250 : 1418, bottom: 1134, left: 1701, right: 1134, header: 520, footer: 460 } } },
-      headers: timbrado ? { default: new Header({ children: [imagemTimbrado(timbrado.cabecalho, 565)] }) } : undefined,
-      footers: timbrado ? { default: new Footer({ children: [imagemTimbrado(timbrado.rodape, 565)] }) } : undefined,
-      children: filhos,
-    }],
-  });
-  return Packer.toBuffer(doc);
+    sections: [secaoDaMinuta(texto, timbrado)],
+  }));
 }

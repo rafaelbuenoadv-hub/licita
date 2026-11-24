@@ -382,7 +382,7 @@ create table if not exists modelos (
   primary key (orgao_id, etapa)
 );
 
--- Documentos de apoio do processo (memorandos, planilhas): guarda o texto extraído.
+-- Documentos de apoio do processo: preserva também o original nos novos envios.
 create table if not exists anexos (
   id serial primary key,
   processo_id int not null references processos(id) on delete cascade,
@@ -471,6 +471,8 @@ create index if not exists orcamentos_proc on orcamentos(processo_id);
 alter table orcamentos add column if not exists dados jsonb;
 alter table orcamentos add column if not exists lido_em timestamptz;
 alter table orcamentos add column if not exists fornecedor_manual text;
+
+alter table anexos add column if not exists arquivo bytea;
 
 -- Pesquisa que embasa a minuta de uma etapa: editais publicados com o mesmo objeto e legislação vigente, com as fontes.
 create table if not exists pesquisas_minuta (

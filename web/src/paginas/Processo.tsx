@@ -7,6 +7,7 @@ import { ETAPAS, ETAPAS_INTERNAS, FASES, TIPOS, VIAS, feita, feitos, itensDe, li
 import { CamposEtapa, ItemPac, ProtocoloChecklist } from "./CamposEtapa";
 import { tem, useEu } from "../main";
 import { CamposProcesso, paraApi, type DadosProc, type PlanoConsulta } from "./NovoProcesso";
+import { ExportarProcesso } from "./ExportarProcesso";
 import { Solicitacoes } from "./Solicitacoes";
 
 const ACOES: Record<string, string> = {
@@ -275,7 +276,10 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
       {e.id === "solicitacao" && <section className="sec pedidos" id="pedidos-secretarias" tabIndex={-1}>
         <Solicitacoes key={p.id} processo={p} recarregar={recarregar} />
       </section>}
-      {e.id === "protocolo" && <ProtocoloChecklist p={p} checks={checks} irPara={irPara} />}
+      {e.id === "protocolo" && <>
+        <ExportarProcesso processo={p} salvarPendentes={async () => !editavel || !sujo || await salvarCampos(true)} />
+        <ProtocoloChecklist p={p} checks={checks} irPara={irPara} />
+      </>}
       <div className="sec"><span className="lbl">Conferência obrigatória</span>
         <ul className="chk">{its.map((i: any) => {
           const q = quem[i.id];

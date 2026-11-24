@@ -2033,3 +2033,71 @@ test("preços descartados persistem riscados, ficam fora dos cálculos e são re
   assert.equal(s.itens[0].valor_unitario, 307.5);
   assert.match(s.descricao, /Nenhum preço foi descartado/); assert.doesNotMatch(s.descricao, /~~|Preço descartado — item/);
 });
+
+test("processo completo reúne últimas versões e todos os anexos em PDF e Word, sem alterar a tramitação", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br"), outro = await new Cliente().entrar("admin@b.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de equipamentos escolares", tipo: "bens", via: "licitacao", ano: 2040, requisitante: "Educação" });
+  const rota = `/api/processos/${id}`;
+  const usuario = (await q1("select id from usuarios where email='lic@a.gov.br'"))!.id;
+  const { StandardFonts, PDFName, PDFDict, PDFArray } = await import("pdf-lib");
+  const pdfOriginal = await PDFDocument.create(), fonte = await pdfOriginal.embedFont(StandardFonts.Helvetica);
+  for (const texto of ["ORIGINAL_PRIMEIRA_PAGINA", "ORIGINAL_SEGUNDA_PAGINA"]) pdfOriginal.addPage().drawText(texto, { x: 50, y: 700, size: 12, font: fonte });
+  const original = Buffer.from(await pdfOriginal.save());
+  const { Document, Packer, Paragraph } = await import("docx");
+  const word = await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph("APOIO_WORD_INTEGRAL")] }] }));
+  const dados = new FormData(); dados.set("chave_envio", randomUUID()); dados.set("secretaria", "Educação");
+  dados.set("descricao", "# Solicitação\nCORPO_DA_SOLICITACAO\n[[Itens]]\n\n@ Titular");
+  dados.set("itens", JSON.stringify([{ descricao: "Mesa escolar", unidade: "UN", quantidade: 2, valor_unitario: 100 }]));
+  dados.set("topicos_adicionais", JSON.stringify([{ titulo: "Entrega", conteudo: "TOPICO_ADICIONAL_PRESENTE" }]));
+  dados.set("arquivo", new Blob([original]), "solicitacao-original.pdf");
+  dados.append("apoios", new Blob([word]), "apoio.docx");
+  dados.append("apoios", new Blob([original]), "mesmo-original.pdf");
+  assert.equal((await lic.post(`${rota}/solicitacoes`, dados)).status, 201);
+  assert.equal((await lic.put(`${rota}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "PAC_DENTRO_DA_SOLICITACAO" } })).status, 200);
+  for (const [etapa, versao, texto] of [["pac", 1, "# Registro PAC\nPAC_MINUTA_SALVA_DENTRO_DA_SOLICITACAO"], ["dfd", 1, "# DFD\nVERSAO_ANTIGA_NAO_INCLUIR"], ["dfd", 2, "# DFD\nDFD_ATUAL_EDITAVEL"], ["etp", 1, "# ETP\nETP_ATUAL_EDITAVEL"]] as const) await pool.query("insert into minutas (processo_id,etapa,versao,texto,origem,usuario_id) values ($1,$2,$3,$4,'manual',$5)", [id, etapa, versao, texto, usuario]);
+  await pool.query("insert into campos_etapa (processo_id,etapa,valores) values ($1,'precos',$2::jsonb)", [id, JSON.stringify({ metodo: "media", memoria: "MEMORIA_DE_CALCULO_SALVA" })]);
+  const outroProcesso = await lic.post("/api/processos", { objeto: "Dados de outro processo", tipo: "bens", via: "licitacao", ano: 2040 });
+  await pool.query("insert into anexos (processo_id,nome,texto,usuario_id) values ($1,'isolado.txt','NAO_VAZAR_OUTRO_PROCESSO',$2)", [outroProcesso.dados.id, usuario]);
+  await pool.query("insert into anexos (processo_id,nome,texto,usuario_id) values ($1,'anexo-antigo.txt','ANEXO_ANTIGO_EM_TEXTO',$2)", [id, usuario]);
+  const geral = new FormData(); geral.set("arquivo", new Blob(["ANEXO_NOVO_ORIGINAL_PRESERVADO"]), "anexo-novo.txt");
+  assert.equal((await lic.post(`${rota}/anexos`, geral)).status, 201);
+  const anexoSalvo = await q1<{ arquivo: Buffer }>("select arquivo from anexos where processo_id=$1 and nome='anexo-novo.txt'", [id]);
+  assert.equal(anexoSalvo!.arquivo.toString(), "ANEXO_NOVO_ORIGINAL_PRESERVADO");
+  const cotacao = new FormData(); cotacao.set("arquivo", new Blob(["ORCAMENTO_SEM_VINCULO_TAMBEM_INCLUIDO"]), "orcamento-sem-vinculo.txt");
+  assert.equal((await lic.post(`${rota}/orcamentos`, cotacao)).status, 201);
+  const { dados: { id: revisao } } = await lic.post("/api/revisoes", { numero: "Revisão teste", objeto: "Conferência do processo", via: "licitacao", processo_id: id });
+  // A revisão pode ser vinculada por SQL na fixture, sem depender do fluxo próprio de cadastro de arquivos.
+  const rev = revisao ?? (await q1("insert into revisoes (orgao_id,processo_id,numero,objeto,via) values ($1,$2,'Rev. 1','Conferência','licitacao') returning id", [orgA, id]))!.id;
+  await pool.query("update revisoes set processo_id=$1 where id=$2", [id, rev]);
+  await pool.query("insert into revisao_minutas (revisao_id,tipo,texto,origem,autor_id) values ($1,'parecer','# Parecer\nPARECER_DA_REVISAO','manual',$2)", [rev, usuario]);
+  const antes = await q1("select (select count(*) from minutas where processo_id=$1)::int as minutas,(select count(*) from checagens where processo_id=$1)::int as checks,situacao from processos where id=$1", [id]);
+  const pdf = await lic.get(`${rota}/completo.pdf`); assert.equal(pdf.status, 200, JSON.stringify(pdf.dados));
+  const textoPdf = (await extrairTexto("processo.pdf", pdf.dados)).replace(/\s+/g, " ");
+  for (const marca of ["CORPO_DA_SOLICITACAO", "PAC_MINUTA_SALVA_DENTRO_DA_SOLICITACAO", "TOPICO_ADICIONAL_PRESENTE", "PAC_DENTRO_DA_SOLICITACAO", "DFD_ATUAL_EDITAVEL", "ETP_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "APOIO_WORD_INTEGRAL", "ORIGINAL_PRIMEIRA_PAGINA", "ORIGINAL_SEGUNDA_PAGINA", "ANEXO_ANTIGO_EM_TEXTO", "ANEXO_NOVO_ORIGINAL_PRESERVADO", "ORCAMENTO_SEM_VINCULO_TAMBEM_INCLUIDO", "PARECER_DA_REVISAO"]) assert.ok(textoPdf.includes(marca), marca);
+  assert.doesNotMatch(textoPdf, /VERSAO_ANTIGA_NAO_INCLUIR|NAO_VAZAR_OUTRO_PROCESSO/);
+  assert.equal(textoPdf.match(/ORIGINAL_PRIMEIRA_PAGINA/g)?.length, 1);
+  assert.ok(textoPdf.indexOf("CORPO_DA_SOLICITACAO") < textoPdf.indexOf("DFD_ATUAL_EDITAVEL"));
+  assert.ok(textoPdf.indexOf("DFD_ATUAL_EDITAVEL") < textoPdf.indexOf("ETP_ATUAL_EDITAVEL"));
+  const unido = await PDFDocument.load(pdf.dados);
+  const names = unido.catalog.lookup(PDFName.of("Names"), PDFDict).lookup(PDFName.of("EmbeddedFiles"), PDFDict).lookup(PDFName.of("Names"), PDFArray);
+  assert.equal(names.size(), 8, "quatro originais únicos devem acompanhar o PDF");
+  const docx = await lic.get(`${rota}/completo.docx`); assert.equal(docx.status, 200, JSON.stringify(docx.dados));
+  const textoWord = await extrairTexto("processo.docx", docx.dados);
+  assert.match(textoWord, /DFD_ATUAL_EDITAVEL/); assert.match(textoWord, /ETP_ATUAL_EDITAVEL/); assert.match(textoWord, /ANEXO_ANTIGO_EM_TEXTO/);
+  assert.doesNotMatch(textoWord, /VERSAO_ANTIGA_NAO_INCLUIR|NAO_VAZAR_OUTRO_PROCESSO/);
+  const { unzipSync } = await import("fflate"); const zip = unzipSync(docx.dados);
+  assert.equal(Object.keys(zip).filter((n) => n.startsWith("word/media/") && n.endsWith(".jpg")).length, 5, "todas as cinco páginas dos anexos devem aparecer no Word");
+  assert.equal((await outro.get(`${rota}/completo.pdf`)).status, 404);
+  assert.equal((await outro.get(`${rota}/completo.docx`)).status, 404);
+  assert.equal((await lic.get(`${rota}/completo.pdf?timbrado=inexistente`)).status, 404);
+  const depois = await q1("select (select count(*) from minutas where processo_id=$1)::int as minutas,(select count(*) from checagens where processo_id=$1)::int as checks,situacao from processos where id=$1", [id]);
+  assert.deepEqual(depois, antes);
+  if (process.env.LICITA_QA_DIR) {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(`${process.env.LICITA_QA_DIR}/processo-completo-qa.pdf`, pdf.dados);
+    writeFileSync(`${process.env.LICITA_QA_DIR}/processo-completo-qa.docx`, docx.dados);
+  }
+  // Um anexo inválido deve identificar o problema, sem baixar um processo incompleto.
+  await pool.query("insert into orcamentos (processo_id,fornecedor,nome,arquivo,texto,usuario_id) values ($1,'Fonte','danificado.pdf',$2,'',$3)", [id, Buffer.from("%PDF-danificado"), usuario]);
+  const invalido = await lic.get(`${rota}/completo.pdf`); assert.equal(invalido.status, 422); assert.match(invalido.dados.erro, /danificado.pdf/);
+});

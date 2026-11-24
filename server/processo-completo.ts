@@ -1,0 +1,116 @@
+import { createHash } from "node:crypto";
+import { PDFDocument } from "pdf-lib";
+import { Document, Packer, Paragraph, ImageRun, TextRun, PageOrientation, Header, Footer } from "docx";
+import { q, q1 } from "./db.js";
+import { ETAPAS, TIPOS, VIAS, type Valores } from "../shared/etapas.js";
+import { documentoDaSolicitacao, type ItemSolicitacao, type TopicoSolicitacao } from "../shared/solicitacao.js";
+import { documentoDosCampos, camposDo } from "./campos.js";
+import { secaoDaMinuta, type Timbrado } from "./docx.js";
+import { minutaParaPdf } from "./pdf.js";
+import { arquivoDoProcessoParaPdf, paginasDoPdfParaWord } from "./arquivo-processo.js";
+import type { Processo } from "./routes/processos.js";
+
+interface Peca { titulo: string; texto?: string; nome?: string; arquivo?: Buffer; referencias?: string[] }
+const nomeLinha = (s: string) => s.replace(/[\r\n]/g, " ");
+const temCampos = (v?: Valores) => Object.values(v ?? {}).some((x) => Array.isArray(x) ? x.length : String(x ?? "").trim());
+
+/** Só lê registros do processo já autorizado pela rota. Não gera versões nem conclui etapas. */
+export async function pecasDoProcesso(p: Processo, usuario: number) {
+  const [campos, solicitacoes, apoios, orcamentos, minutas, anexos, pesquisas, orgao, autor, revisoes, arquivosRevisao, minutasRevisao] = await Promise.all([
+    camposDo(p.id),
+    q<{ id: number; secretaria: string; referencia: string; descricao: string; nome_arquivo: string | null; arquivo: Buffer | null; itens: ItemSolicitacao[]; topicos_adicionais: TopicoSolicitacao[] }>("select id,secretaria,referencia,descricao,nome_arquivo,arquivo,itens,topicos_adicionais from solicitacoes_processo where processo_id=$1 order by id", [p.id]),
+    q<{ id: number; solicitacao_id: number; nome: string; arquivo: Buffer }>("select a.id,a.solicitacao_id,a.nome,a.arquivo from solicitacao_anexos a join solicitacoes_processo s on s.id=a.solicitacao_id where s.processo_id=$1 order by a.id", [p.id]),
+    q<{ id: number; nome: string; arquivo: Buffer }>("select id,nome,arquivo from orcamentos where processo_id=$1 order by id", [p.id]),
+    q<{ etapa: string; texto: string; versao: number }>("select distinct on (etapa) etapa,texto,versao from minutas where processo_id=$1 order by etapa,versao desc", [p.id]),
+    q<{ nome: string; texto: string; arquivo: Buffer | null }>("select nome,texto,arquivo from anexos where processo_id=$1 order by id", [p.id]),
+    q<{ etapa: string; texto: string; fontes: { titulo: string; url: string }[] }>("select distinct on (etapa) etapa,texto,fontes from pesquisas_minuta where processo_id=$1 order by etapa,id desc", [p.id]),
+    q1<{ nome: string }>("select nome from orgaos where id=$1", [p.orgao_id]),
+    q1<{ nome: string; cargo: string }>("select nome,cargo from usuarios where id=$1 and orgao_id=$2", [usuario, p.orgao_id]),
+    q<{ id: number; numero: string }>("select id,numero from revisoes where processo_id=$1 and orgao_id=$2 order by id", [p.id, p.orgao_id]),
+    q<{ revisao_id: number; nome: string; arquivo: Buffer }>("select a.revisao_id,a.nome,a.arquivo from revisao_arquivos a join revisoes r on r.id=a.revisao_id where r.processo_id=$1 and r.orgao_id=$2 order by r.id,a.id", [p.id, p.orgao_id]),
+    q<{ revisao_id: number; tipo: string; texto: string }>("select distinct on (r.id,m.tipo) r.id as revisao_id,m.tipo,m.texto from revisao_minutas m join revisoes r on r.id=m.revisao_id where r.processo_id=$1 and r.orgao_id=$2 order by r.id,m.tipo,m.id desc", [p.id, p.orgao_id]),
+  ]);
+  const pecas: Peca[] = [], ausentes: string[] = [];
+  const arquivosVistos = new Map<string, Peca>();
+  const incluirArquivo = (nome: string, arquivo: Buffer, referencia: string) => {
+    const hash = createHash("sha256").update(arquivo).digest("hex");
+    const visto = arquivosVistos.get(hash);
+    if (visto) { visto.referencias!.push(`${referencia}: ${nome}`); return; }
+    const peca = { titulo: `${referencia} — ${nomeLinha(nome)}`, nome, arquivo, referencias: [] };
+    arquivosVistos.set(hash, peca); pecas.push(peca);
+  };
+  const incluirOrcamentos = () => {
+    for (const o of orcamentos) incluirArquivo(o.nome, o.arquivo, "Orçamento / comprovante de pesquisa de preços");
+  };
+  for (const e of ETAPAS) {
+    if (e.id === "pac" && solicitacoes.length) continue; // O PAC fica dentro da Solicitação, conforme a organização adotada.
+    if (e.id === "solicitacao") {
+      for (const s of solicitacoes) {
+        const docs = apoios.filter((a) => a.solicitacao_id === s.id);
+        if (s.descricao.trim()) pecas.push({ titulo: `Solicitação — ${s.secretaria}${s.referencia ? ` — ${s.referencia}` : ""}`, texto: documentoDaSolicitacao(s.descricao, s.itens, campos, docs, [...s.topicos_adicionais, ...minutas.filter((m) => m.etapa === "pac").map((m) => ({ titulo: `Registro salvo da verificação no PAC — versão ${m.versao}`, conteudo: m.texto }))]) });
+        if (s.arquivo && s.nome_arquivo) incluirArquivo(s.nome_arquivo, s.arquivo, `Solicitação original — ${s.secretaria}`);
+        for (const a of docs) incluirArquivo(a.nome, a.arquivo, `Documento de apoio — ${s.secretaria}`);
+      }
+      if (!solicitacoes.length) ausentes.push(e.nome);
+    }
+    const minuta = minutas.find((m) => m.etapa === e.id);
+    if (minuta) pecas.push({ titulo: `${e.doc ?? e.nome} — versão ${minuta.versao}`, texto: minuta.texto });
+    else if (e.id !== "solicitacao" && temCampos(campos[e.id])) pecas.push({ titulo: `${e.doc ?? e.nome} — campos salvos`, texto: await documentoDosCampos(p, e, campos, autor ?? { nome: "", cargo: "" }) });
+    else if (e.fase === "interna" && e.id !== "solicitacao") ausentes.push(e.nome);
+    const pesquisa = pesquisas.find((x) => x.etapa === e.id);
+    if (pesquisa) pecas.push({ titulo: `Pesquisa de apoio — ${e.nome}`, texto: `# PESQUISA DE APOIO — ${e.nome}\n\n${pesquisa.texto}\n\n## Fontes\n${pesquisa.fontes.map((f) => `${f.titulo}: ${f.url}`).join("\n")}` });
+    if (e.id === "precos") incluirOrcamentos();
+  }
+  for (const a of anexos) {
+    if (a.arquivo) incluirArquivo(a.nome, a.arquivo, "Anexo do processo");
+    else pecas.push({ titulo: `Anexo do processo — ${nomeLinha(a.nome)} (registro em texto)`, texto: `# ${nomeLinha(a.nome)}\n\n${a.texto}` });
+  }
+  for (const r of revisoes) {
+    for (const a of arquivosRevisao.filter((a) => a.revisao_id === r.id)) incluirArquivo(a.nome, a.arquivo, `Revisão ${r.numero}`);
+    for (const m of minutasRevisao.filter((m) => m.revisao_id === r.id)) pecas.push({ titulo: `Revisão ${r.numero} — ${m.tipo}`, texto: m.texto });
+  }
+  const capa = [`# PROCESSO COMPLETO`, orgao?.nome ?? "", `Protocolo: ${p.protocolo}`, p.numero && `Processo administrativo: ${p.numero}`, p.procedimento && `Procedimento: ${p.procedimento}`, `Objeto: ${p.objeto}`, `Área requisitante: ${[p.requisitante, ...p.areas_adicionais].filter(Boolean).join("; ")}`, `Tipo: ${TIPOS[p.tipo]} · Forma: ${VIAS[p.via]}`, `Situação: ${p.situacao}`, p.obs && `Observações: ${p.obs}`, `Exportado em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`, "Reúne as últimas versões salvas dos documentos e os anexos disponíveis.", ausentes.length && `Etapas internas sem documento salvo ou campos preenchidos: ${ausentes.join("; ")}.`].filter(Boolean).join("\n\n");
+  return { capa, pecas };
+}
+
+export async function montarProcessoCompleto(p: Processo, formato: "pdf" | "docx", usuario: number, timbrado?: Timbrado) {
+  const { capa, pecas } = await pecasDoProcesso(p, usuario);
+  const partes = [];
+  for (const peca of pecas) {
+    const arquivo = peca.arquivo ? await arquivoDoProcessoParaPdf(peca.nome!, peca.arquivo) : await minutaParaPdf(peca.texto!, peca.titulo, timbrado);
+    const pdf = await PDFDocument.load(arquivo);
+    partes.push({ ...peca, pdf, arquivoPdf: arquivo, paginas: pdf.getPageCount() });
+  }
+  if (formato === "pdf") {
+    const pdf = await PDFDocument.create();
+    const capaPdf = await PDFDocument.load(await minutaParaPdf(capa, "Processo completo", timbrado));
+    let tamanhoIndice = 1, indicePdf = capaPdf;
+    for (let tentativa = 0; tentativa < 5; tentativa++) {
+      let pagina = capaPdf.getPageCount() + tamanhoIndice + 1;
+      const linhas = partes.map((x, i) => { const inicio = pagina; pagina += x.paginas; return `${i + 1}. ${x.titulo} — páginas ${inicio} a ${pagina - 1}${x.referencias?.length ? `\nMesmo arquivo também referido em: ${x.referencias.join("; ")}` : ""}`; });
+      indicePdf = await PDFDocument.load(await minutaParaPdf(`# ÍNDICE DO PROCESSO\n\n${linhas.join("\n\n") || "Nenhum documento ou anexo disponível."}`, "Índice do processo"));
+      if (tamanhoIndice === indicePdf.getPageCount()) break;
+      tamanhoIndice = indicePdf.getPageCount();
+    }
+    for (const origem of [capaPdf, indicePdf, ...partes.map((x) => x.pdf)]) for (const pg of await pdf.copyPages(origem, origem.getPageIndices())) pdf.addPage(pg);
+    for (const [i, x] of partes.entries()) if (x.arquivo) await pdf.attach(x.arquivo, `${i + 1}-${x.nome}`, { description: x.titulo });
+    return Buffer.from(await pdf.save());
+  }
+  const indice = `# ÍNDICE DO PROCESSO\n\n${partes.map((x, i) => `${i + 1}. ${x.titulo}${x.referencias?.length ? `\nMesmo arquivo também referido em: ${x.referencias.join("; ")}` : ""}`).join("\n\n") || "Nenhum documento ou anexo disponível."}`;
+  const sections = [secaoDaMinuta(capa, timbrado), secaoDaMinuta(indice)];
+  for (const [i, x] of partes.entries()) {
+    if (!x.arquivo) { sections.push(secaoDaMinuta(x.texto!, timbrado)); continue; }
+    const paginas = await paginasDoPdfParaWord(x.arquivoPdf);
+    for (const [j, imagem] of paginas.entries()) {
+      const largo = imagem.width > imagem.height;
+      const largura = largo ? 1020 : 690, altura = largo ? 640 : 960;
+      const escala = Math.min(largura / imagem.width, altura / imagem.height);
+      sections.push({
+        properties: { page: { size: { width: 11906, height: 16838, orientation: largo ? PageOrientation.LANDSCAPE : PageOrientation.PORTRAIT }, margin: { top: 720, bottom: 720, left: 720, right: 720 } } },
+        headers: undefined, footers: undefined,
+        children: [new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: `${i + 1}. ${x.titulo.slice(0, 120)} — folha ${j + 1}/${paginas.length}`, size: 16 })] }), new Paragraph({ spacing: { after: 0 }, children: [new ImageRun({ type: "jpg", data: imagem.data, transformation: { width: Math.round(imagem.width * escala), height: Math.round(imagem.height * escala) } })] })],
+      });
+    }
+  }
+  return Packer.toBuffer(new Document({ title: `Processo completo — ${p.protocolo}`, creator: "Licita", styles: { default: { document: { run: { font: "Times New Roman", size: 24 } } } }, sections: sections.map((s) => ({ ...s, headers: s.headers ?? { default: new Header({ children: [new Paragraph("")] }) }, footers: s.footers ?? { default: new Footer({ children: [new Paragraph("")] }) } })) }));
+}

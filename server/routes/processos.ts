@@ -1,3 +1,4 @@
+import { montarProcessoCompleto } from "../processo-completo.js";
 import { anexosDaRequisicao, apoiosComTextoLocal, hashDoAnexo, incorporarApoios, nomeAnexoEnviado, parametrosApoios, receberAnexosSolicitacao, referenciasApoios, salvarApoios } from "../anexos-solicitacao.js";
 import { fornecedorNoTexto, limparNomeFornecedor, nomeDoArquivoSemExtensao, nomeFornecedorOrcamento, type OrcamentoLido } from "../../shared/orcamentos.js";
 import { documentoDaSolicitacao, planejamentoDoProcesso, prazoDoProcesso, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao, type TopicoSolicitacao } from "../../shared/solicitacao.js";
@@ -623,6 +624,15 @@ export function rotasProcessos() {
     res.json({ ok: true, etapa_atual: atual(p, c) });
   });
 
+  r.get(["/processos/:id/completo.pdf", "/processos/:id/completo.docx"], async (req, res) => {
+    const p = await processoDo(req);
+    const formato = req.path.endsWith(".pdf") ? "pdf" : "docx";
+    const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
+    const arquivo = await montarProcessoCompleto(p, formato, req.usuario!.id, timbrado);
+    res.setHeader("Cache-Control", "private, no-store");
+    enviarArquivo(res, `processo-completo-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}.${formato}`, arquivo);
+  });
+
   // Monta o documento da etapa só com os campos preenchidos (sem IA) e salva como nova versão.
   r.post("/processos/:id/minutas/:etapa/dos-campos", async (req, res) => {
     const p = await processoDo(req);
@@ -724,7 +734,7 @@ export function rotasProcessos() {
     if (!req.file) throw new ErroHttp(400, "Envie um arquivo.");
     const nome = nomeEnviado(req.file);
     const texto = await extrairTexto(nome, req.file.buffer);
-    const a = await q1("insert into anexos (processo_id, nome, texto, usuario_id) values ($1,$2,$3,$4) returning id", [p.id, nome, texto, req.usuario!.id]);
+    const a = await q1("insert into anexos (processo_id, nome, texto, usuario_id, arquivo) values ($1,$2,$3,$4,$5) returning id", [p.id, nome, texto, req.usuario!.id, req.file.buffer]);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "anexo.incluido", detalhe: { nome } });
     res.status(201).json({ id: a.id, caracteres: texto.length });
   });
