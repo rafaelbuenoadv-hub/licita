@@ -50,6 +50,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [modo, setModo] = useState<Modo | null>(null);
   const [chave, setChave] = useState("");
   const [edicao, setEdicao] = useState<Solicitacao | null>(null);
+  const [solicitacaoAtualizada, setSolicitacaoAtualizada] = useState<number | null>(null);
   const [timbrado, setTimbrado] = useState("");
   const [valores, setValores] = useState<Record<string, string>>({});
   const [cadastro, setCadastro] = useState<{ area: string; titular: Titular | null }>();
@@ -65,7 +66,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [apoios, setApoios] = useState<File[]>([]);
   const [progresso, setProgresso] = useState("");
   const [cotando, setCotando] = useState(false);
-  const [ocupado, setOcupado] = useState<"salvar" | "ia" | null>(null);
+  const [ocupado, setOcupado] = useState<"salvar" | "mesclar" | "ia" | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; erro?: boolean } | null>(null);
   const painelPrevia = useRef<HTMLDetailsElement>(null);
   const editorPrevia = useRef<HTMLTextAreaElement>(null);
@@ -209,15 +210,17 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const salvar = async (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     if (cotando) return;
-    setOcupado("salvar");
+    const mesclar = (ev.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "mesclar";
+    setOcupado(mesclar ? "mesclar" : "salvar");
     setAviso(null);
     try {
       if (modo === "anexo" && !arquivo) throw new Error("Selecione o documento da solicitação.");
       if (lidas.erro) throw new Error(lidas.erro);
-      const texto = previa;
+      const texto = documentoDaSolicitacao(previa, itens);
       const dados = montarDados(texto);
       await enviarApoios(dados);
       setProgresso("Salvando a solicitação…");
+      let idSalva = edicao?.id;
       if (edicao) {
         dados.set("anterior", edicao.descricao);
         dados.set("itens_anteriores", JSON.stringify(edicao.itens));
@@ -225,11 +228,14 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       }
       else {
         dados.set("chave_envio", chave);
-        await api.post(caminho, dados);
+        const r = await api.post<{ id: number }>(caminho, dados);
+        idSalva = r.id;
       }
       fechar();
       await recarregar();
-      setAviso({ texto: edicao ? "Solicitação atualizada." : "Solicitação adicionada ao processo." });
+      setSolicitacaoAtualizada(mesclar ? idSalva ?? null : null);
+      setAviso({ texto: mesclar ? "Solicitação mesclada e atualizada com suas edições e os itens e orçamentos atuais. Confira o documento abaixo."
+        : edicao ? "Solicitação atualizada." : "Solicitação adicionada ao processo." });
     } catch (erro) {
       setAviso({ texto: erro instanceof Error ? erro.message : "Não foi possível salvar a solicitação.", erro: true });
     } finally {
@@ -348,6 +354,12 @@ export function Solicitacoes({ processo, recarregar }: Props) {
               <span className="small muted">A IA usa os dados preenchidos, os anexos desta solicitação e os orçamentos vinculados aos itens. Essas fontes são enviadas ao provedor de IA para gerar o rascunho.</span>
             </>
           </div>}
+          {descricao.trim() && <div className="stack">
+            <div><button type="submit" name="acao" value="mesclar" className="btn pri" disabled={!!ocupado || cotando}>
+              {ocupado === "mesclar" ? "Mesclando e atualizando…" : "Mesclar e atualizar solicitação"}
+            </button></div>
+            <span className="small muted">Reúne o texto editado, os campos preenchidos, os itens e os orçamentos atuais, salva a solicitação e abre o documento atualizado.</span>
+          </div>}
           {descricao.trim() && <details ref={painelPrevia} className="panel box">
             <summary>Prévia da solicitação</summary>
             <div className="pad stack">
@@ -413,7 +425,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                 <td>{s.referencia && <strong>{s.referencia}</strong>}
                   {s.objeto && <div>{s.objeto}</div>}
                   {s.itens?.length > 0 && <div className="small muted">{s.itens.length} {s.itens.length === 1 ? "item" : "itens"}{totalDosItens(s.itens) != null ? ` · ${s.itens.some((i) => totalDoItem(i) == null) ? "subtotal dos itens com valor" : "total estimado"} ${brl(totalDosItens(s.itens))}` : ""}</div>}
-                  {s.descricao && <details><summary>Ver solicitação</summary>
+                  {s.descricao && <details open={solicitacaoAtualizada === s.id || undefined}><summary>Ver solicitação</summary>
                     {podeAdicionar && <div className="tools">
                       <button type="button" className="btn sm" disabled={!!ocupado || cotando || !!modo} onClick={() => editar(s, true)}>Editar manualmente</button>
                     </div>}
