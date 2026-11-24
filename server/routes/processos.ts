@@ -477,7 +477,10 @@ export function rotasProcessos() {
     );
     if (!s?.descricao) throw new ErroHttp(404, "Texto da solicitação não encontrado.");
     const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
-    const arquivo = await exportar(documentoDaSolicitacao(s.descricao, s.itens, await camposDo(p.id)), MODELO_SOLICITACAO.doc, timbrado);
+    const apoios = await q<AnexoSolicitacao>("select id,nome,arquivo from solicitacao_anexos where solicitacao_id=$1 order by id", [sid]);
+    const texto = documentoDaSolicitacao(s.descricao, s.itens, await camposDo(p.id), apoios);
+    const base = await exportar(texto, MODELO_SOLICITACAO.doc, timbrado);
+    const arquivo = formato === "pdf" ? await solicitacaoCompleta(base, ordemDosAnexos([], [], apoios)) : base;
     enviarArquivo(res, `solicitacao-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.${formato}`, arquivo);
   });
 
@@ -491,8 +494,9 @@ export function rotasProcessos() {
     const ids = [...new Set((s.itens ?? []).flatMap((i) => (i.cotacoes ?? []).map((c) => c.orcamento_id)).filter((x): x is number => x != null))];
     const arquivos = ids.length ? await q<AnexoSolicitacao>("select id, nome, arquivo from orcamentos where processo_id=$1 and id = any($2)", [p.id, ids]) : [];
     const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
-    const documento = await minutaParaPdf(documentoDaSolicitacao(s.descricao, s.itens, await camposDo(p.id)), MODELO_SOLICITACAO.doc, timbrado);
-    const arquivo = await solicitacaoCompleta(documento, ordemDosAnexos(s.itens ?? [], arquivos));
+    const apoios = await q<AnexoSolicitacao>("select id,nome,arquivo from solicitacao_anexos where solicitacao_id=$1 order by id", [sid]);
+    const documento = await minutaParaPdf(documentoDaSolicitacao(s.descricao, s.itens, await camposDo(p.id), apoios), MODELO_SOLICITACAO.doc, timbrado);
+    const arquivo = await solicitacaoCompleta(documento, ordemDosAnexos(s.itens ?? [], arquivos, apoios));
     enviarArquivo(res, `solicitacao-completa-${p.protocolo.replace(/[^0-9a-z-]/gi, "-")}-${sid}.pdf`, arquivo);
   });
 

@@ -2,14 +2,15 @@
 // dos comprovantes das consultas ao PNCP (na ordem em que aparecem nos itens).
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import sharp from "sharp";
+import { extrairTexto } from "./extrair.js";
 import { tipoPeloConteudo } from "./arquivo-para-ia.js";
 import type { ItemSolicitacao } from "../shared/solicitacao.js";
 
 export interface AnexoSolicitacao { id: number; nome: string; arquivo: Buffer }
-interface Entrada { codigo: string; grupo: "orcamento" | "pncp"; fornecedor: string; nome: string; arquivo: Buffer }
+interface Entrada { codigo: string; grupo: "apoio" | "orcamento" | "pncp"; fornecedor: string; nome: string; arquivo: Buffer }
 
 /** Orçamentos vinculados às cotações dos itens: primeiro os de fornecedores e outras fontes, depois os do PNCP. */
-export function ordemDosAnexos(itens: ItemSolicitacao[], arquivos: AnexoSolicitacao[]) {
+export function ordemDosAnexos(itens: ItemSolicitacao[], arquivos: AnexoSolicitacao[], apoios: AnexoSolicitacao[] = []) {
   const porId = new Map(arquivos.map((a) => [a.id, a]));
   const vistos = new Set<number>();
   const orcamentos: Omit<Entrada, "codigo">[] = [], pncp: Omit<Entrada, "codigo">[] = [];
@@ -20,7 +21,7 @@ export function ordemDosAnexos(itens: ItemSolicitacao[], arquivos: AnexoSolicita
     vistos.add(c.orcamento_id);
     (c.fonte === "pncp" ? pncp : orcamentos).push({ grupo: c.fonte === "pncp" ? "pncp" : "orcamento", fornecedor: c.fornecedor, nome: a.nome, arquivo: a.arquivo });
   }
-  return [...orcamentos.map((a, i) => ({ ...a, codigo: `A${i + 1}` })), ...pncp.map((a, i) => ({ ...a, codigo: `B${i + 1}` }))] as Entrada[];
+  return [...apoios.map((a, i) => ({ ...a, grupo: "apoio" as const, fornecedor: a.nome, codigo: `D${i + 1}` })), ...orcamentos.map((a, i) => ({ ...a, codigo: `A${i + 1}` })), ...pncp.map((a, i) => ({ ...a, codigo: `B${i + 1}` }))] as Entrada[];
 }
 
 // As fontes padrão do PDF só escrevem WinAnsi: troca o que não cabe nela.
@@ -57,13 +58,13 @@ export async function solicitacaoCompleta(documento: Buffer, entradas: Entrada[]
   if (!entradas.length) return Buffer.from(await pdf.save());
   const normal = await pdf.embedFont(StandardFonts.Helvetica), negrito = await pdf.embedFont(StandardFonts.HelveticaBold);
   const A4: [number, number] = [595.28, 841.89];
-  const titulo = (e: Entrada) => `Anexo ${e.codigo} — ${e.grupo === "pncp" ? "Consulta ao PNCP" : "Orçamento"}: ${e.fornecedor || e.nome}`;
+  const titulo = (e: Entrada) => `Anexo ${e.codigo} — ${e.grupo === "apoio" ? "Documento de apoio" : e.grupo === "pncp" ? "Consulta ao PNCP" : "Orçamento"}: ${e.fornecedor || e.nome}`;
 
   // Índice dos anexos.
   let pagina = pdf.addPage(A4);
   let y = A4[1] - 70;
   pagina.drawText(seguro("ANEXOS DA SOLICITAÇÃO"), { x: 60, y, size: 15, font: negrito }); y -= 30;
-  for (const [grupo, nome] of [["orcamento", "A — Orçamentos de fornecedores e outras fontes"], ["pncp", "B — Consultas ao PNCP"]] as const) {
+  for (const [grupo, nome] of [["apoio", "D — Documentos de apoio"], ["orcamento", "A — Orçamentos de fornecedores e outras fontes"], ["pncp", "B — Consultas ao PNCP"]] as const) {
     const lista = entradas.filter((e) => e.grupo === grupo);
     if (!lista.length) continue;
     y = escrever(pagina, negrito, nome, 60, y, 11, A4[0] - 120) - 4;
@@ -76,11 +77,13 @@ export async function solicitacaoCompleta(documento: Buffer, entradas: Entrada[]
 
   for (const e of entradas) {
     const tipo = tipoPeloConteudo(e.arquivo);
+    // O original acompanha o PDF, inclusive quando seu formato não permite copiar as páginas.
+    if (e.grupo === "apoio") await pdf.attach(e.arquivo, `${e.codigo}-${e.nome}`, { description: `Documento de apoio original: ${e.nome}` });
     try {
       if (tipo === "pdf") {
         const origem = await PDFDocument.load(e.arquivo, { ignoreEncryption: true });
         const paginas = await pdf.copyPages(origem, origem.getPageIndices());
-        paginas.forEach((pg, i) => { pdf.addPage(pg); if (i === 0) rotular(pg, negrito, titulo(e)); });
+        paginas.forEach((pg, i) => { pdf.addPage(pg); if (i === 0 && e.grupo !== "apoio") rotular(pg, negrito, titulo(e)); });
         continue;
       }
       if (tipo !== "outro") {
@@ -94,10 +97,27 @@ export async function solicitacaoCompleta(documento: Buffer, entradas: Entrada[]
         continue;
       }
     } catch { /* cai no aviso abaixo */ }
+    if (e.grupo === "apoio" && /\.(docx|xlsx|txt|md|csv)$/i.test(e.nome)) {
+      try {
+        const texto = await extrairTexto(e.nome, e.arquivo);
+        let pg = pdf.addPage(A4), yTexto = A4[1] - 65;
+        rotular(pg, negrito, titulo(e));
+        yTexto = escrever(pg, normal, "Versão em texto. O arquivo original está incluído nos anexos deste PDF.", 60, yTexto, 10, A4[0] - 120) - 15;
+        for (const linha of texto.split("\n")) {
+          const linhas = quebrar(linha, normal, 10, A4[0] - 120);
+          if (!linhas.length) yTexto -= 7;
+          for (const trecho of linhas) {
+            if (yTexto < 55) { pg = pdf.addPage(A4); rotular(pg, negrito, titulo(e)); yTexto = A4[1] - 65; }
+            pg.drawText(trecho, { x: 60, y: yTexto, size: 10, font: normal }); yTexto -= 14;
+          }
+        }
+        continue;
+      } catch { /* O original continua incorporado e será identificado na página de aviso. */ }
+    }
     // Word, planilha, texto ou arquivo ilegível: página de aviso, com o arquivo disponível no sistema.
     const pg = pdf.addPage(A4);
     rotular(pg, negrito, titulo(e));
-    escrever(pg, normal, `O arquivo "${e.nome}" não pode ser incorporado a este PDF (formato não suportado ou arquivo protegido). O original está guardado no processo, junto aos orçamentos.`, 60, A4[1] - 80, 11, A4[0] - 120);
+    escrever(pg, normal, e.grupo === "apoio" ? `Não foi possível exibir as páginas de "${e.nome}". O arquivo original está incorporado nos anexos deste PDF e permanece disponível nos documentos de apoio da solicitação.` : `O arquivo "${e.nome}" não pode ser incorporado a este PDF (formato não suportado ou arquivo protegido). O original está guardado no processo, junto aos orçamentos.`, 60, A4[1] - 80, 11, A4[0] - 120);
   }
   return Buffer.from(await pdf.save());
 }

@@ -1868,3 +1868,60 @@ test("verificação do PAC integra a solicitação e os arquivos exportados com 
   assert.equal(det.campos.pac.consta, "nao");
   assert.deepEqual(det.trilha.etapas.slice(0, 2).map((e: any) => e.id), ["pac", "solicitacao"]);
 });
+
+test("documentos de apoio acompanham o PDF da solicitação e o PDF completo preserva os originais", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de mesas", tipo: "bens", via: "licitacao", ano: 2037 });
+  const processo = `/api/processos/${id}`;
+  const { StandardFonts, PDFName, PDFDict, PDFArray } = await import("pdf-lib");
+  const fazerPdf = async (...textos: string[]) => {
+    const pdf = await PDFDocument.create(), fonte = await pdf.embedFont(StandardFonts.Helvetica);
+    for (const texto of textos) pdf.addPage().drawText(texto, { x: 55, y: 700, font: fonte, size: 12 });
+    return Buffer.from(await pdf.save());
+  };
+  const enviarOrcamento = async (nome: string, arquivo: Buffer) => {
+    const fd = new FormData(); fd.append("arquivo", new Blob([arquivo]), nome);
+    const r = await lic.post(`${processo}/orcamentos?origem=solicitacao`, fd);
+    assert.equal(r.status, 201); return r.dados.ids[0] as number;
+  };
+  const proposta = await enviarOrcamento("proposta.pdf", await fazerPdf("PROPOSTA_FORNECEDOR_INCLUIDA"));
+  const pncp = await enviarOrcamento("consulta-pncp.pdf", await fazerPdf("CONSULTA_PNCP_INCLUIDA"));
+  const { Document, Packer, Paragraph } = await import("docx");
+  const word = await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph("APOIO_EM_WORD_INCLUIDO")] }] }));
+  const sharp = (await import("sharp")).default;
+  const imagem = await sharp({ create: { width: 300, height: 200, channels: 3, background: "#cceedd" } }).png().toBuffer();
+  const dados = new FormData();
+  dados.set("chave_envio", randomUUID()); dados.set("secretaria", "Educação"); dados.set("descricao", "# SOLICITAÇÃO\nPedido com documentos de apoio.\n[[Itens]]");
+  dados.set("itens", JSON.stringify([{ descricao: "Mesa", unidade: "UN", quantidade: 2, cotacoes: [
+    { orcamento_id: proposta, fornecedor: "Loja A", valor_unitario: 100 },
+    { orcamento_id: pncp, fornecedor: "Município B", valor_unitario: 120, fonte: "pncp" },
+  ] }]));
+  for (const [nome, arquivo] of [
+    ["levantamento.pdf", await fazerPdf("APOIO_PDF_PAGINA_UM", "APOIO_PDF_PAGINA_DOIS")],
+    ["foto.png", imagem], ["memorial.docx", word], ["nota.txt", Buffer.from("APOIO_TEXTO_INCLUIDO")],
+    ["planilha.csv", Buffer.from("Codigo;Descricao\n123;APOIO_PLANILHA_INCLUIDO")],
+  ] as const) dados.append("apoios", new Blob([arquivo]), nome);
+  const criada = await lic.post(`${processo}/solicitacoes`, dados);
+  assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  const outra = new FormData(); outra.set("chave_envio", randomUUID()); outra.set("secretaria", "Saúde"); outra.set("descricao", "Pedido de outra secretaria.");
+  outra.append("apoios", new Blob(["APOIO_EXCLUSIVO_OUTRA_SECRETARIA"]), "outra-secretaria.txt");
+  assert.equal((await lic.post(`${processo}/solicitacoes`, outra)).status, 201);
+  const rota = `${processo}/solicitacoes/${criada.dados.id}`;
+  const textoWord = await extrairTexto("pedido.docx", (await lic.get(`${rota}/docx`)).dados);
+  assert.match(textoWord, /Documentos de apoio anexados/);
+  for (const nome of ["levantamento.pdf", "foto.png", "memorial.docx", "nota.txt", "planilha.csv"]) assert.ok(textoWord.includes(nome));
+  const simples = await lic.get(`${rota}/pdf`), completo = await lic.get(`${rota}/pdf-completo`);
+  assert.equal(simples.status, 200); assert.equal(completo.status, 200);
+  for (const arquivo of [simples.dados, completo.dados]) {
+    const texto = await extrairTexto("pedido.pdf", arquivo);
+    for (const conteudo of ["APOIO_PDF_PAGINA_UM", "APOIO_PDF_PAGINA_DOIS", "APOIO_EM_WORD_INCLUIDO", "APOIO_TEXTO_INCLUIDO", "APOIO_PLANILHA_INCLUIDO"]) assert.ok(texto.includes(conteudo), conteudo);
+    assert.doesNotMatch(texto, /APOIO_EXCLUSIVO_OUTRA_SECRETARIA/);
+    const pdf = await PDFDocument.load(arquivo);
+    const nomes = pdf.catalog.lookup(PDFName.of("Names"), PDFDict).lookup(PDFName.of("EmbeddedFiles"), PDFDict).lookup(PDFName.of("Names"), PDFArray);
+    assert.equal(nomes.size(), 10); // Cinco arquivos de apoio originais incorporados.
+  }
+  assert.equal((await PDFDocument.load(completo.dados)).getPageCount(), (await PDFDocument.load(simples.dados)).getPageCount() + 2);
+  const textoCompleto = await extrairTexto("pedido.pdf", completo.dados);
+  assert.ok(textoCompleto.indexOf("APOIO_PDF_PAGINA_UM") < textoCompleto.indexOf("PROPOSTA_FORNECEDOR_INCLUIDA"));
+  assert.ok(textoCompleto.indexOf("PROPOSTA_FORNECEDOR_INCLUIDA") < textoCompleto.indexOf("CONSULTA_PNCP_INCLUIDA"));
+});

@@ -266,9 +266,30 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[], modo: bool
 }
 
 /** Renderiza os preços cotados no quadro da prévia e dos arquivos exportados. */
-export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[], campos?: Record<string, Record<string, unknown>>) {
+export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[], campos?: Record<string, Record<string, unknown>>, apoios?: { nome: string }[]) {
   const documento = itens.length ? inserirItens(texto, itens, true) : texto;
-  return campos ? inserirVerificacaoPac(documento, campos) : documento;
+  const comPac = campos ? inserirVerificacaoPac(documento, campos) : documento;
+  return apoios ? inserirDocumentosDeApoio(comPac, apoios) : comPac;
+}
+
+/** Relação dos documentos de apoio que acompanham a solicitação exportada. */
+export function inserirDocumentosDeApoio(texto: string, apoios: { nome: string }[]) {
+  if (!texto.trim()) return texto;
+  const titulo = "## Documentos de apoio anexados";
+  const nomes = apoios.map((a) => a.nome.replace(/[\r\n|]/g, " ").replace(/\[\[/g, "[").replace(/\]\]/g, "]"));
+  const secao = nomes.length ? [titulo, "", ...nomes.map((nome, i) => `D${i + 1}. ${nome}`), "", "Os documentos de apoio acompanham a Solicitação no PDF. Os arquivos originais também ficam disponíveis nos anexos do processo."].join("\n") : "";
+  const marco = /^[ \t]*(?:@ |\[\[Local e data\]\][ \t]*$|(?:[^\n]*,[ \t]*)?\d{1,2} de [\p{L}]+ de \d{4}\.?[ \t]*$)/imu;
+  const inicio = texto.indexOf(titulo);
+  if (inicio >= 0) {
+    const depoisTitulo = inicio + titulo.length;
+    const resto = texto.slice(depoisTitulo);
+    const limites = [resto.search(/^#{1,2} /m), resto.search(marco)].filter((i) => i >= 0);
+    const fim = limites.length ? depoisTitulo + Math.min(...limites) : texto.length;
+    return [texto.slice(0, inicio).trimEnd(), secao, texto.slice(fim).trimStart()].filter(Boolean).join("\n\n");
+  }
+  if (!secao) return texto;
+  const fim = texto.search(marco);
+  return [(fim < 0 ? texto : texto.slice(0, fim)).trimEnd(), secao, fim < 0 ? "" : texto.slice(fim).trimStart()].filter(Boolean).join("\n\n");
 }
 
 /** Registro completo do PAC, reutilizado no corpo da Solicitação sem alterar a etapa no sistema. */
