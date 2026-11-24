@@ -3,7 +3,7 @@ import { api, brl } from "../api";
 import { useEu } from "../main";
 import { Folha } from "../comp/Folha";
 import { aplicarPendencias, pendencias } from "../../../shared/etapas";
-import { camposDaSolicitacao, planejamentoDoProcesso, prazoDoProcesso, documentoDaSolicitacao, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { camposDaSolicitacao, planejamentoDoProcesso, prazoDoProcesso, documentoDaSolicitacao, inserirItens, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao, type TopicoSolicitacao } from "../../../shared/solicitacao";
 
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
@@ -19,6 +19,7 @@ interface Solicitacao {
   justificativa: string;
   itens: ItemSolicitacao[];
   orcamentos_ocultos?: number[];
+  topicos_adicionais?: TopicoSolicitacao[];
 }
 interface Props {
   processo: {
@@ -65,6 +66,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [linhas, setLinhas] = useState<LinhaItem[]>([linhaVazia()]);
   const [orcamentosOcultos, setOrcamentosOcultos] = useState<number[]>([]);
   const [arquivo, setArquivo] = useState<File | null>(null);
+  const [topicos, setTopicos] = useState<TopicoSolicitacao[]>([]);
   const [apoios, setApoios] = useState<File[]>([]);
   const [progresso, setProgresso] = useState("");
   const [cotando, setCotando] = useState(false);
@@ -137,6 +139,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       setJustificativa(ja("dfd", "justificativa") || ja("pac", "justificativa_inclusao"));
       setLinhas([linhaVazia()]);
       setOrcamentosOcultos([]);
+      setTopicos([]);
       trocarTexto(novo === "manual" ? modelo : "");
       setArquivo(null);
       setApoios([]);
@@ -155,6 +158,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setJustificativa(s.justificativa);
     setLinhas(linhasDosItens(s.itens, processo.orcamentos));
     setOrcamentosOcultos(s.orcamentos_ocultos ?? []);
+    setTopicos(s.topicos_adicionais ?? []);
     setArquivo(null);
     setApoios([]);
     const texto = inserirItens(s.descricao, s.itens, "marcador");
@@ -208,6 +212,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     dados.set("objeto_solicitacao", objeto);
     dados.set("justificativa", justificativa);
     dados.set("itens", JSON.stringify(lidas.itens));
+    dados.set("topicos_adicionais", JSON.stringify(topicos));
     dados.set("orcamentos_ocultos", JSON.stringify(orcamentosOcultos));
     if (arquivo) dados.set("arquivo", arquivo);
     return dados;
@@ -229,6 +234,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       let idSalva = edicao?.id;
       if (edicao) {
         dados.set("anterior", edicao.descricao);
+        dados.set("topicos_anteriores", JSON.stringify(edicao.topicos_adicionais ?? []));
         dados.set("itens_anteriores", JSON.stringify(edicao.itens));
         dados.set("orcamentos_ocultos_anteriores", JSON.stringify(edicao.orcamentos_ocultos ?? []));
         await api.put(`${caminho}/${edicao.id}`, dados);
@@ -318,6 +324,24 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                 placeholder={modo === "manual" ? "Informe a necessidade, as quantidades e os prazos que já conhece." : undefined}
                 onChange={(e) => trocarTexto(e.target.value)} />
             </label>
+            <fieldset className="wide itens-sol stack">
+              <legend>Tópicos adicionais (opcional)</legend>
+              <p className="small muted">Inclua informações específicas quando precisar. Campos em branco não entram no documento.</p>
+              {topicos.map((topico, i) => <div className="panel box pad stack" key={i}>
+                <label>Título do tópico {i + 1}
+                  <input maxLength={200} value={topico.titulo} disabled={!!ocupado || cotando} placeholder="Ex.: Condições de entrega"
+                    onChange={(e) => setTopicos(topicos.map((t, k) => k === i ? { ...t, titulo: e.target.value } : t))} />
+                </label>
+                <label>Conteúdo do tópico {i + 1}
+                  <textarea rows={4} maxLength={8000} value={topico.conteudo} disabled={!!ocupado || cotando} placeholder="Escreva as informações que devem constar na Solicitação."
+                    onChange={(e) => setTopicos(topicos.map((t, k) => k === i ? { ...t, conteudo: e.target.value } : t))} />
+                </label>
+                <div><button className="lnk" type="button" disabled={!!ocupado || cotando}
+                  onClick={() => setTopicos(topicos.filter((_, k) => k !== i))}>Remover tópico {i + 1}</button></div>
+              </div>)}
+              <div><button className="btn" type="button" disabled={!!ocupado || cotando || topicos.length >= 20}
+                onClick={() => setTopicos([...topicos, { titulo: "", conteudo: "" }])}>Adicionar tópico</button></div>
+            </fieldset>
             <fieldset className="wide itens-sol">
               <legend>Documentos de apoio da solicitação</legend>
               <div className="tools">
@@ -392,7 +416,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                 </>}
               <p className="small muted">Use {edicao ? "Salvar alterações" : "Salvar solicitação"} para gravar as alterações.</p>
             </div>
-            <Folha texto={documentoDaSolicitacao(previa, itens, processo.campos, documentosDeApoio)} />
+            <Folha texto={documentoDaSolicitacao(previa, itens, processo.campos, documentosDeApoio, topicos)} />
           </details>}
           {faltantes.length > 0 && !editandoPrevia && <div className="pend">
             <div className="row"><h4>Campos pendentes</h4>
@@ -443,7 +467,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                     {podeAdicionar && <div className="tools">
                       <button type="button" className="btn sm" disabled={!!ocupado || cotando || !!modo} onClick={() => editar(s, true)}>Editar manualmente</button>
                     </div>}
-                    <Folha texto={documentoDaSolicitacao(s.descricao, s.itens, processo.campos, s.apoios)} />
+                    <Folha texto={documentoDaSolicitacao(s.descricao, s.itens, processo.campos, s.apoios, s.topicos_adicionais ?? [])} />
                   </details>}
                   {(comprovantes.size > 0 || fontes.size > 0) && <details><summary>Comprovantes e fontes das cotações</summary>
                     <ul>

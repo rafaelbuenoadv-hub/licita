@@ -294,6 +294,7 @@ alter table solicitacoes_processo add column if not exists justificativa text no
 alter table solicitacoes_processo add column if not exists itens jsonb not null default '[]';
 -- Propostas retiradas desta solicitação continuam disponíveis no processo e podem ser restauradas.
 alter table solicitacoes_processo add column if not exists orcamentos_ocultos jsonb not null default '[]';
+alter table solicitacoes_processo add column if not exists topicos_adicionais jsonb not null default '[]';
 
 create table if not exists solicitacao_anexos (
   id serial primary key,

@@ -266,10 +266,38 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[], modo: bool
 }
 
 /** Renderiza os preços cotados no quadro da prévia e dos arquivos exportados. */
-export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[], campos?: Record<string, Record<string, unknown>>, apoios?: { nome: string }[]) {
+export function documentoDaSolicitacao(texto: string, itens: ItemSolicitacao[], campos?: Record<string, Record<string, unknown>>, apoios?: { nome: string }[], topicos?: TopicoSolicitacao[]) {
   const documento = itens.length ? inserirItens(texto, itens, true) : texto;
   const comPac = campos ? inserirVerificacaoPac(documento, campos) : documento;
-  return apoios ? inserirDocumentosDeApoio(comPac, apoios) : comPac;
+  const comApoios = apoios ? inserirDocumentosDeApoio(comPac, apoios) : comPac;
+  return topicos ? inserirTopicosAdicionais(comApoios, topicos) : comApoios;
+}
+
+export interface TopicoSolicitacao { titulo: string; conteudo: string }
+
+/** Seção opcional para a prévia e a exportação; os campos são salvos separados do texto-base. */
+export function inserirTopicosAdicionais(texto: string, topicos: TopicoSolicitacao[]) {
+  const titulo = "## Tópicos adicionais";
+  const secoes = topicos.filter((t) => t.titulo.trim() || t.conteudo.trim()).map((t) => {
+    const nome = t.titulo.trim().replace(/[\r\n]/g, " ").replace(/\*\*/g, "") || "Informações complementares";
+    // Os campos são texto livre dentro desta seção, sem criar outras seções ou assinaturas.
+    const conteudo = t.conteudo.trim().replace(/^#{1,6}[ \t]+(.+)$/gm, "**$1**").replace(/^@[ \t]+/gm, "");
+    return [`**${nome}**`, conteudo].filter(Boolean).join("\n\n");
+  });
+  const secao = secoes.length ? [titulo, ...secoes].join("\n\n") : "";
+  const data = /(?:^|\n)(?:[^\n]*,[ \t]*)?\d{1,2} de [\p{L}]+ de \d{4}\.?[ \t]*\s*$/iu;
+  const assinatura = /^[ \t]*@ /m;
+  const placeholderData = /^[ \t]*\[\[(?:PREENCHER:[ \t]*)?Local e data\]\][ \t]*$/im;
+  const rodape = (trecho: string) => {
+    const a = trecho.search(assinatura), d = trecho.search(placeholderData);
+    const fim = Math.min(a < 0 ? trecho.length : a, d < 0 ? trecho.length : d);
+    const antes = trecho.slice(0, fim);
+    const dia = antes.search(data);
+    return dia < 0 ? fim : dia;
+  };
+  if (!secao) return texto;
+  const fim = rodape(texto);
+  return [texto.slice(0, fim).trimEnd(), secao, texto.slice(fim).trimStart()].filter(Boolean).join("\n\n");
 }
 
 /** Relação dos documentos de apoio que acompanham a solicitação exportada. */

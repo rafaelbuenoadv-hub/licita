@@ -1925,3 +1925,54 @@ test("documentos de apoio acompanham o PDF da solicitação e o PDF completo pre
   assert.ok(textoCompleto.indexOf("APOIO_PDF_PAGINA_UM") < textoCompleto.indexOf("PROPOSTA_FORNECEDOR_INCLUIDA"));
   assert.ok(textoCompleto.indexOf("PROPOSTA_FORNECEDOR_INCLUIDA") < textoCompleto.indexOf("CONSULTA_PNCP_INCLUIDA"));
 });
+
+test("tópicos adicionais são opcionais, editáveis e integram Word e PDFs da solicitação", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const outroOrgao = await new Cliente().entrar("admin@b.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de mesas para escolas", tipo: "bens", via: "licitacao", ano: 2038 });
+  const processo = `/api/processos/${id}`, rota = `${processo}/solicitacoes`;
+  const criar = (topicos?: unknown) => lic.post(rota, { chave_envio: randomUUID(), secretaria: "Educação", descricao: "# SOLICITAÇÃO\nTexto da secretaria.\n\nIbaiti, 24 de novembro de 2026.\n\n@ Titular", ...(topicos === undefined ? {} : { topicos_adicionais: topicos }) });
+  const ler = async (id: number) => (await lic.get(processo)).dados.solicitacoes.find((s: any) => s.id === id);
+  const semTopicos = await criar();
+  assert.equal(semTopicos.status, 201);
+  assert.deepEqual((await ler(semTopicos.dados.id)).topicos_adicionais, []);
+  assert.doesNotMatch((await ler(semTopicos.dados.id)).descricao, /Tópicos adicionais/);
+  const vazios = await criar(JSON.stringify([{ titulo: " ", conteudo: " " }]));
+  assert.equal(vazios.status, 201);
+  assert.deepEqual((await ler(vazios.dados.id)).topicos_adicionais, []);
+  assert.equal((await criar("json inválido")).status, 400);
+  assert.equal((await criar([{ titulo: "Título", conteudo: "a".repeat(8001) }])).status, 400);
+  const topicos = [{ titulo: "Local de entrega", conteudo: "Entregar no almoxarifado municipal." }, { titulo: "Observações", conteudo: "Agendar com a unidade." }];
+  const criada = await criar(JSON.stringify(topicos));
+  assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  const url = `${rota}/${criada.dados.id}`;
+  let s = await ler(criada.dados.id);
+  assert.deepEqual(s.topicos_adicionais, topicos);
+  assert.doesNotMatch(s.descricao, /Tópicos adicionais/);
+  for (const formato of ["docx", "pdf", "pdf-completo"]) {
+    const arquivo = await lic.get(`${url}/${formato}`);
+    assert.equal(arquivo.status, 200);
+    const texto = await extrairTexto(`solicitacao.${formato === "docx" ? "docx" : "pdf"}`, arquivo.dados);
+    assert.match(texto, /Local de entrega/); assert.match(texto, /almoxarifado municipal/); assert.match(texto, /Agendar com a unidade/);
+    assert.equal((await outroOrgao.get(`${url}/${formato}`)).status, 404);
+  }
+  const antigos = s;
+  const atualizados = [{ titulo: "Prazo de entrega", conteudo: "Entregar em 20 dias úteis." }];
+  const alterar = (s: any, topicos: unknown) => lic.put(url, { anterior: s.descricao, descricao: s.descricao, topicos_anteriores: s.topicos_adicionais, topicos_adicionais: topicos });
+  assert.equal((await alterar(s, JSON.stringify(atualizados))).status, 200);
+  s = await ler(criada.dados.id);
+  assert.deepEqual(s.topicos_adicionais, atualizados);
+  const atualizadoWord = await extrairTexto("solicitacao.docx", (await lic.get(`${url}/docx`)).dados);
+  assert.match(atualizadoWord, /20 dias úteis/); assert.doesNotMatch(atualizadoWord, /almoxarifado municipal|Agendar com a unidade/);
+  assert.equal((await alterar(antigos, [])).status, 409);
+  // Clientes anteriores que editam só o texto preservam os tópicos cadastrados.
+  assert.equal((await lic.put(url, { anterior: s.descricao, descricao: s.descricao.replace("Texto da secretaria.", "Texto revisado.") })).status, 200);
+  s = await ler(criada.dados.id);
+  assert.deepEqual(s.topicos_adicionais, atualizados);
+  assert.equal((await alterar(s, [])).status, 200);
+  s = await ler(criada.dados.id);
+  assert.deepEqual(s.topicos_adicionais, []);
+  const removidoWord = await extrairTexto("solicitacao.docx", (await lic.get(`${url}/docx`)).dados);
+  assert.doesNotMatch(removidoWord, /Tópicos adicionais|20 dias úteis/);
+  assert.match(s.descricao, /Texto revisado/); assert.match(s.descricao, /@ Titular/);
+});
