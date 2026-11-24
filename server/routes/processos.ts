@@ -148,7 +148,7 @@ const itensSolicitacao = z.array(z.object({
     orcamento_id: idOrcamento.nullable(),
     fornecedor: z.string().trim().max(200),
     valor_unitario: z.number().positive().max(1e12).nullable(),
-    fonte: z.enum(["fornecedor", "loja", "pncp", "outra"]).optional(),
+    fonte: z.enum(["fornecedor", "banco_precos", "loja", "pncp", "outra"]).optional(),
     link: z.string().trim().max(1500).optional(),
     consultado_em: z.iso.date().optional(),
     obs: z.string().trim().max(1000).optional(),

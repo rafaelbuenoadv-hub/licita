@@ -16,7 +16,8 @@ function assinatura(texto: string) {
   const limpo = normalizarCotacao(texto)
     .replace(/\(?\bc[oó]d(?:igo)?\.?\s*\d+\)?/g, " ") // código do catálogo do fornecedor
     .replace(/(\d)\.(\d{3})\b/g, "$1$2");            // 36.000 -> 36000
-  const numeros = new Set((limpo.match(/\d+(?:,\d+)?(?:\/\d+)?/g) ?? []).map((n) => n.replace(",", ".")));
+  // "01" e "1" são o mesmo número (pedra brita nº 01 / nº 1).
+  const numeros = new Set((limpo.match(/\d+(?:,\d+)?(?:\/\d+)?/g) ?? []).map((n) => n.replace(",", ".").replace(/^0+(?=\d)/, "")));
   const palavras = new Set((limpo.match(/[a-z]{3,}/g) ?? [])
     .filter((p) => !VAZIAS.has(p)).map((p) => p.slice(0, 6)).map((p) => SINONIMOS[p] ?? p));
   return { numeros, palavras };
@@ -35,13 +36,17 @@ export function semelhanca(a: Comparavel, b: Comparavel) {
   if (ua && ub && ua !== ub) return -1;
   const sa = assinatura(a.descricao), sb = assinatura(b.descricao);
   if (!sa.palavras.size || !sb.palavras.size) return 0;
-  const palavras = comuns(sa.palavras, sb.palavras) / Math.min(sa.palavras.size, sb.palavras.size);
+  const iguais = comuns(sa.palavras, sb.palavras);
+  // Uma só palavra em comum ("pedra") quando um dos itens tem mais palavras não basta ("pó de pedra" × "pedra brita").
+  const palavras = iguais / Math.min(sa.palavras.size, sb.palavras.size) * (iguais === 1 && Math.max(sa.palavras.size, sb.palavras.size) >= 2 ? 0.6 : 1);
   // Números decidem a variante do item (faixa de BTU, bitola): conjuntos diferentes derrubam a semelhança.
   const numeros = sa.numeros.size && sb.numeros.size
     ? comuns(sa.numeros, sb.numeros) / Math.max(sa.numeros.size, sb.numeros.size)
     : sa.numeros.size || sb.numeros.size ? 0.5 : 1;
   const qa = numeroDe(a.quantidade), qb = numeroDe(b.quantidade);
   const quantidade = qa != null && qb != null ? (qa === qb ? 1 : 0) : 0.5;
+  // Ambos com números e nenhum em comum: são variantes diferentes (nº 1 × nº 2, 9.000 × 12.000 BTU), não o mesmo item.
+  if (sa.numeros.size && sb.numeros.size && numeros === 0) return Math.min(0.4, 0.5 * palavras);
   return 0.5 * palavras + 0.35 * numeros + 0.15 * quantidade;
 }
 const MINIMO = 0.62;

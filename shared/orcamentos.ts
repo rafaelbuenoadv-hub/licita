@@ -10,6 +10,8 @@ export interface DadosOrcamento {
   valor_total: number | null;
   frete: Inclusao; instalacao: Inclusao;
   prazo_entrega: string | null; observacoes: string | null;
+  /** Origem do documento quando não é proposta de fornecedor (ex.: relatório do Banco de Preços). */
+  fonte?: "banco_precos";
 }
 export interface OrcamentoLido {
   id: number;

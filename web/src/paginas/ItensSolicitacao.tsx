@@ -185,7 +185,11 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     const dados = await lerOrcamento(id);
     const itens = dados.itens.filter((i) => i.descricao.trim());
     if (!itens.length) throw new Error("O orçamento foi anexado. A leitura não encontrou itens para lançar.");
-    setLeitura({ id, dados: { ...dados, fornecedor: limparNomeFornecedor(dados.fornecedor) || fornecedor, itens }, usar: itens.map(() => true) });
+    // Já há itens cadastrados: a leitura só lança preços neles (nova cotação). Linha sem item correspondente fica desmarcada;
+    // para lançá-la como item novo, marque e escolha "Novo item".
+    const temItens = linhas.some((l) => l.descricao.trim());
+    const destinosIniciais = destinosDoOrcamento(linhas, itens);
+    setLeitura({ id, dados: { ...dados, fornecedor: limparNomeFornecedor(dados.fornecedor) || fornecedor, itens }, usar: destinosIniciais.map((d) => !temItens || d.indice != null) });
     setReler(null);
   };
   const importar = (arquivo: File) => executar("importar", async () => {
@@ -230,7 +234,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
         quantidade: anterior.quantidade || (lido.quantidade != null && lido.quantidade >= 0 && lido.quantidade <= 1e12 ? String(lido.quantidade).replace(".", ",") : ""),
       }, {
         orcamentoId: leitura.id, fornecedor,
-        valor: precoLido(lido.valor_unitario), fonte: "fornecedor", consultadoEm: dataConsulta(),
+        valor: precoLido(lido.valor_unitario), fonte: leitura.dados.fonte ?? "fornecedor", consultadoEm: dataConsulta(),
       });
       if (destino.indice != null) resultado[destino.indice] = item;
       else {

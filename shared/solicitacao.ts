@@ -51,7 +51,7 @@ export const MODELO_SOLICITACAO = {
 
 export const CRITERIOS_PRECO = { media: "Média", mediana: "Mediana", menor: "Menor valor" };
 export type CriterioPreco = keyof typeof CRITERIOS_PRECO;
-export const FONTES_COTACAO = { fornecedor: "Orçamento de fornecedor", loja: "Loja na internet", pncp: "Valor do PNCP", outra: "Outras fontes" };
+export const FONTES_COTACAO = { fornecedor: "Orçamento de fornecedor", banco_precos: "Banco de Preços", loja: "Loja na internet", pncp: "Valor do PNCP", outra: "Outras fontes" };
 export type FonteCotacao = keyof typeof FONTES_COTACAO;
 export interface CotacaoItem {
   orcamento_id: number | null;

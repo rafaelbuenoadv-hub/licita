@@ -156,6 +156,7 @@ export function lerRelatorioCotacao(texto: string): DadosOrcamento | null {
   const periodo = /Pesquisa realizada entre ([^\n]+)/i.exec(texto)?.[1]?.trim();
   return {
     fornecedor: /bancodeprecos/i.test(texto) ? "Banco de Preços — Relatório de Cotação" : "Relatório de Cotação",
+    fonte: "banco_precos",
     cnpj: null, data: null, validade: null, itens,
     valor_total: global ? valorDe(global[1]) : null,
     frete: "nao_informado", instalacao: "nao_informado", prazo_entrega: null,
