@@ -1,6 +1,6 @@
 // Itens da contratação e orçamentos de cada item: lista de itens, janela "Adicionar item" e
 // janela "Orçamentos e pesquisa de preços" com consolidação por média, mediana ou menor valor.
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from "react";
 import { brl, numBR } from "../api";
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { CRITERIOS_PRECO, FONTES_COTACAO, valorDasCotacoes, type CriterioPreco, type FonteCotacao, type ItemSolicitacao } from "../../../shared/solicitacao";
@@ -27,6 +27,7 @@ interface Props {
   recarregar: () => Promise<unknown>;
   usarPncp: (k: number, r: ResultadoPncp) => Promise<void>;
   setAviso: (t: string) => void;
+  importacaoOrcamento: ReactNode;
 }
 
 export function ItensOrcamentos(props: Props) {
@@ -163,7 +164,7 @@ function ModalPncp({ k, linhas, ocupado, anexando, usarPncp, fechar, abrirOrcame
 
 const valorValido = (c: LinhaCotacao) => { const v = numBR(c.valor); return v != null && !Number.isNaN(v) && v > 0; };
 
-function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, anexando, enviar, executar, recarregar, usarPncp, setAviso, focarPncp, fechar }: Props & { k: number; focarPncp: boolean; fechar: () => void }) {
+function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, anexando, enviar, executar, recarregar, usarPncp, setAviso, importacaoOrcamento, focarPncp, fechar }: Props & { k: number; focarPncp: boolean; fechar: () => void }) {
   const linha = linhas[k];
   const { nome, descricao } = separarDescricao(linha.descricao);
   const vazio = { fonte: "fornecedor" as FonteCotacao, data: dataConsulta(), fornecedor: "", valor: "", link: "", obs: "" };
@@ -260,6 +261,7 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
               <button type="button" className="btn pri" disabled={ocupado || !!anexando} onClick={() => arquivo.current?.click()}>📎 {anexando === `item-${k}` ? "Anexando…" : "Anexar orçamento"}</button>
               <input ref={arquivo} hidden type="file" accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ""; if (a) void anexar(a); }} />
             </div>
+            {importacaoOrcamento}
             <div ref={pncp} className={"orc-pncp" + (focarPncp ? " destaque" : "")}>
               <BuscaPncpItem descricao={nome || linha.descricao} ocupado={ocupado || !!anexando} usar={(r) => usarPncp(k, r)} />
             </div>

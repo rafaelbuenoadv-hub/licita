@@ -360,9 +360,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   };
   const descricoes = linhas.map((linha) => linha.descricao);
 
-  return <fieldset className="wide itens-sol" disabled={ocupado || !!anexando}>
-    <legend>Itens</legend>
-    <BuscaPncpLote key={JSON.stringify(descricoes)} descricoes={descricoes} ocupado={ocupado || !!anexando} usar={usarPncp} />
+  const importacaoOrcamento = <>
     <div className="tools">
       <button className="btn pri" type="button" disabled={!!anexando || ocupado} onClick={() => seletorImportacao.current?.click()}>
         {anexando === "importar" ? "Lendo orçamento…" : "Anexar e ler orçamento"}</button>
@@ -407,6 +405,13 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
       </div>
     </div>}
 
+    {aviso && <p className="small" role="status">{aviso}</p>}
+  </>;
+
+  return <fieldset className="wide itens-sol" disabled={ocupado || !!anexando}>
+    <legend>Itens</legend>
+    <BuscaPncpLote key={JSON.stringify(descricoes)} descricoes={descricoes} ocupado={ocupado || !!anexando} usar={usarPncp} />
+
     {repetidos.length > 0 && <div className="note stack" role="status" style={{ gap: 8 }}>
       <div className="row"><span><strong>{repetidos.length} {repetidos.length === 1 ? "item parece repetido" : "itens parecem repetidos"}</strong>: o mesmo item lançado de novo com o preço de outro fornecedor.</span>
         <button type="button" className="btn sm" onClick={() => setConferirRepetidos(!conferirRepetidos)}>{conferirRepetidos ? "Fechar" : "Conferir e juntar"}</button></div>
@@ -427,7 +432,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
       </>}
     </div>}
     <ItensOrcamentos linhas={linhas} setLinhas={setLinhas} orcamentos={orcamentos} caminho={caminho} ocupado={ocupado} anexando={anexando}
-      enviar={enviar} executar={executar} recarregar={recarregar} usarPncp={usarPncp} setAviso={setAviso} />
+      enviar={enviar} executar={executar} recarregar={recarregar} usarPncp={usarPncp} setAviso={setAviso} importacaoOrcamento={importacaoOrcamento} />
     {aviso && <p className="small" role="status">{aviso}</p>}
   </fieldset>;
 }
