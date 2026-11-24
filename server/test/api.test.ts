@@ -738,7 +738,8 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   // DFD: dados do processo, cadastro de secretários, campos, documento e conferência.
   r = await admin.post(rota);
   assert.deepEqual([...new Set(cods())], ["campo", "valor", "secretario", "minuta", "item"]);
-  assert.deepEqual(r.dados.pendencias.find((x: any) => x.codigo === "valor"), { codigo: "valor", texto: "Informe o valor estimado preliminar nos dados do processo.", onde: "dados", alvo: "valor", bloqueia: true });
+  // Sem preços na Solicitação e sem valor nos dados do processo: só um aviso, que não trava o DFD.
+  assert.equal(r.dados.pendencias.find((x: any) => x.codigo === "valor").bloqueia, false);
   const dados = { objeto: "Aquisição de 30 cadeiras escolares", tipo: "bens", via: "licitacao", ano: 2028, requisitante: "Obras", valor_estimado: 9000, pca_item_id: null };
   assert.equal((await admin.put(`/api/processos/${id}`, dados)).status, 200);
   r = await admin.post(rota);

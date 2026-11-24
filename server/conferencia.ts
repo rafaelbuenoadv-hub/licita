@@ -2,6 +2,7 @@
 // Tudo aqui é regra fixa; funciona mesmo com a IA indisponível.
 import { q, q1 } from "./db.js";
 import { secretariosDoProcesso } from "./portarias.js";
+import { totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
 import { consultarPca, type ItemConsultaPca } from "../shared/consulta-pca.js";
 import { ETAPAS, camposFaltando, itensDe, pendencias, temValor, type Checks, type Etapa, type Tipo, type Via, type Valores } from "../shared/etapas.js";
 
@@ -42,7 +43,13 @@ export async function conferirEtapa(p: Proc, e: Etapa, checks: Checks, campos: R
   }
   if (e.id === "dfd") {
     if (!p.requisitante.trim()) l.push({ codigo: "area", texto: "Informe a área requisitante nos dados do processo.", onde: "dados", alvo: "requisitante", bloqueia: true });
-    if (p.valor_estimado == null) l.push({ codigo: "valor", texto: "Informe o valor estimado preliminar nos dados do processo.", onde: "dados", alvo: "valor", bloqueia: true });
+    // O valor vem das cotações da Solicitação (ou dos dados do processo); sem nenhum dos dois, só avisa.
+    if (p.valor_estimado == null) {
+      const s = await q<{ itens: ItemSolicitacao[] }>("select itens from solicitacoes_processo where processo_id=$1", [p.id]);
+      if (totalDosItens(s.flatMap((x) => x.itens ?? [])) == null) {
+        l.push({ codigo: "valor", texto: "Ainda não há valor estimado: lance os preços dos itens na Solicitação ou informe o valor preliminar nos dados do processo.", onde: "dados", alvo: "valor", bloqueia: false });
+      }
+    }
     const cad = await secretariosDoProcesso(p);
     for (const a of cad.areasSemCadastro) l.push({ codigo: "secretario", texto: `Não há secretário cadastrado para "${a}". Cadastre em Configurações ou ajuste o nome da área.`, onde: "config", bloqueia: true });
     for (const s of cad.secretarios) if (!s.portaria) l.push({ codigo: "portaria", texto: `Falta a portaria de nomeação de ${s.nome} (${s.secretaria}). Cadastre em Configurações, no cadastro de secretários.`, onde: "config", bloqueia: true });

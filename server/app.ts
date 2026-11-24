@@ -58,7 +58,8 @@ export function criarApp() {
   const web = [path.join(here, "../web"), path.join(here, "../dist/web")].find((p) => existsSync(path.join(p, "index.html")));
   if (web) {
     app.use(express.static(web, { index: false, maxAge: "1h" }));
-    app.get(/^\/(?!api\/).*/, (_req, res) => { res.sendFile(path.join(web, "index.html")); });
+    // A página principal nunca fica em cache: depois de uma atualização, o navegador já carrega a versão nova.
+    app.get(/^\/(?!api\/).*/, (_req, res) => { res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate"); res.sendFile(path.join(web, "index.html")); });
   }
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

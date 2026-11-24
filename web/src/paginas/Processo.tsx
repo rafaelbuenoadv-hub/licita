@@ -269,7 +269,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
       }} />}
       {e.campos.length > 0 && <CamposEtapa e={e} p={p} valores={vals} editavel={editavel} sujo={sujo} gravando={gravandoCampos}
         sugeridos={mesclarCampos(p, e.id).sugeridos.filter((k) => vals[k] === p.sugestoes_campos?.[e.id]?.[k])}
-        mudar={(v) => { setVals(v); setSujo(true); }} salvar={() => salvarCampos()}
+        mudar={(v) => { setVals(v); setSujo(true); setConf(null); }} salvar={() => salvarCampos()}
         gerar={e.modelo && editavel ? gerarDocumento : undefined} gerando={gerandoDoc} />}
 
       {e.id === "solicitacao" && <section className="sec pedidos" id="pedidos-secretarias" tabIndex={-1}>
