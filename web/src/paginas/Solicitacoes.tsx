@@ -18,6 +18,7 @@ interface Solicitacao {
   objeto: string;
   justificativa: string;
   itens: ItemSolicitacao[];
+  orcamentos_ocultos?: number[];
 }
 interface Props {
   processo: {
@@ -62,6 +63,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
   const [objeto, setObjeto] = useState("");
   const [justificativa, setJustificativa] = useState("");
   const [linhas, setLinhas] = useState<LinhaItem[]>([linhaVazia()]);
+  const [orcamentosOcultos, setOrcamentosOcultos] = useState<number[]>([]);
   const [arquivo, setArquivo] = useState<File | null>(null);
   const [apoios, setApoios] = useState<File[]>([]);
   const [progresso, setProgresso] = useState("");
@@ -133,6 +135,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       setObjeto(ja("dfd", "objeto") || processo.objeto || "");
       setJustificativa(ja("dfd", "justificativa") || ja("pac", "justificativa_inclusao"));
       setLinhas([linhaVazia()]);
+      setOrcamentosOcultos([]);
       trocarTexto(novo === "manual" ? modelo : "");
       setArquivo(null);
       setApoios([]);
@@ -150,6 +153,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     setObjeto(s.objeto);
     setJustificativa(s.justificativa);
     setLinhas(linhasDosItens(s.itens, processo.orcamentos));
+    setOrcamentosOcultos(s.orcamentos_ocultos ?? []);
     setArquivo(null);
     setApoios([]);
     const texto = inserirItens(s.descricao, s.itens, "marcador");
@@ -203,6 +207,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
     dados.set("objeto_solicitacao", objeto);
     dados.set("justificativa", justificativa);
     dados.set("itens", JSON.stringify(lidas.itens));
+    dados.set("orcamentos_ocultos", JSON.stringify(orcamentosOcultos));
     if (arquivo) dados.set("arquivo", arquivo);
     return dados;
   };
@@ -224,6 +229,7 @@ export function Solicitacoes({ processo, recarregar }: Props) {
       if (edicao) {
         dados.set("anterior", edicao.descricao);
         dados.set("itens_anteriores", JSON.stringify(edicao.itens));
+        dados.set("orcamentos_ocultos_anteriores", JSON.stringify(edicao.orcamentos_ocultos ?? []));
         await api.put(`${caminho}/${edicao.id}`, dados);
       }
       else {
@@ -306,6 +312,11 @@ export function Solicitacoes({ processo, recarregar }: Props) {
               <label className="wide">Justificativa
                 <textarea maxLength={8000} value={justificativa} disabled={!!ocupado} placeholder="Por que a secretaria precisa desta contratação" onChange={(e) => setJustificativa(e.target.value)} /></label>
             </>}
+            <label className="wide">{modo === "anexo" ? "Descrição complementar (opcional)" : "Descrição da solicitação"}
+              <textarea required={modo !== "anexo" && !edicao?.nome_arquivo && !edicao?.apoios.length && !apoios.length} maxLength={LIMITE_SOLICITACAO} value={descricao} disabled={!!ocupado}
+                placeholder={modo === "manual" ? "Informe a necessidade, as quantidades e os prazos que já conhece." : undefined}
+                onChange={(e) => trocarTexto(e.target.value)} />
+            </label>
             <fieldset className="wide itens-sol">
               <legend>Documentos de apoio da solicitação</legend>
               <div className="tools">
@@ -325,14 +336,16 @@ export function Solicitacoes({ processo, recarregar }: Props) {
                 </li>)}
               </ul>}
             </fieldset>
-            <ItensSolicitacao processoId={processo.id} linhas={linhas} setLinhas={setLinhas}
-              orcamentos={processo.orcamentos} recarregar={recarregar} ia={ia.disponivel} ocupado={!!ocupado} setCotando={setCotando} />
-            {lidas.erro && <p className="wide small muted">{lidas.erro}</p>}
-            <label className="wide">{modo === "anexo" ? "Descrição complementar (opcional)" : "Descrição da solicitação"}
-              <textarea required={modo !== "anexo" && !edicao?.nome_arquivo && !edicao?.apoios.length && !apoios.length} maxLength={LIMITE_SOLICITACAO} value={descricao} disabled={!!ocupado}
-                placeholder={modo === "manual" ? "Informe a necessidade, as quantidades e os prazos que já conhece." : undefined}
-                onChange={(e) => trocarTexto(e.target.value)} />
-            </label>
+            <details className="wide subtopico-orcamentos" open>
+              <summary><span>Orçamentos da solicitação</span>
+                <span className="small">{processo.orcamentos.filter((o) => !orcamentosOcultos.includes(o.id)).length} arquivos · {itens.length} itens</span>
+              </summary>
+              <div className="pad stack">
+                <ItensSolicitacao processoId={processo.id} linhas={linhas} setLinhas={setLinhas}
+                  orcamentos={processo.orcamentos} orcamentosOcultos={orcamentosOcultos} setOrcamentosOcultos={setOrcamentosOcultos} recarregar={recarregar} ia={ia.disponivel} ocupado={!!ocupado} setCotando={setCotando} />
+                {lidas.erro && <p className="wide small muted">{lidas.erro}</p>}
+              </div>
+            </details>
           </div>
           {modo !== "anexo" && descricao.trim() && <p className="small muted">Use [[nome do campo]] no texto para criar um campo de preenchimento na prévia.</p>}
           {modo !== "anexo" && !descricao.trim() && <div><button className="btn" type="button" disabled={!!ocupado} onClick={() => trocarTexto(modelo)}>Usar modelo do órgão</button></div>}

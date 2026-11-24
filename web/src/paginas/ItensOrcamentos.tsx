@@ -29,6 +29,7 @@ interface Props {
   setAviso: (t: string) => void;
   importacaoOrcamento: ReactNode;
   lerOrcamento: (id: number) => void;
+  excluirProposta: (id: number) => void;
 }
 
 export function ItensOrcamentos(props: Props) {
@@ -57,6 +58,15 @@ export function ItensOrcamentos(props: Props) {
     if (!colunas.has(chave)) colunas.set(chave, { chave, nome, fonte: "fornecedor" });
   }
   const cotacoesTabela = [...colunas.values()];
+  const excluirColuna = (col: { chave: string; nome: string; arquivo?: OrcamentoLido }) => {
+    if (!confirm(`Excluir a proposta “${col.nome}” e os preços dela desta solicitação?`)) return;
+    if (col.arquivo) props.excluirProposta(col.arquivo.id);
+    else {
+      setLinhas((lista) => lista.map((l) => ({ ...l, cotacoes: l.cotacoes.filter((c) => chaveCotacao(c) !== col.chave) })));
+      setFontesManuais((fontes) => fontes.filter((nome) => `n${normalizarCotacao(nome)}` !== col.chave));
+      props.setAviso("Proposta excluída da tabela. Salve a solicitação para gravar.");
+    }
+  };
   const adicionarFonte = () => {
     const nome = limparNomeFornecedor(novaFonte);
     if (!nome) { props.setAviso("Informe o fornecedor ou a fonte para criar a coluna."); return; }
@@ -116,6 +126,8 @@ export function ItensOrcamentos(props: Props) {
               <span className="small muted">{FONTES_COTACAO[col.fonte]}</span>
               {col.arquivo && <button type="button" className="lnk small" disabled={props.ocupado || !!props.anexando} onClick={() => props.lerOrcamento(col.arquivo!.id)}>Ler preços deste arquivo</button>}
               {col.arquivo && <a className="small" href={`/api${props.caminho}/${col.arquivo.id}/arquivo`} title={col.arquivo.nome}>📎 Ver anexo</a>}
+              <button type="button" className="lnk perigo small" aria-label={`Excluir proposta da cotação ${j + 1}`} disabled={props.ocupado || !!props.anexando}
+                onClick={() => excluirColuna(col)}>Excluir proposta</button>
             </th>)}
             <th className="r">Valor de referência</th><th>Pesquisa de preços</th><th className="r">Total</th><th className="r">Ações</th></tr></thead>
           <tbody>{visiveis.map(({ l, k }, n) => {

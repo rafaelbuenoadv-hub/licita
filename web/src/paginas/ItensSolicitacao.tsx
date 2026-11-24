@@ -131,11 +131,13 @@ function precosDaProposta(linhas: LinhaItem[], dados?: DadosOrcamento | null) {
   return precos;
 }
 
-export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, recarregar, ia, ocupado, setCotando }: {
+export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, orcamentosOcultos, setOrcamentosOcultos, recarregar, ia, ocupado, setCotando }: {
   processoId: number;
   linhas: LinhaItem[];
   setLinhas: Dispatch<SetStateAction<LinhaItem[]>>;
   orcamentos: OrcamentoLido[];
+  orcamentosOcultos: number[];
+  setOrcamentosOcultos: Dispatch<SetStateAction<number[]>>;
   recarregar: () => Promise<unknown>;
   ia: boolean;
   ocupado: boolean;
@@ -153,6 +155,15 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   const lidas = lerLinhas(linhas);
   const total = totalDosItens(lidas.itens);
   const parcial = !!lidas.erro || lidas.itens.some((item) => totalDoItem(item) == null);
+  const orcamentosAtivos = orcamentos.filter((o) => !orcamentosOcultos.includes(o.id));
+  const excluirProposta = (id: number) => {
+    setLinhas((lista) => lista.map((l) => ({ ...l, cotacoes: l.cotacoes.filter((c) => c.orcamentoId !== id) })));
+    setOrcamentosOcultos((ids) => [...new Set([...ids, id])]);
+    if (leitura?.id === id) setLeitura(null);
+    if (reler?.id === id) setReler(null);
+    if (orcamentoParaLer === String(id)) setOrcamentoParaLer("");
+    setAviso("Proposta excluída da tabela. Clique em Salvar orçamentos e atualizar solicitação para gravar.");
+  };
   const caminho = `/processos/${processoId}/orcamentos`;
   const alterar = (k: number, dados: Partial<LinhaItem>) =>
     setLinhas((lista) => lista.map((l, i) => i === k ? { ...l, ...dados } : l));
@@ -204,7 +215,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   const lerAnexado = (id?: number) => {
     if (id != null) setOrcamentoParaLer(String(id));
     painelOrcamentos.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-    const proposta = orcamentos.find((o) => String(o.id) === (id == null ? orcamentoParaLer : String(id)));
+    const proposta = orcamentosAtivos.find((o) => String(o.id) === (id == null ? orcamentoParaLer : String(id)));
     if (!proposta) return;
     void executar("importar", async () => {
       setLeitura(null);
@@ -394,11 +405,11 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
         <span className="small muted">{ia ? "Confira as linhas extraídas antes de lançar nos itens." : "Lê planilhas (.xlsx, .csv), Word com tabela e PDF com texto selecionável. Foto e PDF digitalizado: informe os preços na coluna."}</span>
       </>
     </div>
-    {orcamentos.length > 0 && <details className="orcamento-existente"><summary>Usar orçamento já anexado</summary>
+    {orcamentosAtivos.length > 0 && <details className="orcamento-existente"><summary>Usar orçamento já anexado</summary>
       <div className="grade-anexo">
         <label>Arquivo<select value={orcamentoParaLer} disabled={ocupado || !!anexando} onChange={(e) => setOrcamentoParaLer(e.target.value)}>
           <option value="">Selecione o arquivo</option>
-          {orcamentos.map((o) => <option key={o.id} value={o.id}>{o.nome}</option>)}
+          {orcamentosAtivos.map((o) => <option key={o.id} value={o.id}>{o.nome}</option>)}
         </select></label>
         <button type="button" className="btn" disabled={!orcamentoParaLer || ocupado || !!anexando} onClick={() => lerAnexado()}>Ler preços</button>
       </div>
@@ -434,6 +445,15 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
       </div>
     </div>}
 
+    {orcamentosOcultos.length > 0 && <details className="orcamento-existente">
+      <summary>Propostas excluídas desta solicitação ({orcamentosOcultos.length})</summary>
+      <ul>{orcamentos.filter((o) => orcamentosOcultos.includes(o.id)).map((o) => <li key={o.id}>{o.nome}{" "}
+        <button type="button" className="lnk" disabled={ocupado || !!anexando} onClick={() => {
+          setOrcamentosOcultos((ids) => ids.filter((id) => id !== o.id));
+          setAviso("Proposta restaurada na tabela. Leia o arquivo ou informe os preços e salve a solicitação.");
+        }}>Restaurar proposta</button>
+      </li>)}</ul>
+    </details>}
     {aviso && <p className="note" role="status">{aviso}</p>}
   </section>;
 
@@ -460,8 +480,8 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
           <span className="small">Confira a lista: só junte itens que são de fato o mesmo.</span></div>
       </>}
     </div>}
-    <ItensOrcamentos linhas={linhas} setLinhas={setLinhas} orcamentos={orcamentos} caminho={caminho} ocupado={ocupado} anexando={anexando}
-      enviar={enviar} executar={executar} recarregar={recarregar} usarPncp={usarPncp} setAviso={setAviso} importacaoOrcamento={importacaoOrcamento} lerOrcamento={(id) => lerAnexado(id)} />
+    <ItensOrcamentos linhas={linhas} setLinhas={setLinhas} orcamentos={orcamentosAtivos} caminho={caminho} ocupado={ocupado} anexando={anexando}
+      enviar={enviar} executar={executar} recarregar={recarregar} usarPncp={usarPncp} setAviso={setAviso} importacaoOrcamento={importacaoOrcamento} lerOrcamento={(id) => lerAnexado(id)} excluirProposta={excluirProposta} />
     {aviso && <p className="small" role="status">{aviso}</p>}
   </fieldset>;
 }

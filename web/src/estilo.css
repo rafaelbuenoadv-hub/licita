@@ -378,3 +378,10 @@ dialog.janela::backdrop{background:#10182788}
 .orc-manual{align-items:end}.orc-manual label{display:flex;flex-direction:column;gap:5px;min-width:240px;font-size:13px}
 .tabela-itens-orc .preco-cotacao input{min-width:130px;width:100%;text-align:right;background:var(--surface)}
 .tabela-itens-orc .criterio-tabela{display:block;margin-top:6px;min-width:110px;font-size:12px}
+
+.subtopico-orcamentos{border:1px solid var(--line);border-radius:12px;background:var(--surface);min-width:0;overflow:hidden}
+.subtopico-orcamentos>summary{cursor:pointer;padding:15px 18px;background:var(--accent-soft);color:var(--ink);font-weight:700}
+.subtopico-orcamentos>summary>.small{float:right;font-weight:400;color:var(--muted);margin-left:12px}
+.subtopico-orcamentos[open]>summary{border-bottom:1px solid var(--line)}
+.subtopico-orcamentos .itens-sol{min-width:0;width:100%;margin:0}
+@media(max-width:600px){.subtopico-orcamentos>summary>.small{float:none;display:block;margin:5px 0 0 18px}}

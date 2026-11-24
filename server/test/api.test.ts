@@ -1788,3 +1788,46 @@ test("relatório de cotação (Banco de Preços) é lido sem IA, e anexar PDF co
   assert.equal(r2.status, 422);
   assert.match(r2.dados.erro, /não tem texto selecionável/);
 });
+
+test("proposta excluída da solicitação fica fora da tabela e pode ser restaurada sem afetar outra secretaria", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de mesas", tipo: "bens", via: "licitacao", ano: 2035 });
+  const processo = `/api/processos/${id}`;
+  const anexar = async (rota: string, nome: string) => {
+    const fd = new FormData(); fd.append("arquivo", new Blob([`Fornecedor: ${nome}\nMesa R$ 100,00`]), `${nome}.txt`);
+    const r = await lic.req("POST", `${rota}/orcamentos?origem=solicitacao`, fd);
+    assert.equal(r.status, 201, JSON.stringify(r.dados)); return r.dados.ids[0] as number;
+  };
+  const a = await anexar(processo, "Loja A"), b = await anexar(processo, "Loja B");
+  const cotacao = (id: number, fornecedor: string, valor: number) => ({ orcamento_id: id, fornecedor, valor_unitario: valor });
+  const item = (cotacoes: any[]) => ({ descricao: "Mesa", unidade: "UN", quantidade: 2, cotacoes });
+  const criar = (secretaria: string, itens: any[]) => lic.post(`${processo}/solicitacoes`, {
+    chave_envio: randomUUID(), secretaria, descricao: "# Solicitação\n[[Itens]]", itens, orcamentos_ocultos: [],
+  });
+  const primeira = await criar("Planejamento", [item([cotacao(a, "Loja A", 100), cotacao(b, "Loja B", 200)])]);
+  const segunda = await criar("Administração", [item([cotacao(b, "Loja B", 200)])]);
+  assert.equal(primeira.status, 201); assert.equal(segunda.status, 201);
+  const ler = async () => (await lic.get(processo)).dados;
+  const editar = (s: any, itens: any[], ocultos: number[], anteriores = s.orcamentos_ocultos) => lic.put(`${processo}/solicitacoes/${s.id}`, {
+    anterior: s.descricao, descricao: s.descricao, itens, itens_anteriores: s.itens,
+    orcamentos_ocultos: ocultos, orcamentos_ocultos_anteriores: anteriores,
+  });
+  let p = await ler(), s = p.solicitacoes.find((s: any) => s.id === primeira.dados.id);
+  assert.equal((await editar(s, [item([cotacao(a, "Loja A", 100)])], [b])).status, 200);
+  p = await ler(); s = p.solicitacoes.find((s: any) => s.id === primeira.dados.id);
+  assert.deepEqual(s.orcamentos_ocultos, [b]);
+  assert.equal(s.itens[0].valor_unitario, 100);
+  assert.doesNotMatch(s.descricao, /Loja B/);
+  assert.equal(p.solicitacoes.find((s: any) => s.id === segunda.dados.id).itens[0].cotacoes[0].orcamento_id, b);
+  assert.equal((await lic.get(`${processo}/orcamentos/${b}/arquivo`)).status, 200);
+  // Uma edição antiga não desfaz a exclusão salva por outro usuário.
+  assert.equal((await editar(s, s.itens, [], [])).status, 409);
+  assert.equal((await editar(s, s.itens, [])).status, 200);
+  p = await ler(); s = p.solicitacoes.find((s: any) => s.id === primeira.dados.id);
+  assert.deepEqual(s.orcamentos_ocultos, []);
+  assert.equal(s.itens[0].cotacoes.length, 1); // Restaurar não inventa nem relança preço.
+  assert.equal((await editar(s, s.itens, [a])).status, 400); // Proposta ainda vinculada.
+  const outro = await lic.post("/api/processos", { objeto: "Outro processo", tipo: "bens", via: "licitacao", ano: 2035 });
+  const externo = await anexar(`/api/processos/${outro.dados.id}`, "Loja C");
+  assert.equal((await editar(s, s.itens, [externo])).status, 400);
+});
