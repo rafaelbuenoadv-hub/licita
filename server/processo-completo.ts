@@ -16,7 +16,7 @@ const temCampos = (v?: Valores) => Object.values(v ?? {}).some((x) => Array.isAr
 
 /** Só lê registros do processo já autorizado pela rota. Não gera versões nem conclui etapas. */
 export async function pecasDoProcesso(p: Processo, usuario: number) {
-  const [campos, solicitacoes, apoios, orcamentos, minutas, anexos, pesquisas, orgao, autor, revisoes, arquivosRevisao, minutasRevisao] = await Promise.all([
+  const [campos, solicitacoes, apoios, orcamentos, minutas, anexos, pesquisas, orgao, autores, revisoes, arquivosRevisao, minutasRevisao] = await Promise.all([
     camposDo(p.id),
     q<{ id: number; secretaria: string; referencia: string; descricao: string; nome_arquivo: string | null; arquivo: Buffer | null; itens: ItemSolicitacao[]; topicos_adicionais: TopicoSolicitacao[] }>("select id,secretaria,referencia,descricao,nome_arquivo,arquivo,itens,topicos_adicionais from solicitacoes_processo where processo_id=$1 order by id", [p.id]),
     q<{ id: number; solicitacao_id: number; nome: string; arquivo: Buffer }>("select a.id,a.solicitacao_id,a.nome,a.arquivo from solicitacao_anexos a join solicitacoes_processo s on s.id=a.solicitacao_id where s.processo_id=$1 order by a.id", [p.id]),
@@ -25,7 +25,7 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
     q<{ nome: string; texto: string; arquivo: Buffer | null }>("select nome,texto,arquivo from anexos where processo_id=$1 order by id", [p.id]),
     q<{ etapa: string; texto: string; fontes: { titulo: string; url: string }[] }>("select distinct on (etapa) etapa,texto,fontes from pesquisas_minuta where processo_id=$1 order by etapa,id desc", [p.id]),
     q1<{ nome: string }>("select nome from orgaos where id=$1", [p.orgao_id]),
-    q1<{ nome: string; cargo: string }>("select nome,cargo from usuarios where id=$1 and orgao_id=$2", [usuario, p.orgao_id]),
+    q<{ etapa: string; nome: string; cargo: string }>("select c.etapa,u.nome,u.cargo from campos_etapa c join usuarios u on u.id=c.usuario_id where c.processo_id=$1 and u.orgao_id=$2", [p.id, p.orgao_id]),
     q<{ id: number; numero: string }>("select id,numero from revisoes where processo_id=$1 and orgao_id=$2 order by id", [p.id, p.orgao_id]),
     q<{ revisao_id: number; nome: string; arquivo: Buffer }>("select a.revisao_id,a.nome,a.arquivo from revisao_arquivos a join revisoes r on r.id=a.revisao_id where r.processo_id=$1 and r.orgao_id=$2 order by r.id,a.id", [p.id, p.orgao_id]),
     q<{ revisao_id: number; tipo: string; texto: string }>("select distinct on (r.id,m.tipo) r.id as revisao_id,m.tipo,m.texto from revisao_minutas m join revisoes r on r.id=m.revisao_id where r.processo_id=$1 and r.orgao_id=$2 order by r.id,m.tipo,m.id desc", [p.id, p.orgao_id]),
@@ -55,7 +55,7 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
     }
     const minuta = minutas.find((m) => m.etapa === e.id);
     if (minuta) pecas.push({ titulo: `${e.doc ?? e.nome} — versão ${minuta.versao}`, texto: minuta.texto });
-    else if (e.id !== "solicitacao" && temCampos(campos[e.id])) pecas.push({ titulo: `${e.doc ?? e.nome} — campos salvos`, texto: await documentoDosCampos(p, e, campos, autor ?? { nome: "", cargo: "" }) });
+    else if (e.id !== "solicitacao" && temCampos(campos[e.id])) pecas.push({ titulo: `${e.doc ?? e.nome} — campos salvos`, texto: await documentoDosCampos(p, e, campos, autores.find((a) => a.etapa === e.id) ?? { nome: "[[Responsável pela etapa]]", cargo: "" }) });
     else if (e.fase === "interna" && e.id !== "solicitacao") ausentes.push(e.nome);
     const pesquisa = pesquisas.find((x) => x.etapa === e.id);
     if (pesquisa) pecas.push({ titulo: `Pesquisa de apoio — ${e.nome}`, texto: `# PESQUISA DE APOIO — ${e.nome}\n\n${pesquisa.texto}\n\n## Fontes\n${pesquisa.fontes.map((f) => `${f.titulo}: ${f.url}`).join("\n")}` });

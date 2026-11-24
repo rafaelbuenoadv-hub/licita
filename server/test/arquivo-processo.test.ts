@@ -33,5 +33,6 @@ test("anexos mantêm páginas originais e Word e planilhas são convertidos inte
   const texto = await textoLocalDoPdf(xlsxPdf);
   assert.match(texto, /LINHA_1005/); assert.match(texto, /SEGUNDA_ABA_COMPLETA/);
   assert.ok((await PDFDocument.load(xlsxPdf)).getPageCount() > 2);
+  await assert.rejects(arquivoDoProcessoParaPdf('danificado.docx', Buffer.from([0x50,0x4b,0x03,0x04,0,0,0,0,0,0])), (erro: any) => erro.status === 422 && /danificado.docx/.test(erro.message));
   await assert.rejects(arquivoDoProcessoParaPdf('danificado.pdf', Buffer.from('%PDF-invalido')), /danificado.pdf/);
 });

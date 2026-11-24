@@ -43,7 +43,7 @@ export async function arquivoDoProcessoParaPdf(nome: string, arquivo: Buffer): P
       } finally { await rm(pasta, { recursive: true, force: true }); }
     }
   } catch (erro) {
-    if ((erro as NodeJS.ErrnoException).code === "ENOENT" && /\.(docx|xlsx|xls)$/i.test(nome)) throw new ErroHttp(503, "A conversão de Word e planilhas está indisponível no servidor. Tente novamente após a atualização.");
+    if ((erro as NodeJS.ErrnoException).code === "ENOENT" && (erro as NodeJS.ErrnoException).syscall?.startsWith("spawn")) throw new ErroHttp(503, "A conversão de Word e planilhas está indisponível no servidor. Tente novamente após a atualização.");
     throw new ErroHttp(422, `Não foi possível juntar o anexo “${nome}”. Confira se o arquivo abre sem senha e anexe uma cópia válida. Nenhum arquivo foi omitido da exportação.`);
   }
   throw new ErroHttp(422, `O formato de “${nome}” não pode ser exibido no processo completo. Converta esse arquivo para PDF e anexe novamente.`);
