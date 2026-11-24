@@ -28,7 +28,7 @@ interface Props {
   usarPncp: (k: number, r: ResultadoPncp) => Promise<void>;
   setAviso: (t: string) => void;
   importacaoOrcamento: ReactNode;
-  selecionarOrcamento: (id: number) => void;
+  lerOrcamento: (id: number) => void;
 }
 
 export function ItensOrcamentos(props: Props) {
@@ -36,6 +36,9 @@ export function ItensOrcamentos(props: Props) {
   const [editando, setEditando] = useState<number | "novo" | null>(null);
   const [orcamentosDe, setOrcamentosDe] = useState<{ k: number; pncp?: boolean } | null>(null);
   const [pncpDe, setPncpDe] = useState<number | null>(null);
+  const [novaFonte, setNovaFonte] = useState("");
+  const [fontesManuais, setFontesManuais] = useState<string[]>(() => [...new Set(linhas.flatMap((l) => l.cotacoes
+    .filter((c) => c.orcamentoId == null && !!c.fornecedor.trim()).map((c) => c.fornecedor)))]);
   // Uma coluna por arquivo anexado ou fonte informada manualmente, compartilhada entre os itens.
   const chaveCotacao = (c: LinhaCotacao) => c.orcamentoId != null ? `o${c.orcamentoId}` : `n${normalizarCotacao(c.fornecedor)}`;
   const colunas = new Map<string, { chave: string; nome: string; fonte: FonteCotacao; arquivo?: OrcamentoLido }>();
@@ -49,10 +52,36 @@ export function ItensOrcamentos(props: Props) {
     colunas.set(chave, { ...existente, chave, nome: existente?.arquivo && nomeFornecedorOrcamento(existente.arquivo)
       || limparNomeFornecedor(c.fornecedor) || existente?.nome || "Fonte a informar", fonte: c.fonte ?? existente?.fonte ?? "fornecedor" });
   }
+  for (const nome of fontesManuais) {
+    const chave = `n${normalizarCotacao(nome)}`;
+    if (!colunas.has(chave)) colunas.set(chave, { chave, nome, fonte: "fornecedor" });
+  }
   const cotacoesTabela = [...colunas.values()];
-  const abrirCotacao = (k: number, arquivo?: OrcamentoLido) => {
-    if (arquivo) props.selecionarOrcamento(arquivo.id);
-    setOrcamentosDe({ k });
+  const adicionarFonte = () => {
+    const nome = limparNomeFornecedor(novaFonte);
+    if (!nome) { props.setAviso("Informe o fornecedor ou a fonte para criar a coluna."); return; }
+    if ([...colunas.values()].some((col) => normalizarCotacao(col.nome) === normalizarCotacao(nome))) {
+      props.setAviso("Este fornecedor ou fonte já tem uma coluna na tabela. Digite os preços nela."); return;
+    }
+    setFontesManuais((atuais) => [...atuais, nome]);
+    setNovaFonte("");
+    props.setAviso("Coluna criada. Digite os preços na tabela e salve a solicitação.");
+  };
+  const alterarPreco = (k: number, chave: string, nome: string, fonte: FonteCotacao, arquivo: OrcamentoLido | undefined, valor: string) => {
+    const linha = linhas[k];
+    const atual = linha.cotacoes.findIndex((c) => cotacaoPreenchida(c) && chaveCotacao(c) === chave);
+    if (valor.trim() && atual < 0 && linha.cotacoes.filter(cotacaoPreenchida).length >= 20) {
+      props.setAviso("O item já tem 20 cotações. Retire uma em Mais opções antes de acrescentar outra."); return;
+    }
+    setLinhas((lista) => lista.map((l, i) => {
+      if (i !== k) return l;
+      const indice = l.cotacoes.findIndex((c) => cotacaoPreenchida(c) && chaveCotacao(c) === chave);
+      if (!valor.trim()) return { ...l, cotacoes: l.cotacoes.filter((_, j) => j !== indice) };
+      if (indice >= 0) return { ...l, valorAnterior: undefined, cotacoes: l.cotacoes.map((c, j) => j === indice ? { ...c, valor } : c) };
+      return { ...l, valorAnterior: undefined, cotacoes: [...l.cotacoes.filter(cotacaoPreenchida), {
+        orcamentoId: arquivo?.id ?? null, fornecedor: nome, valor, fonte, consultadoEm: dataConsulta(),
+      }] };
+    }));
   };
   const lidas = lerLinhas(linhas);
   // Índice de cada linha nos itens lidos (linhas vazias ficam de fora da leitura).
@@ -67,6 +96,13 @@ export function ItensOrcamentos(props: Props) {
 
   return (
     <div className="itens-orc">
+      {props.importacaoOrcamento}
+      <div className="orc-manual tools">
+        <label>Orçamento sem arquivo<input value={novaFonte} maxLength={200} disabled={props.ocupado || !!props.anexando}
+          placeholder="Nome do fornecedor ou fonte" onChange={(e) => setNovaFonte(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); adicionarFonte(); } }} /></label>
+        <button type="button" className="btn" disabled={props.ocupado || !!props.anexando} onClick={adicionarFonte}>+ Criar coluna para digitar preços</button>
+      </div>
       <div className="row">
         <div><h3>Itens da contratação</h3><p className="small muted">Cadastre os itens e consolide orçamentos de fornecedores, PNCP e outras fontes.</p></div>
         <button type="button" className="btn pri" disabled={props.ocupado || linhas.length >= 200} onClick={() => setEditando("novo")}>+ Adicionar item</button>
@@ -78,6 +114,7 @@ export function ItensOrcamentos(props: Props) {
               <span className="lbl">Cotação {j + 1}</span>
               <strong>{col.nome}</strong>
               <span className="small muted">{FONTES_COTACAO[col.fonte]}</span>
+              {col.arquivo && <button type="button" className="lnk small" disabled={props.ocupado || !!props.anexando} onClick={() => props.lerOrcamento(col.arquivo!.id)}>Ler preços deste arquivo</button>}
               {col.arquivo && <a className="small" href={`/api${props.caminho}/${col.arquivo.id}/arquivo`} title={col.arquivo.nome}>📎 Ver anexo</a>}
             </th>)}
             <th className="r">Valor de referência</th><th>Pesquisa de preços</th><th className="r">Total</th><th className="r">Ações</th></tr></thead>
@@ -93,17 +130,29 @@ export function ItensOrcamentos(props: Props) {
               <td className="r num">{l.quantidade || "—"}</td>
               {cotacoesTabela.map((col, j) => {
                 const c = l.cotacoes.find((c) => cotacaoPreenchida(c) && chaveCotacao(c) === col.chave);
-                const valor = c ? numBR(c.valor) : null;
                 return <td key={col.chave} className="r num preco-cotacao">
-                  {valor != null && Number.isFinite(valor) && valor > 0
-                    ? <button type="button" className="lnk" aria-label={`Editar cotação ${j + 1} do item ${n + 1}`} onClick={() => abrirCotacao(k, col.arquivo)}>{brl(valor)}</button>
-                    : <><span className="small muted">{c ? "Preço a informar" : "Sem vínculo"}</span>
-                      <button type="button" className="lnk small" aria-label={`Relacionar cotação ${j + 1} ao item ${n + 1}`} onClick={() => abrirCotacao(k, col.arquivo)}>{c ? "Informar preço" : "Relacionar item"}</button></>}
+                  <input aria-label={`Preço da cotação ${j + 1} para o item ${n + 1}`} inputMode="decimal" placeholder="Digite o preço"
+                    value={c?.valor ?? ""} disabled={props.ocupado || !!props.anexando} data-coluna={j}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      const campos = [...(e.currentTarget.closest("table")?.querySelectorAll<HTMLInputElement>(".preco-cotacao input") ?? [])]
+                        .filter((input) => input.dataset.coluna === String(j));
+                      const proximo = campos[campos.indexOf(e.currentTarget) + 1];
+                      proximo?.focus(); proximo?.select();
+                    }}
+                    onChange={(e) => alterarPreco(k, col.chave, col.nome, col.fonte, col.arquivo, e.target.value)} />
                 </td>;
+
               })}
-              <td className="r num">{item?.valor_unitario != null ? brl(item.valor_unitario) : <span className="muted">A pesquisar</span>}</td>
+              <td className="r num">{item?.valor_unitario != null ? brl(item.valor_unitario) : <span className="muted">A pesquisar</span>}
+                <select className="criterio-tabela" aria-label={`Critério de preço do item ${n + 1}`} value={l.criterio ?? "media"} disabled={props.ocupado || !!props.anexando}
+                  onChange={(e) => setLinhas((lista) => lista.map((x, i) => i === k ? { ...x, criterio: e.target.value as CriterioPreco } : x))}>
+                  {Object.entries(CRITERIOS_PRECO).map(([chave, nome]) => <option key={chave} value={chave}>{nome}</option>)}
+                </select>
+              </td>
               <td><div className="acoes-preco">
-                <button type="button" className="btn sm orc" onClick={() => setOrcamentosDe({ k })}>📊 {valores.length ? `Orçamentos (${valores.length})` : "Adicionar orçamento"}</button>
+                <button type="button" className="btn sm orc" onClick={() => setOrcamentosDe({ k })}>Mais opções{valores.length ? ` (${valores.length})` : ""}</button>
                 <button type="button" className="btn sm pncp" onClick={() => setPncpDe(k)}>🔍 Buscar no PNCP</button>
               </div></td>
               <td className="r num">{total != null ? brl(Math.round(total * 100) / 100) : "—"}</td>
@@ -114,9 +163,14 @@ export function ItensOrcamentos(props: Props) {
             </tr>;
           })}</tbody>
         </table></div>}
-      {cotacoesTabela.length > 0 && <p className="small muted">Cada orçamento aparece em uma coluna. Os preços entram nos itens após o vínculo manual; arquivos ainda sem vínculo ficam disponíveis para relacionar.</p>}
+      {cotacoesTabela.length > 0 && <p className="small muted">Digite ou corrija os preços diretamente nas células. Média, mediana ou menor valor e o total são recalculados na hora. Depois, salve a solicitação.</p>}
       <div className="valor-preliminar"><span>Valor preliminar</span><b>{lidas.itens.length && total ? brl(Math.round(total * 100) / 100) + (algumSemValor ? " (parcial)" : "") : "A pesquisar"}</b></div>
       {lidas.erro && <p className="small aviso-anexo" role="status">{lidas.erro}</p>}
+      <div className="tools fim">
+        <button type="submit" name="acao" value="mesclar" className="btn pri" disabled={props.ocupado || !!props.anexando}>
+          {props.ocupado ? "Salvando…" : "Salvar orçamentos e atualizar solicitação"}
+        </button>
+      </div>
 
       {editando !== null && <ModalItem linha={editando === "novo" ? undefined : linhas[editando]} fechar={() => setEditando(null)}
         salvar={(l) => {
@@ -201,7 +255,7 @@ function ModalPncp({ k, linhas, ocupado, anexando, usarPncp, fechar, abrirOrcame
 
 const valorValido = (c: LinhaCotacao) => { const v = numBR(c.valor); return v != null && !Number.isNaN(v) && v > 0; };
 
-function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, anexando, enviar, executar, recarregar, usarPncp, setAviso, importacaoOrcamento, focarPncp, fechar }: Props & { k: number; focarPncp: boolean; fechar: () => void }) {
+function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, anexando, enviar, executar, recarregar, usarPncp, setAviso, focarPncp, fechar }: Props & { k: number; focarPncp: boolean; fechar: () => void }) {
   const linha = linhas[k];
   const { nome, descricao } = separarDescricao(linha.descricao);
   const vazio = { fonte: "fornecedor" as FonteCotacao, data: dataConsulta(), fornecedor: "", valor: "", link: "", obs: "" };
@@ -298,7 +352,6 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
               <button type="button" className="btn pri" disabled={ocupado || !!anexando} onClick={() => arquivo.current?.click()}>📎 {anexando === `item-${k}` ? "Anexando…" : "Anexar orçamento"}</button>
               <input ref={arquivo} hidden type="file" accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ""; if (a) void anexar(a); }} />
             </div>
-            {importacaoOrcamento}
             <div ref={pncp} className={"orc-pncp" + (focarPncp ? " destaque" : "")}>
               <BuscaPncpItem descricao={nome || linha.descricao} ocupado={ocupado || !!anexando} usar={(r) => usarPncp(k, r)} />
             </div>

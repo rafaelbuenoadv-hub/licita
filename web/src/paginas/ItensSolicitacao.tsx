@@ -143,6 +143,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
 }) {
   const [anexando, setAnexando] = useState("");
   const seletorImportacao = useRef<HTMLInputElement>(null);
+  const painelOrcamentos = useRef<HTMLElement>(null);
   const [aviso, setAviso] = useState("");
   const [leitura, setLeitura] = useState<LeituraOrcamento | null>(null);
   const [reler, setReler] = useState<{ id: number; fornecedor: string } | null>(null);
@@ -200,8 +201,10 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
     finally { await recarregar(); }
   });
 
-  const lerAnexado = () => {
-    const proposta = orcamentos.find((o) => String(o.id) === orcamentoParaLer);
+  const lerAnexado = (id?: number) => {
+    if (id != null) setOrcamentoParaLer(String(id));
+    painelOrcamentos.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    const proposta = orcamentos.find((o) => String(o.id) === (id == null ? orcamentoParaLer : String(id)));
     if (!proposta) return;
     void executar("importar", async () => {
       setLeitura(null);
@@ -373,19 +376,11 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
   };
   const descricoes = linhas.map((linha) => linha.descricao);
 
-  const importacaoOrcamento = <>
-    {orcamentos.length > 0 && <div className="grade-anexo">
-      <label>Orçamento já anexado<select value={orcamentoParaLer} disabled={ocupado || !!anexando} onChange={(e) => setOrcamentoParaLer(e.target.value)}>
-        <option value="">Selecione o arquivo para leitura</option>
-        {orcamentos.map((o) => <option key={o.id} value={o.id}>{o.nome}</option>)}
-      </select></label>
-      <button type="button" className="btn" disabled={!orcamentoParaLer || ocupado || !!anexando} onClick={lerAnexado}>
-        {anexando === "importar" ? "Lendo orçamento…" : "Ler orçamento anexado"}
-      </button>
-    </div>}
+  const importacaoOrcamento = <section className="orcamento-direto stack" ref={painelOrcamentos}>
+    <div><h3>Orçamentos</h3><p className="small muted">Adicione o arquivo, escolha os itens dos preços lidos e confira a tabela abaixo.</p></div>
     <div className="tools">
       <button className="btn pri" type="button" disabled={!!anexando || ocupado} onClick={() => seletorImportacao.current?.click()}>
-        {anexando === "importar" ? "Lendo orçamento…" : "Anexar e ler orçamento"}</button>
+        {anexando === "importar" ? "Lendo orçamento…" : "+ Adicionar orçamento (arquivo)"}</button>
       <>
         <input hidden ref={seletorImportacao} type="file" accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png,.txt,.csv" onChange={(e) => {
           const arquivo = e.target.files?.[0];
@@ -399,18 +394,25 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
         <span className="small muted">{ia ? "Confira as linhas extraídas antes de lançar nos itens." : "Lê planilhas (.xlsx, .csv), Word com tabela e PDF com texto selecionável. Foto e PDF digitalizado: informe os preços na coluna."}</span>
       </>
     </div>
+    {orcamentos.length > 0 && <details className="orcamento-existente"><summary>Usar orçamento já anexado</summary>
+      <div className="grade-anexo">
+        <label>Arquivo<select value={orcamentoParaLer} disabled={ocupado || !!anexando} onChange={(e) => setOrcamentoParaLer(e.target.value)}>
+          <option value="">Selecione o arquivo</option>
+          {orcamentos.map((o) => <option key={o.id} value={o.id}>{o.nome}</option>)}
+        </select></label>
+        <button type="button" className="btn" disabled={!orcamentoParaLer || ocupado || !!anexando} onClick={() => lerAnexado()}>Ler preços</button>
+      </div>
+    </details>}
     {leitura && <div className="cotacao-item stack">
-      <h4>Conferir orçamento e relacionar itens</h4>
-      <p className="small muted">A leitura não relaciona itens automaticamente. Para cada linha que deseja aproveitar, escolha o item de destino e confirme o lançamento.</p>
+      <h4>Escolha o item de cada preço</h4>
+      <p className="small muted">Escolha o item na última coluna e clique em Adicionar preços à tabela. As linhas sem item escolhido ficam de fora.</p>
       <label className="campo">Fornecedor ou fonte do orçamento
         <input value={leitura.dados.fornecedor ?? ""} maxLength={200} placeholder="Informe a razão social ou o nome comercial"
           onChange={(e) => setLeitura({ ...leitura, dados: { ...leitura.dados, fornecedor: e.target.value } })} />
       </label>
       <div className="tw"><table className="t">
-        <thead><tr><th>Usar</th><th>Descrição</th><th>Un.</th><th>Qtd.</th><th>Preço unitário</th><th>Relacionar ao item</th></tr></thead>
+        <thead><tr><th>Descrição no orçamento</th><th>Un.</th><th>Qtd.</th><th>Preço unitário</th><th>Relacionar ao item</th></tr></thead>
         <tbody>{leitura.dados.itens.map((i, k) => <tr key={k}>
-          <td><input type="checkbox" aria-label={`Usar linha ${k + 1} da proposta`} checked={leitura.usar[k] && !destinos[k].ambigua}
-            disabled={destinos[k].ambigua} onChange={(e) => setLeitura({ ...leitura, usar: leitura.usar.map((v, n) => n === k ? e.target.checked : v) })} /></td>
           <td>{i.descricao}</td><td>{i.unidade || "—"}</td><td>{i.quantidade ?? "—"}</td><td>{brl(i.valor_unitario)}</td>
           <td><select aria-label={`Lançar a linha ${k + 1} da proposta em`} value={destinos[k].ambigua ? "" : destinos[k].indice == null ? "novo" : String(destinos[k].indice)}
             onChange={(e) => {
@@ -427,13 +429,13 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
         </tr>)}</tbody>
       </table></div>
       <div className="tools">
-        <button className="btn pri" type="button" disabled={!leitura.usar.some((v, k) => v && !destinos[k].ambigua)} onClick={aplicarLeitura}>Confirmar vínculos e lançar preços</button>
+        <button className="btn pri" type="button" disabled={!leitura.usar.some((v, k) => v && !destinos[k].ambigua)} onClick={aplicarLeitura}>Adicionar preços à tabela</button>
         <button className="btn" type="button" onClick={() => setLeitura(null)}>Fechar conferência</button>
       </div>
     </div>}
 
-    {aviso && <p className="small" role="status">{aviso}</p>}
-  </>;
+    {aviso && <p className="note" role="status">{aviso}</p>}
+  </section>;
 
   return <fieldset className="wide itens-sol" disabled={ocupado || !!anexando}>
     <legend>Itens</legend>
@@ -459,7 +461,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, re
       </>}
     </div>}
     <ItensOrcamentos linhas={linhas} setLinhas={setLinhas} orcamentos={orcamentos} caminho={caminho} ocupado={ocupado} anexando={anexando}
-      enviar={enviar} executar={executar} recarregar={recarregar} usarPncp={usarPncp} setAviso={setAviso} importacaoOrcamento={importacaoOrcamento} selecionarOrcamento={(id) => setOrcamentoParaLer(String(id))} />
+      enviar={enviar} executar={executar} recarregar={recarregar} usarPncp={usarPncp} setAviso={setAviso} importacaoOrcamento={importacaoOrcamento} lerOrcamento={(id) => lerAnexado(id)} />
     {aviso && <p className="small" role="status">{aviso}</p>}
   </fieldset>;
 }
