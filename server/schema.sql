@@ -744,7 +744,7 @@ declare afetadas text[];
 begin
   if TG_OP='UPDATE' then if OLD.valores=NEW.valores then return NEW; end if; end if;
   afetadas=case NEW.etapa
-    when 'pac' then array['pac','dfd','etp','tr','protocolo']
+    when 'pac' then array['dfd','etp','tr','protocolo']
     when 'dfd' then array['dfd','etp','tr','dot','protocolo']
     when 'precos' then array['precos','etp','tr','dot','protocolo']
     when 'etp' then array['etp','tr','protocolo']
@@ -779,3 +779,6 @@ alter table anexos add column if not exists etapa text not null default '';
 -- Registros antigos sem data de juntada conhecida permanecem sem data.
 alter table solicitacao_anexos add column if not exists criado_em timestamptz;
 alter table solicitacao_anexos alter column criado_em set default now();
+
+-- O PAC é um cadastro de apoio. As versões antigas ficam arquivadas, sem exigir revisão de peça própria.
+delete from revisoes_documentos where etapa='pac';

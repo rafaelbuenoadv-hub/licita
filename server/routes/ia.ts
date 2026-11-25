@@ -49,7 +49,7 @@ async function contexto(req: Request, p: Processo, etapaId: string, opts: { incl
   const cadastro = await secretariosDoProcesso(p);
   const { secretarios } = cadastro;
   const modelo = solicitacao ? await modeloSolicitacao(p.orgao_id)
-    : (await q1("select texto from modelos where orgao_id=$1 and etapa=$2", [p.orgao_id, e.id]))?.texto ?? e.modelo;
+    : e.modelo ? (await q1("select texto from modelos where orgao_id=$1 and etapa=$2", [p.orgao_id, e.id]))?.texto ?? e.modelo : null;
   const minutas = await q(
     `select distinct on (etapa) etapa, texto from minutas where processo_id=$1 order by etapa, versao desc`, [p.id]);
   const anexos = await q("select nome, texto from anexos where processo_id=$1 order by id", [p.id]);

@@ -72,9 +72,9 @@ export const ETAPAS: Etapa[] = [
     modelo: null,
   },
   {
-    id: "pac", nome: "Verificar no PAC", doc: "Registro da verificação no Plano Anual de Contratações", docOpcional: true,
+    id: "pac", nome: "Verificar no PAC", doc: null,
     fase: "interna", campos: CAMPOS.pac,
-    oque: "Confirme se o objeto já consta do Plano Anual de Contratações (PAC) vigente e no mês planejado para início. Busque o objeto no PAC e vincule o item ao processo. Se não consta, registre a justificativa da inclusão extraordinária.",
+    oque: "Confirme se o objeto já consta do Plano Anual de Contratações (PAC) vigente e no mês planejado para início. Busque o objeto no PAC e vincule o item ao processo. Se não consta, registre a justificativa da inclusão extraordinária. Esta etapa apenas registra informações, aproveitadas no DFD e no ETP, e não gera documento próprio.",
     base: [{ rotulo: "Art. 12, VII", url: U.a12 }, { rotulo: "Art. 18, caput e § 1º, II", url: U.a18 }, { rotulo: "Dec. 2.533/2024, art. 6º" }],
     papeis: ["requisitante", "contratacao"],
     itens: [
@@ -85,11 +85,7 @@ export const ETAPAS: Etapa[] = [
       "Objeto que não consta do PAC sem justificativa da inclusão extraordinária é a primeira causa de devolução.",
       "O mesmo item do PAC deve ser citado no DFD e no ETP.",
     ],
-    modelo: `REGISTRO DE VERIFICAÇÃO NO PLANO ANUAL DE CONTRATAÇÕES
-Identificação do processo; Secretaria demandante; objeto
-1. Consta do PAC vigente (item e mês previsto) — ou justificativa da inclusão extraordinária
-2. Início no mês planejado, ou motivo da alteração do cronograma
-Local e data; assinatura do responsável pela Secretaria`,
+    modelo: null,
   },
   {
     id: "dfd", nome: "DFD", doc: "Documento de Formalização da Demanda (DFD)",

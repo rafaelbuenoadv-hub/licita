@@ -68,6 +68,7 @@ export async function minutaVigente(processoId: number, etapa: string) {
       where m.processo_id = $1 and m.etapa = $2 order by m.versao desc limit 1`, [processoId, etapa]);
 }
 export async function salvarMinuta(processoId: number, etapa: string, texto: string, origem: string, usuario: number, versaoEsperada?: number) {
+  if (etapa === "pac") throw new ErroHttp(400, "A verificação no PAC registra informações para o DFD e o ETP e não gera documento próprio.");
   return tx(async (c) => {
     const registro = await c.query("select id from processos where id=$1 and excluido_em is null for update", [processoId]);
     if (!registro.rowCount) throw new ErroHttp(404, "Processo não encontrado.");

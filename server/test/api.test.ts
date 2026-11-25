@@ -2070,10 +2070,10 @@ test("processo completo reúne últimas versões e todos os anexos em PDF e Word
   const antes = await q1("select (select count(*) from minutas where processo_id=$1)::int as minutas,(select count(*) from checagens where processo_id=$1)::int as checks,situacao from processos where id=$1", [id]);
   const pdf = await lic.get(`${rota}/completo.pdf`); assert.equal(pdf.status, 200, JSON.stringify(pdf.dados));
   const textoPdf = (await extrairTexto("processo.pdf", pdf.dados)).replace(/\s+/g, " ");
-  for (const marca of ["ENCAMINHAMENTO_PRIMEIRO", "TR_ATUAL_EDITAVEL", "DOTACAO_ATUAL", "FISCAL_ATUAL", "PAC_MINUTA_SALVA_DENTRO_DA_SOLICITACAO", "TOPICO_ADICIONAL_PRESENTE", "PAC_DENTRO_DA_SOLICITACAO", "DFD_ATUAL_EDITAVEL", "ETP_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "APOIO_WORD_INTEGRAL", "ORIGINAL_PRIMEIRA_PAGINA", "ORIGINAL_SEGUNDA_PAGINA", "ANEXO_ANTIGO_EM_TEXTO", "ANEXO_NOVO_ORIGINAL_PRESERVADO", "ORCAMENTO_SEM_VINCULO_TAMBEM_INCLUIDO", "PARECER_DA_REVISAO"]) assert.ok(textoPdf.includes(marca), marca);
+  for (const marca of ["ENCAMINHAMENTO_PRIMEIRO", "TR_ATUAL_EDITAVEL", "DOTACAO_ATUAL", "FISCAL_ATUAL", "TOPICO_ADICIONAL_PRESENTE", "PAC_DENTRO_DA_SOLICITACAO", "DFD_ATUAL_EDITAVEL", "ETP_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "APOIO_WORD_INTEGRAL", "ORIGINAL_PRIMEIRA_PAGINA", "ORIGINAL_SEGUNDA_PAGINA", "ANEXO_ANTIGO_EM_TEXTO", "ANEXO_NOVO_ORIGINAL_PRESERVADO", "ORCAMENTO_SEM_VINCULO_TAMBEM_INCLUIDO", "PARECER_DA_REVISAO"]) assert.ok(textoPdf.includes(marca), marca);
   assert.doesNotMatch(textoPdf, /VERSAO_ANTIGA_NAO_INCLUIR|NAO_VAZAR_OUTRO_PROCESSO/);
   assert.equal(textoPdf.match(/ORIGINAL_PRIMEIRA_PAGINA/g)?.length, 1);
-  assert.doesNotMatch(textoPdf, /CORPO_DA_SOLICITACAO/);
+  assert.doesNotMatch(textoPdf, /CORPO_DA_SOLICITACAO|PAC_MINUTA_SALVA_DENTRO_DA_SOLICITACAO/);
   const ordem = ["ENCAMINHAMENTO_PRIMEIRO", "DFD_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "ETP_ATUAL_EDITAVEL", "TR_ATUAL_EDITAVEL", "DOTACAO_ATUAL", "FISCAL_ATUAL"];
   for (let i = 1; i < ordem.length; i++) assert.ok(textoPdf.indexOf(ordem[i-1]) < textoPdf.indexOf(ordem[i]), `ordem: ${ordem[i-1]} antes de ${ordem[i]}`);
   assert.ok(textoPdf.indexOf("DFD_ATUAL_EDITAVEL") < textoPdf.indexOf("ORIGINAL_PRIMEIRA_PAGINA"));
@@ -2415,4 +2415,44 @@ test("anexos de todas as etapas acompanham suas peças em PDF e Word, inclusive 
     writeFileSync(`${process.env.LICITA_QA_DIR}/anexos-por-etapa-qa.pdf`,pdf.dados);
     writeFileSync(`${process.env.LICITA_QA_DIR}/anexos-por-etapa-qa.docx`,word.dados);
   }
+});
+
+test("PAC só registra dados: não gera minuta e a verificação alimenta DFD e ETP, preservando arquivos e versões antigas", async () => {
+  const adm=await new Cliente().entrar("admin@a.gov.br");
+  const {dados:{id}}=await adm.post("/api/processos",{objeto:"Mobiliário para ampliação escolar",tipo:"bens",via:"licitacao",ano:2046,requisitante:"Educação"});
+  const rota=`/api/processos/${id}`;
+  const usuarioId=(await q1("select id from usuarios where email='admin@a.gov.br'"))!.id;
+  // Um processo antigo pode conter uma peça própria do PAC com pendências e alertas.
+  await pool.query("insert into minutas(processo_id,etapa,versao,texto,usuario_id) values($1,'pac',1,'# PAC ANTIGO\nPAC_ARQUIVADO_ANTIGO [[pendência antiga]]',$2)",[id,usuarioId]);
+  await pool.query("insert into revisoes_documentos(processo_id,etapa,motivo) values($1,'pac','Alerta antigo da peça retirada')",[id]);
+  await migrar();
+  const e=ETAPAS.find((x)=>x.id==="pac")!;
+  assert.equal(e.doc,null);assert.equal(e.modelo,null);
+  assert.ok(!(await adm.get("/api/modelos")).dados.some((m:any)=>m.etapa==="pac"));
+  const valores={consta:"nao",justificativa_inclusao:"Inclusão da demanda após abertura de novas salas."};
+  assert.equal((await adm.put(`${rota}/campos/pac`,{valores})).status,200);
+  assert.equal((await adm.post(`${rota}/checagens`,{item:"pc1",marcado:true})).status,200);
+  const concluir=await adm.post(`${rota}/etapas/pac/concluir`);
+  assert.equal(concluir.dados.concluida,true,JSON.stringify(concluir.dados));
+  assert.ok(!concluir.dados.pendencias.some((p:any)=>["minuta","revisao"].includes(p.codigo)));
+  assert.equal((await adm.post(`${rota}/minutas/pac/dos-campos`)).status,400);
+  assert.equal((await adm.post(`${rota}/minutas/pac`,{texto:"Nova peça PAC"})).status,400);
+  assert.equal((await adm.post(`${rota}/minutas/pac/pendencias`,{versao:1,valores:{0:"Preenchido"}})).status,400);
+  assert.equal((await adm.post(`${rota}/ia/redigir`,{etapa:"pac"})).status,400);
+  const p=(await adm.get(rota)).dados;
+  assert.deepEqual(p.campos.pac,valores);
+  assert.ok(!p.revisoes_documentos.some((r:any)=>r.etapa==="pac"));
+  const {documentoDfd}=await import("../modelo-dfd.js");
+  const {documentoEtp}=await import("../modelos-fase-interna.js");
+  for(const texto of [await documentoDfd(p,p.campos,{nome:"Servidor",cargo:"Educação"}),await documentoEtp(p,p.campos,{nome:"Servidor",cargo:"Educação"})]) {
+    assert.match(texto,/Inclusão da demanda após abertura de novas salas/);
+  }
+  const anexo=new FormData();anexo.set("etapa","pac");anexo.set("arquivo",new Blob(["COMPROVANTE_PAC_ATUAL"]),"comprovante-pac.txt");
+  assert.equal((await adm.post(`${rota}/anexos`,anexo)).status,201);
+  const {pecasDoProcesso}=await import("../processo-completo.js");
+  const {pecas}=await pecasDoProcesso((await adm.get(rota)).dados,usuarioId);
+  assert.ok(pecas.some((x)=>x.nome==="comprovante-pac.txt"));
+  assert.ok(!pecas.some((x)=>x.texto?.includes("PAC_ARQUIVADO_ANTIGO")));
+  assert.equal((await adm.get(`${rota}/minutas/pac`)).dados.versoes.length,1);
+  assert.match((await adm.get(`${rota}/minutas/pac/versoes/1`)).dados.texto,/PAC_ARQUIVADO_ANTIGO/);
 });

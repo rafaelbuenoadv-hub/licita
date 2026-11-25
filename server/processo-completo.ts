@@ -66,8 +66,7 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
     if (id === "dfd" || id === "etp") texto = inserirComplementosDaInstrucao(texto, solicitacoes);
     if (id === "dfd") {
       texto = inserirVerificacaoPac(texto, campos);
-      const pac = minutas.find((m) => m.etapa === "pac");
-      if (pac) texto = inserirComplementosDaInstrucao(texto, [...solicitacoes, { secretaria: "Verificação no PAC", objeto: "", justificativa: "", informacoes: "", itens: [], topicos_adicionais: [{ titulo: `Registro salvo da verificação no PAC — versão ${pac.versao}`, conteudo: pac.texto }] }]);
+
     }
     documentos.set(id, { titulo: `${e.doc ?? e.nome}${minuta ? ` — versão ${minuta.versao}` : " — campos salvos"}`, texto });
   }
