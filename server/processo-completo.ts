@@ -1,3 +1,4 @@
+import { destinoDosAnexos } from "../shared/anexos-etapas.js";
 import { inserirComplementosDaInstrucao, type DadosInstrucao } from "../shared/instrucao.js";
 import { createHash } from "node:crypto";
 import { PDFDocument } from "pdf-lib";
@@ -33,21 +34,27 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
     q<{ revisao_id: number; nome: string; arquivo: Buffer }>("select a.revisao_id,a.nome,a.arquivo from revisao_arquivos a join revisoes r on r.id=a.revisao_id where r.processo_id=$1 and r.orgao_id=$2 order by r.id,a.id", [p.id, p.orgao_id]),
     q<{ revisao_id: number; tipo: string; texto: string }>("select distinct on (r.id,m.tipo) r.id as revisao_id,m.tipo,m.texto from revisao_minutas m join revisoes r on r.id=m.revisao_id where r.processo_id=$1 and r.orgao_id=$2 order by r.id,m.tipo,m.id desc", [p.id, p.orgao_id]),
   ]);
-  const pecas: Peca[] = [], anexosPecas: Peca[] = [], ausentes: string[] = [];
+  const documentos = new Map<string, Peca>(), grupos = new Map<string, Peca[]>(), ausentes: string[] = [];
+  const grupo = (etapa: string) => {
+    const destino = destinoDosAnexos(etapa);
+    if (!grupos.has(destino)) grupos.set(destino, []);
+    return grupos.get(destino)!;
+  };
   const arquivosVistos = new Map<string, Peca>();
-  const incluirArquivo = (nome: string, arquivo: Buffer, referencia: string) => {
+  const incluirArquivo = (nome: string, arquivo: Buffer, referencia: string, etapa: string) => {
     const hash = createHash("sha256").update(arquivo).digest("hex");
-    const visto = arquivosVistos.get(hash);
+    const chave = `${destinoDosAnexos(etapa)}:${hash}`;
+    const visto = arquivosVistos.get(chave);
     if (visto) { visto.referencias!.push(`${referencia}: ${nome}`); return; }
     const peca = { titulo: `${referencia} — ${nomeLinha(nome)}`, nome, arquivo, referencias: [] };
-    arquivosVistos.set(hash, peca); anexosPecas.push(peca);
+    arquivosVistos.set(chave, peca); grupo(etapa).push(peca);
   };
   const incluirOrcamentos = () => {
-    for (const o of orcamentos) incluirArquivo(o.nome, o.arquivo, "Orçamento / comprovante de pesquisa de preços");
+    for (const o of orcamentos) incluirArquivo(o.nome, o.arquivo, "Orçamento / comprovante de pesquisa de preços", "precos");
   };
   for (const s of solicitacoes) {
-    if (s.arquivo && s.nome_arquivo) incluirArquivo(s.nome_arquivo, s.arquivo, `Documento de origem — ${s.secretaria}`);
-    for (const a of apoios.filter((a) => a.solicitacao_id === s.id)) incluirArquivo(a.nome, a.arquivo, `Documento de apoio — ${s.secretaria}`);
+    if (s.arquivo && s.nome_arquivo) incluirArquivo(s.nome_arquivo, s.arquivo, `Documento de origem — ${s.secretaria}`, "solicitacao");
+    for (const a of apoios.filter((a) => a.solicitacao_id === s.id)) incluirArquivo(a.nome, a.arquivo, `Documento de apoio — ${s.secretaria}`, "solicitacao");
   }
   for (const id of ORDEM_DOCUMENTOS_PROCESSO) {
     const e = ETAPAS.find((e) => e.id === id)!;
@@ -62,26 +69,37 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
       const pac = minutas.find((m) => m.etapa === "pac");
       if (pac) texto = inserirComplementosDaInstrucao(texto, [...solicitacoes, { secretaria: "Verificação no PAC", objeto: "", justificativa: "", informacoes: "", itens: [], topicos_adicionais: [{ titulo: `Registro salvo da verificação no PAC — versão ${pac.versao}`, conteudo: pac.texto }] }]);
     }
-    pecas.push({ titulo: `${e.doc ?? e.nome}${minuta ? ` — versão ${minuta.versao}` : " — campos salvos"}`, texto });
+    documentos.set(id, { titulo: `${e.doc ?? e.nome}${minuta ? ` — versão ${minuta.versao}` : " — campos salvos"}`, texto });
   }
   incluirOrcamentos();
   for (const pesquisa of pesquisas) {
     const e = ETAPAS.find((e) => e.id === pesquisa.etapa);
-    if (e) anexosPecas.push({ titulo: `Pesquisa de apoio — ${e.nome}`, texto: `# PESQUISA DE APOIO — ${e.nome}\n\n${pesquisa.texto}\n\n## Fontes\n${pesquisa.fontes.map((f) => `${f.titulo}: ${f.url}`).join("\n")}` });
+    if (e) grupo(e.id).push({ titulo: `Pesquisa de apoio — ${e.nome}`, texto: `# PESQUISA DE APOIO — ${e.nome}\n\n${pesquisa.texto}\n\n## Fontes\n${pesquisa.fontes.map((f) => `${f.titulo}: ${f.url}`).join("\n")}` });
   }
   for (const a of anexos) {
     const referencia = a.etapa ? ETAPAS.find((e) => e.id === a.etapa)?.nome ?? a.etapa : "Processo";
-    anexosPecas.push({ titulo: `Registro de juntada — ${nomeLinha(a.nome)}`, texto: `# REGISTRO DE JUNTADA\n\nArquivo: ${nomeLinha(a.nome)}\n\nPeça de referência: ${referencia}\n\nJuntado em: ${new Date(a.criado_em).toLocaleString("pt-BR", {timeZone:"America/Sao_Paulo"})}` });
-    if (a.arquivo) incluirArquivo(a.nome, a.arquivo, "Anexo do processo");
-    else anexosPecas.push({ titulo: `Anexo do processo — ${nomeLinha(a.nome)} (registro em texto)`, texto: `# ${nomeLinha(a.nome)}\n\n${a.texto}` });
+    grupo(a.etapa).push({ titulo: `Registro de juntada — ${nomeLinha(a.nome)}`, texto: `# REGISTRO DE JUNTADA\n\nArquivo: ${nomeLinha(a.nome)}\n\nPeça de referência: ${referencia}\n\nJuntado em: ${new Date(a.criado_em).toLocaleString("pt-BR", {timeZone:"America/Sao_Paulo"})}` });
+    if (a.arquivo) incluirArquivo(a.nome, a.arquivo, `Anexo — ${referencia}`, a.etapa);
+    else grupo(a.etapa).push({ titulo: `Anexo do processo — ${nomeLinha(a.nome)} (registro em texto)`, texto: `# ${nomeLinha(a.nome)}\n\n${a.texto}` });
   }
   for (const r of revisoes) {
-    for (const a of arquivosRevisao.filter((a) => a.revisao_id === r.id)) incluirArquivo(a.nome, a.arquivo, `Revisão ${r.numero}`);
-    for (const m of minutasRevisao.filter((m) => m.revisao_id === r.id)) anexosPecas.push({ titulo: `Revisão ${r.numero} — ${m.tipo}`, texto: m.texto });
+    for (const a of arquivosRevisao.filter((a) => a.revisao_id === r.id)) incluirArquivo(a.nome, a.arquivo, `Revisão ${r.numero}`, "");
+    for (const m of minutasRevisao.filter((m) => m.revisao_id === r.id)) grupo("").push({ titulo: `Revisão ${r.numero} — ${m.tipo}`, texto: m.texto });
   }
   const revisoesPendentes = await q<{etapa:string;motivo:string}>("select etapa,motivo from revisoes_documentos where processo_id=$1",[p.id]);
-  const capa = [`# PROCESSO COMPLETO`, orgao?.nome ?? "", `Protocolo: ${p.protocolo}`, p.numero && `Processo administrativo: ${p.numero}`, p.procedimento && `Procedimento: ${p.procedimento}`, `Objeto: ${p.objeto}`, `Área requisitante: ${[p.requisitante, ...p.areas_adicionais].filter(Boolean).join("; ")}`, `Tipo: ${TIPOS[p.tipo]} · Forma: ${VIAS[p.via]}`, `Situação: ${p.situacao}`, p.obs && `Observações: ${p.obs}`, `Exportado em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`, "Reúne as últimas versões salvas dos documentos e os anexos disponíveis.", revisoesPendentes.length && `REVISÃO NECESSÁRIA: ${revisoesPendentes.map((r)=>`${ETAPAS.find((e)=>e.id===r.etapa)?.nome??r.etapa}: ${r.motivo}`).join("; ")}` , ausentes.length && `Etapas internas sem documento salvo ou campos preenchidos: ${ausentes.join("; ")}.`].filter(Boolean).join("\n\n");
-  return { capa, pecas: [...pecas, ...anexosPecas] };
+  const capa = [`# PROCESSO COMPLETO`, orgao?.nome ?? "", `Protocolo: ${p.protocolo}`, p.numero && `Processo administrativo: ${p.numero}`, p.procedimento && `Procedimento: ${p.procedimento}`, `Objeto: ${p.objeto}`, `Área requisitante: ${[p.requisitante, ...p.areas_adicionais].filter(Boolean).join("; ")}`, `Tipo: ${TIPOS[p.tipo]} · Forma: ${VIAS[p.via]}`, `Situação: ${p.situacao}`, p.obs && `Observações: ${p.obs}`, `Exportado em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`, "Reúne as últimas versões salvas. Os anexos acompanham cada peça; documentos da Instrução e do PAC acompanham o DFD, e os do planejamento acompanham o ETP. Arquivos sem etapa definida ficam ao final.", revisoesPendentes.length && `REVISÃO NECESSÁRIA: ${revisoesPendentes.map((r)=>`${ETAPAS.find((e)=>e.id===r.etapa)?.nome??r.etapa}: ${r.motivo}`).join("; ")}` , ausentes.length && `Etapas internas sem documento salvo ou campos preenchidos: ${ausentes.join("; ")}.`].filter(Boolean).join("\n\n");
+  const pecas: Peca[] = [];
+  for (const id of ORDEM_DOCUMENTOS_PROCESSO) {
+    const documento = documentos.get(id), anexosDaEtapa = grupos.get(id) ?? [];
+    if (documento) pecas.push(documento);
+    else if (anexosDaEtapa.length) {
+      const nome = ETAPAS.find((e) => e.id === id)!.nome;
+      pecas.push({ titulo: `Anexos da etapa — ${nome}`, texto: `# ANEXOS DA ETAPA — ${nome}\n\nO documento principal desta etapa ainda não foi montado. Os arquivos de apoio disponíveis seguem reunidos nesta seção.` });
+    }
+    pecas.push(...anexosDaEtapa);
+  }
+  pecas.push(...(grupos.get("gerais") ?? []));
+  return { capa, pecas };
 }
 
 export async function montarProcessoCompleto(p: Processo, formato: "pdf" | "docx", usuario: number, timbrado?: Timbrado) {
@@ -104,7 +122,14 @@ export async function montarProcessoCompleto(p: Processo, formato: "pdf" | "docx
       tamanhoIndice = indicePdf.getPageCount();
     }
     for (const origem of [capaPdf, indicePdf, ...partes.map((x) => x.pdf)]) for (const pg of await pdf.copyPages(origem, origem.getPageIndices())) pdf.addPage(pg);
-    for (const [i, x] of partes.entries()) if (x.arquivo) await pdf.attach(x.arquivo, `${i + 1}-${x.nome}`, { description: x.titulo });
+    const originaisIncorporados = new Set<string>();
+    for (const [i, x] of partes.entries()) if (x.arquivo) {
+      const hash = createHash("sha256").update(x.arquivo).digest("hex");
+      if (!originaisIncorporados.has(hash)) {
+        await pdf.attach(x.arquivo, `${i + 1}-${x.nome}`, { description: x.titulo });
+        originaisIncorporados.add(hash);
+      }
+    }
     return Buffer.from(await pdf.save());
   }
   const indice = `# ÍNDICE DO PROCESSO\n\n${partes.map((x, i) => `${i + 1}. ${x.titulo}${x.referencias?.length ? `\nMesmo arquivo também referido em: ${x.referencias.join("; ")}` : ""}`).join("\n\n") || "Nenhum documento ou anexo disponível."}`;

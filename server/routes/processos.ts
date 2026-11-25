@@ -1,3 +1,4 @@
+import { textoLocalDoPdf } from "../orcamento-pdf.js";
 import { registrosDaInstrucao, sincronizarDadosDaInstrucao } from "../instrucao.js";
 import { montarProcessoCompleto } from "../processo-completo.js";
 import { anexosDaRequisicao, apoiosComTextoLocal, hashDoAnexo, incorporarApoios, nomeAnexoEnviado, parametrosApoios, receberAnexosSolicitacao, referenciasApoios, salvarApoios } from "../anexos-solicitacao.js";
@@ -296,7 +297,7 @@ export function rotasProcessos() {
     const minutas = await q(
       `select distinct on (etapa) etapa, versao, origem, criado_em from minutas where processo_id = $1 and etapa = any($2::text[]) order by etapa, versao desc`, [p.id, ETAPAS.map((e) => e.id)]);
     const revisoes_documentos = await q("select etapa,motivo,em from revisoes_documentos where processo_id=$1 order by em", [p.id]);
-    const anexos = await q("select id, nome, etapa, length(texto) as caracteres, criado_em from anexos where processo_id = $1 order by id", [p.id]);
+    const anexos = await q("select id, nome, etapa, arquivo is not null as tem_arquivo, length(texto) as caracteres, criado_em from anexos where processo_id = $1 order by id", [p.id]);
     const orcamentos = await q(
       `select o.id, coalesce(o.fornecedor_manual, o.fornecedor) as fornecedor, o.fornecedor_manual, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, o.dados, o.lido_em, u.nome as usuario
          from orcamentos o left join usuarios u on u.id = o.usuario_id where o.processo_id = $1 order by o.id`, [p.id]);
@@ -789,10 +790,14 @@ export function rotasProcessos() {
     if (!temPapel(req.usuario!, "requisitante", "contratacao", "juridico")) throw new ErroHttp(403, "Seu perfil não pode anexar documentos.");
     if (!req.file) throw new ErroHttp(400, "Envie um arquivo.");
     const nome = nomeEnviado(req.file);
-    const texto = await extrairTexto(nome, req.file.buffer);
     const etapa = z.string().refine((x) => !x || !!etapaPorId(x), "Peça de referência inválida.").parse(req.body.etapa ?? "");
+    if (!req.file.size) throw new ErroHttp(400, "O arquivo está vazio.");
+    if (!/\.(pdf|docx|xlsx|xls|jpg|jpeg|png|txt|md|csv)$/i.test(nome)) throw new ErroHttp(415, "Envie PDF, Word, planilha, imagem ou arquivo de texto.");
+    // Juntar um comprovante não depende de OCR nem de IA: preserva sempre o original.
+    const texto = /\.pdf$/i.test(nome) ? await textoLocalDoPdf(req.file.buffer).catch(() => "")
+      : /\.(docx|xlsx|txt|md|csv)$/i.test(nome) ? await extrairTexto(nome, req.file.buffer).catch(() => "") : "";
     const a = await q1("insert into anexos (processo_id, nome, texto, usuario_id, arquivo, etapa) values ($1,$2,$3,$4,$5,$6) returning id", [p.id, nome, texto, req.usuario!.id, req.file.buffer, etapa]);
-    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "anexo.incluido", detalhe: { nome } });
+    await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "anexo.incluido", detalhe: { nome, etapa } });
     res.status(201).json({ id: a.id, caracteres: texto.length });
   });
   r.get("/processos/:id/anexos/:aid", async (req, res) => {
@@ -800,6 +805,13 @@ export function rotasProcessos() {
     const a = await q1("select id, nome, texto from anexos where id=$1 and processo_id=$2", [Number(req.params.aid), p.id]);
     if (!a) throw new ErroHttp(404, "Documento não encontrado.");
     res.json(a);
+  });
+  r.get("/processos/:id/anexos/:aid/arquivo", async(req,res) => {
+    const p = await processoDo(req);
+    const a = await q1<{nome:string;arquivo:Buffer|null}>("select nome,arquivo from anexos where id=$1 and processo_id=$2",[Number(req.params.aid),p.id]);
+    if (!a?.arquivo) throw new ErroHttp(404,"Arquivo original não disponível para este registro.");
+    res.set("Cache-Control","private, no-store");
+    enviarArquivo(res,a.nome,a.arquivo);
   });
   r.put("/processos/:id/anexos/:aid/referencia", exigePapel("requisitante", "contratacao", "juridico"), async(req,res)=>{
     const p=await processoDo(req);

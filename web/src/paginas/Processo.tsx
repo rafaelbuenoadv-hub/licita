@@ -1,3 +1,4 @@
+import { AnexosEtapa } from "./AnexosEtapa";
 import { PlanejamentoEtp } from "./PlanejamentoEtp";
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { compararOrcamentos, nomeFornecedorOrcamento, type DadosOrcamento } from "../../../shared/orcamentos";
@@ -93,7 +94,7 @@ export function ProcessoPg() {
         </div>
       </div>
 
-      <Anexos p={p} recarregar={carregar} podeIncluir={tem(eu, "requisitante", "contratacao", "juridico")} />
+      <details className="panel box"><summary>Gerenciar todos os anexos do processo</summary><AnexosEtapa processo={p} recarregar={carregar} podeIncluir={tem(eu, "requisitante", "contratacao", "juridico")} podeExcluir={tem(eu, "requisitante", "contratacao")} /></details>
       <Historico id={p.id} versao={p.checagens.length + (p.minutas?.length ?? 0) + (p.orcamentos?.length ?? 0) + p.solicitacoes.length} atualizado={p.atualizado_em} />
     </>
   );
@@ -302,6 +303,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
         <ExportarProcesso processo={p} salvarPendentes={async () => !editavel || !sujo || await salvarCampos(true)} />
         <ProtocoloChecklist p={p} checks={checks} irPara={irPara} />
       </>}
+      <AnexosEtapa key={e.id} processo={p} etapa={e.id} recarregar={recarregar} podeIncluir={tem(eu, "requisitante", "contratacao", "juridico")} podeExcluir={tem(eu, "requisitante", "contratacao")} />
       <div className="sec"><span className="lbl">Conferência obrigatória</span>
         <ul className="chk">{its.map((i: any) => {
           const q = quem[i.id];
@@ -612,32 +614,6 @@ function Minuta({ p, e, editavel, setAviso, camposSujos, salvarCampos }: { p: an
           })}
         </div>) : texto ? <p className="small" style={{ color: "var(--accent)" }}>Nenhum campo pendente nesta minuta.</p> : null)}
     </div>
-  );
-}
-
-function Anexos({ p, recarregar, podeIncluir }: { p: any; recarregar: () => Promise<any>; podeIncluir: boolean }) {
-  const [msg, setMsg] = useState<{ t: string; tipo?: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [referencia, setReferencia] = useState("");
-  const enviar = async (f: File | undefined) => {
-    if (!f) return;
-    setBusy(true); setMsg(null);
-    try { const fd = new FormData(); fd.append("arquivo", f); fd.set("etapa", referencia); const r = await api.post(`/processos/${p.id}/anexos`, fd); await recarregar(); setMsg({ t: `"${f.name}" anexado (${r.caracteres.toLocaleString("pt-BR")} caracteres lidos).`, tipo: "ok" }); }
-    catch (e: any) { setMsg({ t: e.message, tipo: "bad" }); }
-    finally { setBusy(false); }
-  };
-  const remover = async (aid: number) => { await api.del(`/processos/${p.id}/anexos/${aid}`); await recarregar(); };
-  return (
-    <section className="panel">
-      <div className="pad-s row"><div><h2>Documentos de apoio</h2><p className="small muted">Memorandos, planilhas, levantamentos e peças antigas que ficam juntos do processo.</p></div>
-        {podeIncluir && <><label>Peça de referência<select value={referencia} onChange={(e)=>setReferencia(e.target.value)}><option value="">Processo em geral</option>{ETAPAS.filter((x)=>x.doc).map((x)=><option key={x.id} value={x.id}>{x.nome}</option>)}</select></label><label className="btn" htmlFor="anexo">{busy ? "Lendo…" : "Anexar documento"}</label>
-          <input id="anexo" type="file" accept=".docx,.pdf,.txt,.md,.csv" hidden disabled={busy} onChange={(e) => { enviar(e.target.files?.[0]); e.target.value = ""; }} /></>}</div>
-      {msg && <p className={"note " + (msg.tipo ?? "")} style={{ margin: "0 12px 12px" }}>{msg.t}</p>}
-      {p.anexos.length === 0 ? <p className="pad-s muted">Nenhum documento anexado.</p> :
-        <div className="tw"><table className="t"><tbody>{p.anexos.map((a: any) => (
-          <tr key={a.id}><td>{a.nome}</td><td>{podeIncluir ? <select aria-label={`Peça de referência de ${a.nome}`} value={a.etapa ?? ""} onChange={async(ev)=>{try{await api.put(`/processos/${p.id}/anexos/${a.id}/referencia`,{etapa:ev.target.value});await recarregar();}catch(er:any){setMsg({t:er.message,tipo:"bad"});}}}><option value="">Processo em geral</option>{ETAPAS.filter((x)=>x.doc).map((x)=><option key={x.id} value={x.id}>{x.nome}</option>)}</select> : ETAPAS.find((x)=>x.id===a.etapa)?.nome ?? "Processo em geral"}</td><td className="small muted">{a.caracteres.toLocaleString("pt-BR")} caracteres</td><td className="small muted">{dataHora(a.criado_em)}</td>
-            <td className="r">{podeIncluir && <button className="lnk" onClick={() => remover(a.id)}>Remover</button>}</td></tr>))}</tbody></table></div>}
-    </section>
   );
 }
 

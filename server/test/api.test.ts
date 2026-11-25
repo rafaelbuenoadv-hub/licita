@@ -1776,13 +1776,14 @@ test("relatório de cotação (Banco de Preços) é lido sem IA, e anexar PDF co
   const r1 = await lic.req("POST", `/api/processos/${id}/anexos`, fd);
   assert.equal(r1.status, 201, JSON.stringify(r1.dados));
   assert.ok(r1.dados.caracteres > 20);
-  // PDF sem texto (digitalizado): aviso claro, não erro interno.
+  // PDF digitalizado pode ser juntado como comprovante sem exigir leitura por IA.
   const vazio = await PDFDocument.create(); vazio.addPage();
   const fd2 = new FormData();
   fd2.append("arquivo", new Blob([Buffer.from(await vazio.save())]), "digitalizado.pdf");
   const r2 = await lic.req("POST", `/api/processos/${id}/anexos`, fd2);
-  assert.equal(r2.status, 422);
-  assert.match(r2.dados.erro, /não tem texto selecionável/);
+  assert.equal(r2.status, 201);
+  assert.equal(r2.dados.caracteres, 0);
+  assert.deepEqual((await lic.get(`/api/processos/${id}/anexos/${r2.dados.id}/arquivo`)).dados, Buffer.from(await vazio.save()));
 });
 
 test("proposta excluída da solicitação fica fora da tabela e pode ser restaurada sem afetar outra secretaria", async () => {
@@ -2073,9 +2074,12 @@ test("processo completo reúne últimas versões e todos os anexos em PDF e Word
   assert.doesNotMatch(textoPdf, /VERSAO_ANTIGA_NAO_INCLUIR|NAO_VAZAR_OUTRO_PROCESSO/);
   assert.equal(textoPdf.match(/ORIGINAL_PRIMEIRA_PAGINA/g)?.length, 1);
   assert.doesNotMatch(textoPdf, /CORPO_DA_SOLICITACAO/);
-  const ordem = ["ENCAMINHAMENTO_PRIMEIRO", "DFD_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "ETP_ATUAL_EDITAVEL", "TR_ATUAL_EDITAVEL", "DOTACAO_ATUAL", "FISCAL_ATUAL", "ORIGINAL_PRIMEIRA_PAGINA"];
+  const ordem = ["ENCAMINHAMENTO_PRIMEIRO", "DFD_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "ETP_ATUAL_EDITAVEL", "TR_ATUAL_EDITAVEL", "DOTACAO_ATUAL", "FISCAL_ATUAL"];
   for (let i = 1; i < ordem.length; i++) assert.ok(textoPdf.indexOf(ordem[i-1]) < textoPdf.indexOf(ordem[i]), `ordem: ${ordem[i-1]} antes de ${ordem[i]}`);
-  assert.ok(textoPdf.indexOf("DFD_ATUAL_EDITAVEL") < textoPdf.indexOf("ETP_ATUAL_EDITAVEL"));
+  assert.ok(textoPdf.indexOf("DFD_ATUAL_EDITAVEL") < textoPdf.indexOf("ORIGINAL_PRIMEIRA_PAGINA"));
+  assert.ok(textoPdf.indexOf("ORIGINAL_SEGUNDA_PAGINA") < textoPdf.indexOf("MEMORIA_DE_CALCULO_SALVA"));
+  assert.ok(textoPdf.indexOf("MEMORIA_DE_CALCULO_SALVA") < textoPdf.indexOf("ORCAMENTO_SEM_VINCULO_TAMBEM_INCLUIDO"));
+  assert.ok(textoPdf.indexOf("ORCAMENTO_SEM_VINCULO_TAMBEM_INCLUIDO") < textoPdf.indexOf("ETP_ATUAL_EDITAVEL"));
   const unido = await PDFDocument.load(pdf.dados);
   const names = unido.catalog.lookup(PDFName.of("Names"), PDFDict).lookup(PDFName.of("EmbeddedFiles"), PDFDict).lookup(PDFName.of("Names"), PDFArray);
   assert.equal(names.size(), 8, "quatro originais únicos devem acompanhar o PDF");
@@ -2088,7 +2092,7 @@ test("processo completo reúne últimas versões e todos os anexos em PDF e Word
   const textoWord = await extrairTexto("processo.docx", docx.dados);
   assert.match(textoWord, /DFD_ATUAL_EDITAVEL/); assert.match(textoWord, /ETP_ATUAL_EDITAVEL/); assert.match(textoWord, /ANEXO_ANTIGO_EM_TEXTO/);
   assert.doesNotMatch(textoWord, /VERSAO_ANTIGA_NAO_INCLUIR|NAO_VAZAR_OUTRO_PROCESSO/);
-  for (let i = 1; i < ordem.length - 1; i++) assert.ok(textoWord.indexOf(ordem[i-1]) < textoWord.indexOf(ordem[i]), `ordem Word: ${ordem[i-1]} antes de ${ordem[i]}`);
+  for (let i = 1; i < ordem.length; i++) assert.ok(textoWord.indexOf(ordem[i-1]) < textoWord.indexOf(ordem[i]), `ordem Word: ${ordem[i-1]} antes de ${ordem[i]}`);
   const { unzipSync } = await import("fflate"); const zip = unzipSync(docx.dados);
   assert.equal(Object.keys(zip).filter((n) => n.startsWith("word/media/") && n.endsWith(".jpg")).length, 5, "todas as cinco páginas dos anexos devem aparecer no Word");
   assert.equal((await outro.get(`${rota}/completo.pdf`)).status, 404);
@@ -2342,4 +2346,73 @@ test("planejamento inicia o mesmo ETP antes dos preços; revisões preservam ver
   assert.equal((await outro.put(`${rota}/anexos/${salvo.id}/referencia`,{etapa:"dfd"})).status,404);
   const corrigido=(await adm.get(rota)).dados.anexos.find((a:any)=>a.id===salvo.id);
   assert.equal(corrigido.criado_em,salvo.criado_em);assert.equal(corrigido.etapa,"tr");
+});
+
+test("anexos de todas as etapas acompanham suas peças em PDF e Word, inclusive PAC, instrução e planejamento", async () => {
+  const adm=await new Cliente().entrar("admin@a.gov.br"), outro=await new Cliente().entrar("admin@b.gov.br");
+  const {dados:{id}}=await adm.post("/api/processos",{objeto:"Organização dos anexos por etapa",tipo:"bens",via:"licitacao",ano:2045});
+  const rota=`/api/processos/${id}`;
+  const { ORDEM_DOCUMENTOS_PROCESSO,pecasDoProcesso }=await import("../processo-completo.js");
+  const { destinoDosAnexos }=await import("../../shared/anexos-etapas.js");
+  const usuarioId=(await q1("select id from usuarios where email='admin@a.gov.br'"))!.id;
+  for(const etapa of ORDEM_DOCUMENTOS_PROCESSO) await pool.query("insert into minutas(processo_id,etapa,versao,texto,usuario_id) values($1,$2,1,$3,$4)",[id,etapa,`# DOCUMENTO PRINCIPAL\nCORPO_PRINCIPAL_${etapa.toUpperCase()}`,usuarioId]);
+  const anexar=async(etapa:string,nome:string,bytes:Buffer)=>{
+    const dados=new FormData();dados.set("arquivo",new Blob([bytes]),nome);dados.set("etapa",etapa);
+    return adm.post(`${rota}/anexos`,dados);
+  };
+  for(const etapa of ETAPAS){
+    const bytes=Buffer.from(`COMPROVANTE_CORPO_${etapa.id.toUpperCase()}`);
+    const r=await anexar(etapa.id,`apoio-${etapa.id}.txt`,bytes);assert.equal(r.status,201,etapa.id);
+    const original=await adm.get(`${rota}/anexos/${r.dados.id}/arquivo`);assert.equal(original.status,200);assert.deepEqual(original.dados,bytes);
+    assert.equal((await outro.get(`${rota}/anexos/${r.dados.id}/arquivo`)).status,404);
+  }
+  const comum=Buffer.from("ARQUIVO_COMPARTILHADO_CORPO");
+  assert.equal((await anexar("tr","compartilhado-tr.txt",comum)).status,201);
+  assert.equal((await anexar("dot","compartilhado-dot.txt",comum)).status,201);
+  assert.equal((await anexar("tr","copia-tr.txt",comum)).status,201);
+  assert.equal((await anexar("","geral-sem-etapa.txt",Buffer.from("ANEXO_GERAL_CORPO"))).status,201);
+  const digitalizado=await PDFDocument.create();digitalizado.addPage();
+  const pdfSemTexto=Buffer.from(await digitalizado.save());
+  const scan=await anexar("tr","digitalizado.pdf",pdfSemTexto);assert.equal(scan.status,201);assert.equal(scan.dados.caracteres,0,"anexar não exige texto nem IA");
+  assert.deepEqual((await adm.get(`${rota}/anexos/${scan.dados.id}/arquivo`)).dados,pdfSemTexto);
+  assert.equal((await anexar("inexistente","invalido.txt",Buffer.from("Texto"))).status,400);
+  assert.equal((await anexar("dfd","programa.exe",Buffer.from("Texto"))).status,415);
+  const p=(await adm.get(rota)).dados;
+  assert.ok(p.anexos.every((a:any)=>a.tem_arquivo));
+  const {pecas}=await pecasDoProcesso(p,usuarioId);
+  for(const etapa of ETAPAS){
+    const destino=destinoDosAnexos(etapa.id), inicio=pecas.findIndex((x)=>x.texto?.includes(`CORPO_PRINCIPAL_${destino.toUpperCase()}`));
+    const posicao=pecas.findIndex((x)=>x.nome===`apoio-${etapa.id}.txt`);
+    const proximo=ORDEM_DOCUMENTOS_PROCESSO[ORDEM_DOCUMENTOS_PROCESSO.indexOf(destino as any)+1];
+    assert.ok(posicao>inicio,`${etapa.id} após ${destino}`);
+    if(proximo) assert.ok(posicao<pecas.findIndex((x)=>x.texto?.includes(`CORPO_PRINCIPAL_${proximo.toUpperCase()}`)),`${etapa.id} antes da próxima peça`);
+  }
+  assert.equal(pecas.filter((x)=>x.arquivo?.equals(comum)).length,2,"o mesmo arquivo acompanha cada etapa e não duplica dentro dela");
+  const pdf=await adm.get(`${rota}/completo.pdf`);assert.equal(pdf.status,200,JSON.stringify(pdf.dados));
+  const textoPdf=(await extrairTexto("processo.pdf",pdf.dados)).replace(/\s+/g," ");
+  for(const etapa of ETAPAS){
+    const destino=destinoDosAnexos(etapa.id),proximo=ORDEM_DOCUMENTOS_PROCESSO[ORDEM_DOCUMENTOS_PROCESSO.indexOf(destino as any)+1];
+    assert.ok(textoPdf.indexOf(`COMPROVANTE_CORPO_${etapa.id.toUpperCase()}`)>textoPdf.indexOf(`CORPO_PRINCIPAL_${destino.toUpperCase()}`),etapa.id);
+    if(proximo) assert.ok(textoPdf.indexOf(`COMPROVANTE_CORPO_${etapa.id.toUpperCase()}`)<textoPdf.indexOf(`CORPO_PRINCIPAL_${proximo.toUpperCase()}`),etapa.id);
+  }
+  assert.equal(textoPdf.match(/ARQUIVO_COMPARTILHADO_CORPO/g)?.length,2);
+  assert.ok(textoPdf.indexOf("ANEXO_GERAL_CORPO")>textoPdf.indexOf("CORPO_PRINCIPAL_FISCAL"));
+  const word=await adm.get(`${rota}/completo.docx`);assert.equal(word.status,200);
+  const textoWord=await extrairTexto("processo.docx",word.dados);
+  for(const etapa of ETAPAS){
+    const destino=destinoDosAnexos(etapa.id),proximo=ORDEM_DOCUMENTOS_PROCESSO[ORDEM_DOCUMENTOS_PROCESSO.indexOf(destino as any)+1];
+    const arquivo=textoWord.lastIndexOf(`apoio-${etapa.id}.txt`);
+    assert.ok(arquivo>textoWord.indexOf(`CORPO_PRINCIPAL_${destino.toUpperCase()}`),etapa.id);
+    if(proximo) assert.ok(arquivo<textoWord.indexOf(`CORPO_PRINCIPAL_${proximo.toUpperCase()}`),etapa.id);
+  }
+  // Um anexo também deve ser preservado quando ainda não existe documento principal.
+  await pool.query("delete from minutas where processo_id=$1 and etapa='dot'",[id]);
+  const semPrincipal=await pecasDoProcesso((await adm.get(rota)).dados,usuarioId);
+  assert.ok(semPrincipal.pecas.some((x)=>x.titulo==="Anexos da etapa — Dotação orçamentária"));
+  assert.ok(semPrincipal.pecas.some((x)=>x.nome==="apoio-dot.txt"));
+  if(process.env.LICITA_QA_DIR){
+    const{writeFileSync}=await import("node:fs");
+    writeFileSync(`${process.env.LICITA_QA_DIR}/anexos-por-etapa-qa.pdf`,pdf.dados);
+    writeFileSync(`${process.env.LICITA_QA_DIR}/anexos-por-etapa-qa.docx`,word.dados);
+  }
 });
