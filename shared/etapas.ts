@@ -123,45 +123,6 @@ Identificação do processo e do procedimento
 Local e data; assinatura do titular da área requisitante; ratificação do setor de licitações e contratos`,
   },
   {
-    id: "etp", nome: "Estudo Técnico Preliminar", doc: "Estudo Técnico Preliminar (ETP)",
-    fase: "interna", campos: CAMPOS.etp ?? [],
-    oque: "Mostra o problema a resolver e a melhor solução, para que se avalie a viabilidade técnica e econômica. Os incisos I, IV, VI, VIII e XIII (★) são o conteúdo mínimo; os demais devem constar ou ter a ausência justificada. Em obras e serviços comuns de engenharia o ETP é opcional no Município, desde que não haja prejuízo técnico (Dec. 2.533/2024, art. 8º).",
-    base: [{ rotulo: "Art. 18, §§ 1º a 3º", url: U.a18 }, { rotulo: "Dec. 2.533/2024, arts. 7º e 8º" }],
-    papeis: ["requisitante", "contratacao"],
-    itens: [
-      campos("etp"),
-      it("e14", "Assinado por quem elaborou; a fiscalização ficará com outro servidor", "Art. 7º, § 1º"),
-    ],
-    atencao: [
-      "Se o ETP não explica POR QUE esta solução e POR QUE esta quantidade, o processo tende a voltar em diligência.",
-      "Comparar de fato as alternativas (vantagens, desvantagens, conclusão), não só descrever a escolhida.",
-      "Não invocar urgência quando o fundamento é o valor.",
-      "Em versão retificada, fechar com um quadro \"Alterações em relação à versão anterior\" e o motivo de cada uma.",
-      "Campos que dependem de outro setor ficam realçados em amarelo até serem preenchidos; não assinar com amarelo pendente.",
-    ],
-    modelo: `ESTUDO TÉCNICO PRELIMINAR
-(Lei nº 14.133/2021, art. 18, §§ 1º e 2º)
-Identificação do processo e do procedimento
-1. Informações básicas (objeto e natureza do objeto)
-2. Descrição da necessidade (com quadro Indicador | Dado | Fonte)
-3. Área requisitante
-4. Requisitos da contratação
-5. Levantamento de mercado e análise das alternativas (quadro Alternativa | Vantagens | Desvantagens | Conclusão)
-6. Estimativa das quantidades
-7. Estimativa do valor
-8. Descrição da solução como um todo
-9. Justificativa para o parcelamento ou não
-10. Contratações correlatas ou interdependentes
-11. Alinhamento com o planejamento
-12. Resultados pretendidos
-13. Impactos ambientais e medidas mitigadoras (quadro Impacto | Medida mitigadora | Responsável)
-14. Providências a serem adotadas
-15. Análise de riscos (quadro Risco | Probabilidade | Impacto | Ação preventiva / contingência)
-16. Declaração de viabilidade
-17. Responsáveis pela elaboração e fiscalização
-Local e data; assinaturas de quem elaborou`,
-  },
-  {
     id: "precos", nome: "Pesquisa de preços", doc: "Pesquisa de preços e memória de cálculo",
     fase: "interna", campos: CAMPOS.precos ?? [],
     oque: "Define o valor estimado da contratação. Bens e serviços usam pesquisa de preços; obras e serviços de engenharia usam sistema oficial de custos, com BDI.",
@@ -200,6 +161,45 @@ Identificação do processo; órgão; objeto
 6. Parâmetro de comparação
 7. Conclusão (valor máximo aceitável e data-base de reajuste)
 Local e data; assinaturas do agente de contratação e do responsável técnico`,
+  },
+  {
+    id: "etp", nome: "Estudo Técnico Preliminar", doc: "Estudo Técnico Preliminar (ETP)",
+    fase: "interna", campos: CAMPOS.etp ?? [],
+    oque: "Mostra o problema a resolver e a melhor solução, para que se avalie a viabilidade técnica e econômica. Os incisos I, IV, VI, VIII e XIII (★) são o conteúdo mínimo; os demais devem constar ou ter a ausência justificada. Em obras e serviços comuns de engenharia o ETP é opcional no Município, desde que não haja prejuízo técnico (Dec. 2.533/2024, art. 8º).",
+    base: [{ rotulo: "Art. 18, §§ 1º a 3º", url: U.a18 }, { rotulo: "Dec. 2.533/2024, arts. 7º e 8º" }],
+    papeis: ["requisitante", "contratacao"],
+    itens: [
+      campos("etp"),
+      it("e14", "Assinado por quem elaborou; a fiscalização ficará com outro servidor", "Art. 7º, § 1º"),
+    ],
+    atencao: [
+      "Se o ETP não explica POR QUE esta solução e POR QUE esta quantidade, o processo tende a voltar em diligência.",
+      "Comparar de fato as alternativas (vantagens, desvantagens, conclusão), não só descrever a escolhida.",
+      "Não invocar urgência quando o fundamento é o valor.",
+      "Em versão retificada, fechar com um quadro \"Alterações em relação à versão anterior\" e o motivo de cada uma.",
+      "Campos que dependem de outro setor ficam realçados em amarelo até serem preenchidos; não assinar com amarelo pendente.",
+    ],
+    modelo: `ESTUDO TÉCNICO PRELIMINAR
+(Lei nº 14.133/2021, art. 18, §§ 1º e 2º)
+Identificação do processo e do procedimento
+1. Informações básicas (objeto e natureza do objeto)
+2. Descrição da necessidade (com quadro Indicador | Dado | Fonte)
+3. Área requisitante
+4. Requisitos da contratação
+5. Levantamento de mercado e análise das alternativas (quadro Alternativa | Vantagens | Desvantagens | Conclusão)
+6. Estimativa das quantidades
+7. Estimativa do valor
+8. Descrição da solução como um todo
+9. Justificativa para o parcelamento ou não
+10. Contratações correlatas ou interdependentes
+11. Alinhamento com o planejamento
+12. Resultados pretendidos
+13. Impactos ambientais e medidas mitigadoras (quadro Impacto | Medida mitigadora | Responsável)
+14. Providências a serem adotadas
+15. Análise de riscos (quadro Risco | Probabilidade | Impacto | Ação preventiva / contingência)
+16. Declaração de viabilidade
+17. Responsáveis pela elaboração e fiscalização
+Local e data; assinaturas de quem elaborou`,
   },
   {
     id: "tr", nome: "Termo de Referência / Projeto Básico", doc: "Termo de Referência ou Projeto Básico, com análise de riscos",

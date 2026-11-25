@@ -349,6 +349,12 @@ test("preenche portaria de nomeação pelo cadastro, sem usar ato de fiscal ou a
 
 test("minuta versionada, campos pendentes e exportação Word e PDF", async () => {
   const req = await new Cliente().entrar("req@a.gov.br");
+  // A pesquisa de preços agora precede o ETP e precisa estar conferida para liberá-lo.
+  const precos = ETAPAS.find((e) => e.id === "precos")!;
+  await preencherCampos(req, procId, precos);
+  for (const i of itensDe(precos, { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
+    assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
+  }
   const texto = "# ESTUDO TÉCNICO PRELIMINAR\nProcesso nº 367/2026\n## 2. Necessidade\n| Indicador | Dado |\n|---|---|\n| Sepultamentos 2024 | [[nº]] |\n| Sepultamentos 2025 | [[nº]] |\nIbaiti, [[dia]] de novembro de 2026.\n\n@ FULANA DE TAL\n@ Arquiteta";
   const s1 = await req.post(`/api/processos/${procId}/minutas/etp`, { texto });
   assert.deepEqual(s1.dados, { versao: 1, nova: true });
@@ -770,7 +776,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   for (const i of itensDe(ETAPAS[2], { tipo: "bens", via: "licitacao" }).filter((x) => !x.auto)) await admin.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
   r = await admin.post(rota);
   assert.equal(r.dados.concluida, true);
-  assert.deepEqual(r.dados.proxima, { id: "etp", nome: "Estudo Técnico Preliminar" });
+  assert.deepEqual(r.dados.proxima, { id: "precos", nome: "Pesquisa de preços" });
 
   // Apagar um campo obrigatório desmarca o item do sistema e a etapa volta a ficar pendente.
   assert.equal((await admin.put(`/api/processos/${id}/campos/dfd`, { valores: { ...dfd, contato: " " } })).status, 200);
@@ -1366,7 +1372,7 @@ test("trilha: somente as nove etapas da fase interna, do PAC ao Protocolo", asyn
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const painel = async () => (await lic.get("/api/painel")).dados.processos.por_etapa as { id: string; numero: number; etapa: string; total: number }[];
   const antes = await painel();
-  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["solicitacao", 2], ["dfd", 3], ["etp", 4], ["precos", 5], ["tr", 6], ["dot", 7], ["fiscal", 8], ["protocolo", 9]]);
+  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["solicitacao", 2], ["dfd", 3], ["precos", 4], ["etp", 5], ["tr", 6], ["dot", 7], ["fiscal", 8], ["protocolo", 9]]);
   assert.deepEqual(ETAPAS.map((e) => e.fase), ["interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna"]);
   const r = await lic.post("/api/processos", { objeto: "Compra de materiais para a educação", tipo: "bens", via: "licitacao", ano: 2099 });
   assert.equal(r.status, 201);
