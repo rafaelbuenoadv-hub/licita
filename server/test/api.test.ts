@@ -54,6 +54,22 @@ async function preencherCampos(c: Cliente, id: number, e: Etapa) {
   const r = await c.put(`/api/processos/${id}/campos/${e.id}`, { valores });
   assert.equal(r.status, 200, JSON.stringify(r.dados));
 }
+/** Pasta íntegra para os testes da conferência final: campos, documentos e conferências reais no cadastro. */
+async function prepararPastaConferida(c:Cliente,id:number) {
+  const p=(await c.get(`/api/processos/${id}`)).dados;
+  for(const secretaria of [p.requisitante,...p.areas_adicionais].filter(Boolean)) await pool.query("insert into secretarios(orgao_id,secretaria,nome,portaria) values($1,$2,'Responsável de teste','001/2047') on conflict do nothing",[p.orgao_id,secretaria]);
+  await pool.query("update processos set valor_estimado=1000 where id=$1",[id]);
+  for(const e of ETAPAS){
+    await preencherCampos(c,id,e);
+    if(e.id==="pac") assert.equal((await c.put(`/api/processos/${id}/campos/pac`,{valores:{consta:"nao",justificativa_inclusao:"Demanda extraordinária de teste."}})).status,200);
+    if(e.id==="fiscal"){
+      const atual=(await c.get(`/api/processos/${id}`)).dados.campos.fiscal;
+      assert.equal((await c.put(`/api/processos/${id}/campos/fiscal`,{valores:{...atual,substituto_nome:"Outro servidor"}})).status,200);
+    }
+    for(const item of itensDe(e,p).filter((i)=>!i.auto)) assert.equal((await c.post(`/api/processos/${id}/checagens`,{item:item.id,marcado:true})).status,200);
+  }
+  for(const e of ETAPAS.filter((e)=>e.modelo)) assert.equal((await c.post(`/api/processos/${id}/minutas/${e.id}`,{texto:`# ${e.doc}\nDocumento final de teste, conferido pela área responsável.`,origem:"manual"})).status,200);
+}
 /** Registra uma solicitação na secretaria requisitante do processo (etapa 2). */
 async function registrarSolicitacao(c: Cliente, id: number) {
   const p = (await c.get(`/api/processos/${id}`)).dados;
@@ -837,9 +853,9 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   if(alerta) assert.equal((await adm.post(`/api/processos/${id}/revisoes-documentos/protocolo/confirmar`,{versao:aposDotacao.minutas.find((m:any)=>m.etapa==="protocolo").versao,em:alerta.em})).status,200);
   for (const i of itensDe(ETAPAS[fiscal + 1], pb).filter((x) => !x.auto)) await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
   r = await adm.post(`/api/processos/${id}/etapas/protocolo/concluir`);
-  assert.equal(r.dados.concluida, true, JSON.stringify(r.dados.pendencias));
-  assert.equal(r.dados.protocolado, true);
-  assert.equal(r.dados.proxima, null);
+  assert.equal(r.dados.concluida, false);
+  assert.ok(r.dados.pendencias.some((x:any)=>x.etapa==="dfd" && x.codigo==="minuta"),JSON.stringify(r.dados.pendencias));
+  assert.equal(r.dados.protocolado, undefined);
 });
 
 test("revisão avulsa preserva PDFs, versões e evidências dentro do órgão", async () => {
@@ -2135,6 +2151,10 @@ test("fase interna conclui no Protocolo e preserva o histórico externo sem reab
   await pool.query("insert into campos_etapa (processo_id,etapa,valores,usuario_id) values ($1,'dot','{\"dotacao\":\"Dotação indicada\"}',$2)", [id, uid]);
   await preencherCampos(lic, id, ETAPAS.at(-1)!);
   assert.equal((await lic.post(`${rota}/minutas/protocolo/dos-campos`)).status, 200);
+  const incompleto = await lic.post(`${rota}/etapas/protocolo/concluir`);
+  assert.equal(incompleto.dados.concluida,false);
+  assert.ok(incompleto.dados.pendencias.some((x:any)=>x.codigo==="minuta" && x.etapa==="dfd"));
+  await prepararPastaConferida(lic,id);
   const fechar = await lic.post(`${rota}/etapas/protocolo/concluir`);
   assert.equal(fechar.status, 200); assert.equal(fechar.dados.concluida, true, JSON.stringify(fechar.dados));
   assert.equal(fechar.dados.protocolado, true); assert.equal(fechar.dados.proxima, null);
@@ -2455,4 +2475,51 @@ test("PAC só registra dados: não gera minuta e a verificação alimenta DFD e 
   assert.ok(!pecas.some((x)=>x.texto?.includes("PAC_ARQUIVADO_ANTIGO")));
   assert.equal((await adm.get(`${rota}/minutas/pac`)).dados.versoes.length,1);
   assert.match((await adm.get(`${rota}/minutas/pac/versoes/1`)).dados.texto,/PAC_ARQUIVADO_ANTIGO/);
+});
+
+test("conferência completa lê a pasta sem alterar dados, identifica a etapa de correção e impede protocolo com peça faltando",async()=>{
+  const adm=await new Cliente().entrar("admin@a.gov.br"),outro=await new Cliente().entrar("admin@b.gov.br");
+  const {dados:{id}}=await adm.post("/api/processos",{objeto:"Conferência final de mobiliário escolar",tipo:"bens",via:"licitacao",ano:2047,requisitante:"Secretaria de Conferência"});
+  const rota=`/api/processos/${id}`,url=`${rota}/conferencia-completa`;
+  assert.equal((await new Cliente().get(url)).status,401);assert.equal((await outro.get(url)).status,404);
+  const snapshot=async()=>q1("select atualizado_em,(select count(*)::int from minutas where processo_id=$1) as minutas,(select count(*)::int from checagens where processo_id=$1) as checks,(select count(*)::int from auditoria where processo_id=$1) as auditoria from processos where id=$1",[id]);
+  const antes=await snapshot();
+  const inicial=await adm.get(url);assert.equal(inicial.status,200);assert.equal(inicial.dados.pronto,false);
+  assert.equal(inicial.dados.resumo.documentos_previstos,7);assert.equal(inicial.dados.resumo.documentos_gerados,0);
+  assert.ok(inicial.dados.pendencias.some((p:any)=>p.etapa==="dfd" && p.codigo==="minuta" && p.onde==="minuta"));
+  assert.ok(inicial.dados.pendencias.some((p:any)=>p.etapa==="pac" && p.codigo==="campo" && p.alvo==="consta"));
+  assert.ok(!inicial.dados.pendencias.some((p:any)=>["pac","planejamento","solicitacao"].includes(p.etapa) && p.codigo==="minuta"));
+  assert.deepEqual(await snapshot(),antes);
+  await prepararPastaConferida(adm,id);
+  let r=(await adm.get(url)).dados;
+  assert.equal(r.pronto,true,JSON.stringify(r.pendencias));assert.equal(r.resumo.impeditivas,0);assert.equal(r.resumo.documentos_gerados,7);
+  const atual=(await adm.get(rota)).dados;
+  // Diferença entre valor da pesquisa e período da dotação pede conferência humana, sem presumir irregularidade.
+  await pool.query("update campos_etapa set valores=jsonb_set(valores,'{valor_total}','\"500,00\"'::jsonb) where processo_id=$1 and etapa='dot'",[id]);
+  r=(await adm.get(url)).dados;
+  assert.ok(r.pendencias.some((p:any)=>p.codigo==="valor_dotacao" && !p.bloqueia && p.etapa==="dot"));
+  await pool.query("update campos_etapa set valores=$2::jsonb where processo_id=$1 and etapa='dot'",[id,JSON.stringify(atual.campos.dot)]);
+  // Uma nova versão revisada elimina o alerta da alteração; o documento anterior continua no histórico.
+  for(const etapa of ["dot","protocolo"]) await adm.post(`${rota}/minutas/${etapa}`,{texto:`# ${etapa}\nVersão revisada para conferência final.`});
+  assert.equal((await adm.get(url)).dados.pronto,true);
+  assert.equal((await adm.post(`${rota}/etapas/protocolo/concluir`)).dados.protocolado,true);
+  const versao=(await adm.get(`${rota}/minutas/etp`)).dados.vigente.versao;
+  await adm.post(`${rota}/minutas/etp`,{texto:"# ETP\n[[PREENCHER: conclusão da viabilidade]]"});
+  r=(await adm.get(url)).dados;
+  assert.ok(r.pendencias.some((p:any)=>p.etapa==="etp" && p.codigo==="campos" && p.onde==="minuta"));
+  const bloqueado=await adm.post(`${rota}/etapas/protocolo/concluir`);
+  assert.equal(bloqueado.dados.concluida,false);assert.ok(bloqueado.dados.pendencias.some((p:any)=>p.etapa==="etp"));
+  assert.equal((await adm.get(`${rota}/minutas/etp/versoes/${versao}`)).status,200);
+  const fd=new FormData();fd.set("arquivo",new Blob(["Comprovante"]),"apoio.txt");fd.set("etapa","tr");
+  assert.equal((await adm.post(`${rota}/anexos`,fd)).status,201);
+  const usuario=(await q1("select id from usuarios where email='admin@a.gov.br'"))!.id;
+  await pool.query("insert into anexos(processo_id,nome,texto,usuario_id,etapa) values($1,'ausente.pdf','',$2,'tr')",[id,usuario]);
+  await pool.query("insert into anexos(processo_id,nome,texto,usuario_id,arquivo,etapa) values($1,'antigo.doc','',$2,$3,'dfd')",[id,usuario,Buffer.from("arquivo legado")]);
+  r=(await adm.get(url)).dados;
+  assert.equal(r.resumo.arquivos,3);
+  assert.ok(r.pendencias.some((p:any)=>p.etapa==="tr" && p.codigo==="anexo_vazio" && p.onde==="anexos"));
+  assert.ok(r.pendencias.some((p:any)=>p.etapa==="dfd" && p.codigo==="anexo_formato"));
+  await pool.query("insert into usuarios(orgao_id,nome,email,senha_hash,papeis) values($1,'Consulta','consulta-conferencia@a.gov.br',$2,'{consulta}')",[orgA,await hashSenha(SENHA)]);
+  const consulta=await new Cliente().entrar("consulta-conferencia@a.gov.br");
+  const antesConsulta=await snapshot();assert.equal((await consulta.get(url)).status,200);assert.deepEqual(await snapshot(),antesConsulta);
 });

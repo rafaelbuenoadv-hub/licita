@@ -35,7 +35,7 @@ export function ExportarProcesso({ processo, salvarPendentes }: {
       <button type="button" className="btn pri" disabled={!!gerando} onClick={() => gerar("pdf")}>Gerar processo completo em PDF</button>
       <button type="button" className="btn" disabled={!!gerando} onClick={() => gerar("docx")}>Gerar processo completo em Word</button>
     </div>
-    <p className="small muted">No PDF, os anexos mantêm suas páginas e os originais ficam incorporados. No Word, os documentos do sistema são editáveis e os anexos entram como páginas de imagem. Anexos antigos guardados somente em texto são incluídos em texto.</p>
+    <p className="small muted">No PDF, as páginas ficam em retrato; anexos em paisagem são ajustados à folha e os arquivos originais ficam incorporados. No Word, os documentos do sistema são editáveis e os anexos entram como páginas de imagem. Anexos antigos guardados somente em texto são incluídos em texto.</p>
     <p className="small muted">Salve as edições antes de exportar. Gerar o arquivo não protocola nem conclui o processo.</p>
     {gerando && <p className="note" role="status">Preparando os documentos e todas as páginas dos anexos… Aguarde o download.</p>}
     {erro && <p className="note bad" role="alert">{erro}</p>}

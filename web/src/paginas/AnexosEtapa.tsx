@@ -48,7 +48,7 @@ export function AnexosEtapa({ processo, etapa, podeIncluir, podeExcluir, recarre
     catch(e) {setMensagem({texto:e instanceof Error ? e.message : "Não foi possível remover o anexo.",erro:true});}
     finally {setOcupado(false);}
   };
-  return <section className={etapa ? "sec stack" : "panel pad stack"} aria-busy={ocupado}>
+  return <section className={etapa ? "sec stack" : "panel pad stack"} aria-busy={ocupado} id={etapa ? `anexos-${etapa}` : "anexos-gerais"} tabIndex={-1}>
     <div className="row"><div><h3>{etapa ? "Anexos desta etapa" : "Todos os anexos"} <span className="small muted">({lista.length})</span></h3>
       <p className="small muted">{etapa ? destino !== etapa ? `Na montagem, estes arquivos acompanham ${nomeDaEtapa(destino)}.` : "Na montagem em PDF ou Word, estes arquivos aparecem logo após o documento desta etapa."
         : "Confira a vinculação dos arquivos. Anexos sem etapa definida ficam ao final do processo."}</p></div>

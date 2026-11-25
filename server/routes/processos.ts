@@ -1,3 +1,4 @@
+import { conferirProcessoCompleto } from "../conferencia-processo.js";
 import { textoLocalDoPdf } from "../orcamento-pdf.js";
 import { registrosDaInstrucao, sincronizarDadosDaInstrucao } from "../instrucao.js";
 import { montarProcessoCompleto } from "../processo-completo.js";
@@ -591,12 +592,21 @@ export function rotasProcessos() {
     res.json({ etapa_atual: atual(p, c), concluido: concluido(p, c) });
   });
 
+  // A leitura completa também funciona antes de liberar a etapa final e não altera o processo.
+  r.get("/processos/:id/conferencia-completa", async(req,res)=>{
+    const p=await processoDo(req);
+    const [checks,campos]=await Promise.all([checksDo(p.id),camposDo(p.id)]);
+    res.set("Cache-Control","private, no-store");
+    res.json(await conferirProcessoCompleto(p,checks,campos));
+  });
+
   // Concluir e avançar: confere a etapa (campos, documento e conferência) e aponta o que falta.
   r.post("/processos/:id/etapas/:etapa/concluir", async (req, res) => {
     const p = await processoDo(req);
     const checks = await checksDo(p.id);
     const e = exigeEtapaEditavel(req, p, checks, String(req.params.etapa));
-    const lista = await conferirEtapa(p, e, checks, await camposDo(p.id));
+    const campos=await camposDo(p.id);
+    const lista = e.id==="protocolo" ? (await conferirProcessoCompleto(p,checks,campos)).pendencias : await conferirEtapa(p,e,checks,campos);
     const prox = proximaEtapa(e);
     if (lista.some((x) => x.bloqueia)) return res.json({ concluida: false, pendencias: lista, proxima: null });
     const protocolado = e.id === "protocolo";

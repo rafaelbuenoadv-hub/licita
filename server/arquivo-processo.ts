@@ -17,12 +17,11 @@ const opcoes = { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 };
 export async function arquivoDoProcessoParaPdf(nome: string, arquivo: Buffer): Promise<Buffer> {
   try {
     const tipo = tipoPeloConteudo(arquivo);
-    if (tipo === "pdf") { await PDFDocument.load(arquivo); return arquivo; }
+    if (tipo === "pdf") return await pdfEmRetrato(arquivo);
     if (tipo !== "outro") {
       const png = await sharp(arquivo).rotate().png().toBuffer();
       const pdf = await PDFDocument.create(), imagem = await pdf.embedPng(png);
-      const largo = imagem.width > imagem.height;
-      const pg = pdf.addPage(largo ? [841.89, 595.28] : [595.28, 841.89]);
+      const pg = pdf.addPage([595.28, 841.89]);
       const escala = Math.min((pg.getWidth() - 50) / imagem.width, (pg.getHeight() - 50) / imagem.height);
       const width = imagem.width * escala, height = imagem.height * escala;
       pg.drawImage(imagem, { x: (pg.getWidth() - width) / 2, y: (pg.getHeight() - height) / 2, width, height });
@@ -38,8 +37,7 @@ export async function arquivoDoProcessoParaPdf(nome: string, arquivo: Buffer): P
         await writeFile(entrada, arquivo);
         await executar("soffice", [`-env:UserInstallation=${pathToFileURL(perfil).href}`, "--headless", "--nologo", "--nodefault", "--norestore", "--convert-to", "pdf", "--outdir", pasta, entrada], opcoes);
         const pdf = await readFile(join(pasta, "anexo.pdf"));
-        await PDFDocument.load(pdf);
-        return pdf;
+        return await pdfEmRetrato(pdf);
       } finally { await rm(pasta, { recursive: true, force: true }); }
     }
   } catch (erro) {
@@ -65,4 +63,24 @@ export async function paginasDoPdfParaWord(arquivo: Buffer) {
     return paginas;
   } catch { throw new ErroHttp(422, "Não foi possível preparar todas as páginas dos anexos para Word. Tente o PDF completo ou confira os anexos."); }
   finally { await rm(pasta, { recursive: true, force: true }); }
+}
+
+/** Cópia de impressão em retrato. O original permanece incorporado ao processo completo. */
+export async function pdfEmRetrato(arquivo: Buffer): Promise<Buffer> {
+  const origem=await PDFDocument.load(arquivo);
+  const paisagem=origem.getPages().map((pg)=>{
+    const girada=Math.abs(pg.getRotation().angle)%180===90;
+    return girada ? pg.getHeight()>pg.getWidth() : pg.getWidth()>pg.getHeight();
+  });
+  if(!paisagem.some(Boolean)) return arquivo;
+  // Renderiza a aparência completa, inclusive anotações, somente nas folhas que precisam de ajuste.
+  const imagens=await paginasDoPdfParaWord(arquivo), pdf=await PDFDocument.create();
+  for(const [i,larga] of paisagem.entries()){
+    if(!larga){ pdf.addPage((await pdf.copyPages(origem,[i]))[0]);continue; }
+    const imagem=await pdf.embedJpg(imagens[i].data), pg=pdf.addPage([595.28,841.89]);
+    const escala=Math.min(545.28/imagem.width,791.89/imagem.height);
+    const width=imagem.width*escala,height=imagem.height*escala;
+    pg.drawImage(imagem,{x:(pg.getWidth()-width)/2,y:(pg.getHeight()-height)/2,width,height});
+  }
+  return Buffer.from(await pdf.save());
 }

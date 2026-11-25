@@ -1,19 +1,18 @@
+import { partesDaTabela } from "../shared/tabelas-retrato.js";
 import PDFDocument from "pdfkit";
-import { quantidadeColunasCotacoes, QUEBRA_NA_CELULA } from "../shared/solicitacao.js";
+import { existsSync } from "node:fs";
+import { QUEBRA_NA_CELULA } from "../shared/solicitacao.js";
 import type { Timbrado } from "./docx.js";
 
 type Trecho = { texto: string; negrito: boolean; pendente: boolean; riscado: boolean; largura: number };
 const MARGEM = 54;
-const NORMAL = "Times-Roman";
-const NEGRITO = "Times-Bold";
+// Incorpora a fonte para manter a mesma aparência em qualquer computador/impressora.
+const pastaFonte=["/usr/share/fonts/truetype/liberation", "/usr/share/fonts/truetype/liberation2"].find((p)=>existsSync(`${p}/LiberationSerif-Regular.ttf`) && existsSync(`${p}/LiberationSerif-Bold.ttf`));
+const NORMAL = pastaFonte ? `${pastaFonte}/LiberationSerif-Regular.ttf` : "Times-Roman";
+const NEGRITO = pastaFonte ? `${pastaFonte}/LiberationSerif-Bold.ttf` : "Times-Bold";
 
 export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Timbrado) {
-  const colunasCotacoes = quantidadeColunasCotacoes(texto);
-  // Mantém uma única linha por item mesmo nos quadros com muitas cotações.
-  const size: [number, number] | "A4" = colunasCotacoes >= 3
-    ? [Math.min(14_000, Math.max(842, 455 + colunasCotacoes * 70)), 595.28]
-    : "A4";
-  const doc = new PDFDocument({ size, margin: MARGEM, bufferPages: true, info: { Title: titulo, Creator: "Licita" } });
+  const doc = new PDFDocument({ size: "A4", margin: MARGEM, bufferPages: true, info: { Title: titulo, Creator: "Licita" } });
   const blocos: Buffer[] = [];
   const resultado = new Promise<Buffer>((resolve, reject) => {
     doc.on("data", (bloco: Buffer) => blocos.push(bloco));
@@ -73,24 +72,43 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
     });
   }
 
-  function escrever(linha: Trecho[], x: number, yy: number, tamanho: number) {
+  function escrever(linha: Trecho[], x: number, yy: number, tamanho: number, justificar = 0) {
+    const ocupado=linha.reduce((n,t)=>n+t.largura,0);
+    const espacos=linha.reduce((n,t)=>n+(t.texto.match(/ /g)?.length??0),0);
+    const adicional=justificar && espacos ? Math.max(0,justificar-ocupado)/espacos : 0;
     for (const trecho of linha) {
-      if (trecho.pendente && trecho.largura > 0) doc.rect(x, yy, trecho.largura, tamanho + 2).fill("#fff176");
-      doc.fillColor("#171717").font(trecho.negrito ? NEGRITO : NORMAL).fontSize(tamanho)
-        .text(trecho.texto, x, yy, { lineBreak: false, strike: trecho.riscado });
-      x += trecho.largura;
+      const inicio=x;
+      const largura=trecho.largura+(trecho.texto.match(/ /g)?.length??0)*adicional;
+      if (trecho.pendente && largura>0) doc.rect(x,yy,largura,tamanho+2).fill("#fff176");
+      doc.fillColor("#171717").font(trecho.negrito ? NEGRITO : NORMAL).fontSize(tamanho);
+      for(const token of trecho.texto.match(/\S+|\s+/g)??[]){
+        if(token.trim()) doc.text(token,x,yy,{lineBreak:false});
+        x+=doc.widthOfString(token)+(token.match(/ /g)?.length??0)*adicional;
+      }
+      if(trecho.riscado) doc.moveTo(inicio,yy+tamanho*.52).lineTo(x,yy+tamanho*.52).lineWidth(.5).stroke("#171717");
     }
   }
 
-  function quadro(linhas: string[][], alinhamentos: string[] = []) {
+  function quadro(linhas:string[][],alinhamentos:string[]=[]){
+    const partes=partesDaTabela(linhas,alinhamentos);
+    for(const [i,parte] of partes.entries()){
+      if(partes.length>1){
+        if(y+30>fim) novaPagina();
+        escrever(quebrar(`Quadro — parte ${i+1} de ${partes.length}`,largura,9,true)[0],MARGEM,y,9);y+=18;
+      }
+      quadroUnico(parte.linhas,parte.alinhamentos.map((x)=>x??"left"));
+    }
+  }
+
+  function quadroUnico(linhas: string[][], alinhamentos: string[] = []) {
     const colunas = Math.max(...linhas.map((linha) => linha.length));
     const quadroItens = linhas[0][0] === "Item" && linhas[0][1] === "Descrição";
-    const tamanho = quadroItens ? (colunas > 8 ? 8.5 : 9.5) : 10;
-    const altura = 13;
-    const espaco = 4;
+    const tamanho = colunas > 9 ? 7.5 : quadroItens ? 9.5 : 10;
+    const altura = tamanho + 3.5;
+    const espaco = colunas > 9 ? 2 : 4;
     // Quadro de itens: item, unidade e quantidade estreitos; valores com largura para uma linha; descrição com o resto.
     const larguras = quadroItens ? (() => {
-      const fixas = [26, 0, 34, 36];
+      const fixas = [30, 0, 38, 42];
       doc.font(NEGRITO).fontSize(tamanho);
       const valor = Math.max(62, doc.widthOfString("R$ 999.999,99") + 10);
       const l = Array.from({ length: colunas }, (_, c) => (c < 4 ? fixas[c] : valor));
@@ -169,12 +187,13 @@ export async function minutaParaPdf(texto: string, titulo: string, timbrado?: Ti
     const corpo = s.slice(secao ? 3 : principal || assina ? 2 : 0);
     if (y + espaco + altura * (secao ? 2 : 1) > fim) novaPagina();
     y += espaco;
-    for (const linha of quebrar(corpo, largura, tamanho, principal || secao)) {
+    const linhasDoParagrafo=quebrar(corpo,largura,tamanho,principal||secao);
+    for (const [indice,linha] of linhasDoParagrafo.entries()) {
       if (y + altura > fim) novaPagina();
       const x = principal || assina
         ? MARGEM + (largura - linha.reduce((total, t) => total + t.largura, 0)) / 2
         : MARGEM;
-      escrever(linha, x, y, tamanho);
+      escrever(linha,x,y,tamanho,!principal && !secao && !assina && indice<linhasDoParagrafo.length-1 ? largura : 0);
       y += altura;
     }
     y += principal ? 10 : assina ? 0 : 5;

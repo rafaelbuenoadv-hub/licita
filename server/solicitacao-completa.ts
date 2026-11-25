@@ -2,6 +2,7 @@
 // dos comprovantes das consultas ao PNCP (na ordem em que aparecem nos itens).
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import sharp from "sharp";
+import { pdfEmRetrato } from "./arquivo-processo.js";
 import { extrairTexto } from "./extrair.js";
 import { tipoPeloConteudo } from "./arquivo-para-ia.js";
 import type { ItemSolicitacao } from "../shared/solicitacao.js";
@@ -81,7 +82,7 @@ export async function solicitacaoCompleta(documento: Buffer, entradas: Entrada[]
     if (e.grupo === "apoio") await pdf.attach(e.arquivo, `${e.codigo}-${e.nome}`, { description: `Documento de apoio original: ${e.nome}` });
     try {
       if (tipo === "pdf") {
-        const origem = await PDFDocument.load(e.arquivo, { ignoreEncryption: true });
+        const origem = await PDFDocument.load(await pdfEmRetrato(e.arquivo));
         const paginas = await pdf.copyPages(origem, origem.getPageIndices());
         paginas.forEach((pg, i) => { pdf.addPage(pg); if (i === 0 && e.grupo !== "apoio") rotular(pg, negrito, titulo(e)); });
         continue;

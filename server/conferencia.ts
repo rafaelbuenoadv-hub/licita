@@ -1,3 +1,4 @@
+import type { OndeConferencia } from "../shared/conferencia-processo.js";
 // "Concluir e avançar": confere a etapa, aponta o que falta e prepara a peça seguinte com o que já foi informado.
 // Tudo aqui é regra fixa; funciona mesmo com a IA indisponível.
 import { q, q1 } from "./db.js";
@@ -10,7 +11,7 @@ export interface Pendencia {
   codigo: string;
   texto: string;
   /** Onde o usuário resolve: campo dos dados do processo, item da conferência, minuta da etapa ou Configurações. */
-  onde: "dados" | "conferencia" | "minuta" | "config" | "campos";
+  onde: OndeConferencia;
   alvo?: string;
   /** Impede concluir a etapa. Avisos (false) aparecem, mas não travam. */
   bloqueia: boolean;

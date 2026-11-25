@@ -137,11 +137,10 @@ export async function montarProcessoCompleto(p: Processo, formato: "pdf" | "docx
     if (!x.arquivo) { sections.push(secaoDaMinuta(x.texto!, timbrado)); continue; }
     const paginas = await paginasDoPdfParaWord(x.arquivoPdf);
     for (const [j, imagem] of paginas.entries()) {
-      const largo = imagem.width > imagem.height;
-      const largura = largo ? 1020 : 690, altura = largo ? 640 : 960;
+      const largura = 690, altura = 960;
       const escala = Math.min(largura / imagem.width, altura / imagem.height);
       sections.push({
-        properties: { page: { size: { width: 11906, height: 16838, orientation: largo ? PageOrientation.LANDSCAPE : PageOrientation.PORTRAIT }, margin: { top: 720, bottom: 720, left: 720, right: 720 } } },
+        properties: { page: { size: { width: 11906, height: 16838, orientation: PageOrientation.PORTRAIT }, margin: { top: 720, bottom: 720, left: 720, right: 720 } } },
         headers: undefined, footers: undefined,
         children: [new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: `${i + 1}. ${x.titulo.slice(0, 120)} — folha ${j + 1}/${paginas.length}`, size: 16 })] }), new Paragraph({ spacing: { after: 0 }, children: [new ImageRun({ type: "jpg", data: imagem.data, transformation: { width: Math.round(imagem.width * escala), height: Math.round(imagem.height * escala) } })] })],
       });

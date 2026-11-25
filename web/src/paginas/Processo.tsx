@@ -1,3 +1,5 @@
+import { ConferenciaProcesso } from "./ConferenciaProcesso";
+import { focoDaPendencia } from "../../../shared/conferencia-processo";
 import { AnexosEtapa } from "./AnexosEtapa";
 import { PlanejamentoEtp } from "./PlanejamentoEtp";
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
@@ -24,16 +26,27 @@ const ACOES: Record<string, string> = {
   "ia.sugestoes": "pediu sugestões à IA", "campos.salvos": "salvou os campos da etapa", "minuta.campos": "montou o documento com os campos", "processo.protocolado": "protocolou o processo no Departamento de Licitações", "contrato.criado": "registrou contrato",
 };
 
+function posicionarFoco(id:string) {
+  const el=document.getElementById(id);
+  if(!el) return false;
+  if(el instanceof HTMLDetailsElement) el.open=true;
+  for(let pai=el.parentElement;pai;pai=pai.parentElement) if(pai instanceof HTMLDetailsElement) pai.open=true;
+  el.scrollIntoView({behavior:"smooth",block:"center"});el.focus({preventScroll:true});
+  return true;
+}
+
 export function ProcessoPg() {
   const { id } = useParams();
   const { eu, ia } = useEu();
   const [p, setP] = useState<any>(null);
   const [erro, setErro] = useState("");
   const [params, setParams] = useSearchParams();
-  const irPara = (aba: string, replace = false) => {
+  const irPara = (aba: string, replace = false, foco?: string) => {
     const proxima = new URLSearchParams(params);
     proxima.set("aba", aba);
+    if (foco) proxima.set("foco",foco); else proxima.delete("foco");
     setParams(proxima, { preventScrollReset: true, replace });
+    if(foco && params.get("aba")===aba) posicionarFoco(foco);
   };
   const [aviso, setAviso] = useState<{ t: string; tipo?: string } | null>(null);
 
@@ -42,6 +55,21 @@ export function ProcessoPg() {
     catch (e: any) { setErro(e.message); }
   }, [id]);
   useEffect(() => { void carregar(); }, [carregar]);
+
+  const focoAplicado=useRef("");
+  const foco=params.get("foco"), abaFoco=params.get("aba");
+  useEffect(()=>{
+    if(!p || !foco) return;
+    const chave=`${id}:${abaFoco}:${foco}`;
+    if(focoAplicado.current===chave) return;
+    let observador:MutationObserver|undefined;
+    const aplicar=()=>{
+      if(posicionarFoco(foco)){focoAplicado.current=chave;observador?.disconnect();}
+    };
+    aplicar();
+    if(focoAplicado.current!==chave){observador=new MutationObserver(aplicar);observador.observe(document.body,{childList:true,subtree:true});}
+    return()=>observador?.disconnect();
+  },[p,id,foco,abaFoco]);
 
   if (erro) return <p className="note bad">{erro}</p>;
   if (!p) return <p className="muted">Carregando processo…</p>;
@@ -236,7 +264,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
     } catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); return false; }
     finally { setGravandoCampos(false); }
   };
-  const [conf, setConf] = useState<{ codigo: string; texto: string; onde: string; alvo?: string; bloqueia: boolean }[] | null>(null);
+  const [conf, setConf] = useState<{ etapa?: string; codigo: string; texto: string; onde: string; alvo?: string; bloqueia: boolean }[] | null>(null);
   const [conferindo, setConferindo] = useState(false);
   const concluir = async () => {
     setConferindo(true);
@@ -253,7 +281,8 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
     } catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
     finally { setConferindo(false); }
   };
-  const irAte = (x: { onde: string; alvo?: string }) => {
+  const irAte = (x: { etapa?:string; onde: string; alvo?: string }) => {
+    if(x.etapa) {irPara(x.etapa,false,focoDaPendencia({...x,etapa:x.etapa,onde:x.onde as any}));return;}
     const mostra = (el: HTMLElement | null) => { el?.scrollIntoView({ behavior: "smooth", block: "center" }); el?.focus({ preventScroll: true }); };
     if (x.onde === "conferencia") mostra(document.getElementById("c-" + x.alvo));
     else if (x.onde === "campos") {
@@ -261,6 +290,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
       if (x.alvo === "solicitacao") mostra(document.getElementById("pedidos-secretarias"));
       else if (el) mostra(el); else if (x.alvo === "dotacao") irPara("dot");
     }
+    else if (x.onde === "anexos") mostra(document.getElementById(x.alvo ?? `anexos-${e.id}`));
     else if (x.onde === "minuta") document.getElementById("minuta-etapa")?.scrollIntoView({ behavior: "smooth", block: "start" });
     else if (x.onde === "dados") {
       const d = document.getElementById("dados-processo") as HTMLDetailsElement | null;
@@ -300,6 +330,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
         <InstrucaoProcesso key={p.id} processo={p} recarregar={recarregar} />
       </section>}
       {e.id === "protocolo" && <>
+        <ConferenciaProcesso processo={p} pendentes={sujo} salvarPendentes={async()=>!editavel || !sujo || await salvarCampos(true)} irPara={(etapa,foco)=>irPara(etapa,false,foco)} />
         <ExportarProcesso processo={p} salvarPendentes={async () => !editavel || !sujo || await salvarCampos(true)} />
         <ProtocoloChecklist p={p} checks={checks} irPara={irPara} />
       </>}
@@ -379,7 +410,7 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
   };
   const inclusao = (v: string) => v === "incluso" ? "incluído" : v === "nao_incluso" ? "não incluído" : "não informado";
   return (
-    <div className="sec"><span className="lbl">Orçamentos</span>
+    <div className="sec" id="orcamentos-processo" tabIndex={-1}><span className="lbl">Orçamentos</span>
       <p className="small muted">Consulte as propostas do processo. Os itens e as cotações são registrados na Instrução do processo, na etapa 1.</p>
       {lista.length === 0 ? <p className="muted">Nenhum orçamento anexado.</p> :
         <div className="tw"><table className="t">

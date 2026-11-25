@@ -1,7 +1,8 @@
+import { partesDaTabela } from "../shared/tabelas-retrato.js";
 import {
   type ISectionOptions, AlignmentType, BorderStyle, Document, ShadingType, VerticalAlign, Footer, Header, ImageRun, Packer, PageOrientation, Paragraph, Table, TableCell, TableLayoutType, TableRow, TextRun, WidthType,
 } from "docx";
-import { quantidadeColunasCotacoes, QUEBRA_NA_CELULA } from "../shared/solicitacao.js";
+import { QUEBRA_NA_CELULA } from "../shared/solicitacao.js";
 
 // Converte a marcação das minutas em .docx:
 //   "# "  título centralizado      "## " seção em negrito
@@ -32,36 +33,39 @@ function tabela(linhas: string[][], larguraUtil: number, alinhamentos: Alinhamen
   const cols = Math.max(...linhas.map((l) => l.length));
   const borda = { style: BorderStyle.SINGLE, size: 4, color: "000000" };
   const quadroItens = linhas[0][0] === "Item" && linhas[0][1] === "Descrição";
-  const comCotacoes = quadroItens && /^Cotação 1\s/.test(linhas[0][4] ?? "");
+  const comCotacoes = quadroItens && linhas[0].some((c)=>/^Cotação \d+(?:\s|$)/.test(c));
   // Quadro de itens: colunas estreitas fixas (item, unidade, quantidade), valores com largura suficiente
   // para "R$ 999.999,99" numa linha, e o restante para a descrição.
-  const fixas = [600, 0, 650, 700];
-  const valor = cols > 8 ? 1350 : 1300;
-  const columnWidths = quadroItens ? (() => {
-    const larguras = Array.from({ length: cols }, (_, c) => (c < 4 ? fixas[c] : valor));
-    larguras[1] = Math.max(1800, larguraUtil - larguras.reduce((a, b) => a + b, 0));
-    return larguras;
-  })() : undefined;
-  const tamanho = quadroItens ? (cols > 8 ? 17 : 19) : 22;
+  const fixas = [650, 0, 820, 850];
+  const pesos = quadroItens ? (()=>{
+    const larguras=Array.from({length:cols},(_,c)=>c<4 ? fixas[c] : 1240);
+    larguras[1]=Math.max(2200,larguraUtil-larguras.reduce((a,b)=>a+b,0));return larguras;
+  })() : Array.from({length:cols},(_,c)=>Math.sqrt(Math.max(6,Math.min(150,Math.max(...linhas.map((l)=>(l[c]??"").length))))));
+  const soma=pesos.reduce((a,b)=>a+b,0);
+  const columnWidths=pesos.map((p)=>Math.floor(p/soma*larguraUtil));
+  columnWidths[columnWidths.length-1]+=larguraUtil-columnWidths.reduce((a,b)=>a+b,0);
+  const tamanho=cols>9 ? 15 : quadroItens ? 19 : 22;
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
-    ...(columnWidths && { columnWidths, layout: TableLayoutType.FIXED }),
+    columnWidths, layout: TableLayoutType.FIXED,
     borders: { top: borda, bottom: borda, left: borda, right: borda, insideHorizontal: borda, insideVertical: borda },
     rows: linhas.map((l, i) => {
       const total = i > 0 && !l[0] && /^\*\*/.test(l[1] ?? "");
       return new TableRow({
         tableHeader: i === 0,
-        cantSplit: true,
+        cantSplit: i === 0,
         children: Array.from({ length: cols }, (_, j) => new TableCell({
+          width: {size:columnWidths[j],type:WidthType.DXA},
           verticalAlign: VerticalAlign.CENTER,
-          margins: { top: 40, bottom: 40, left: 70, right: 70 },
+          margins: { top: 40, bottom: 40, left: cols>9 ? 40 : 70, right: cols>9 ? 40 : 70 },
           shading: i === 0 ? { type: ShadingType.CLEAR, color: "auto", fill: "E7E7E7" } : total ? { type: ShadingType.CLEAR, color: "auto", fill: "F3F3F3" } : undefined,
           children: [new Paragraph({
+            wordWrap: true,
             alignment: i === 0 ? AlignmentType.CENTER : ALINHA[alinhamentos[j] ?? "left"],
             children: (l[j] ?? "").split(QUEBRA_NA_CELULA).flatMap((trecho, indice) => [
               ...(indice ? [new TextRun({ break: 1 })] : []),
               // No cabeçalho, o nome do fornecedor sai sem negrito, abaixo de "Cotação N".
-              ...runs(trecho, { ...(i === 0 && indice === 0 ? { bold: true } : {}), size: comCotacoes && i === 0 && indice > 0 ? tamanho - 2 : tamanho }),
+              ...runs(trecho, { ...(i === 0 && indice === 0 ? { bold: true } : {}), size: comCotacoes && i === 0 && indice > 0 ? Math.max(15,tamanho-2) : tamanho }),
             ]),
           })],
         })),
@@ -84,20 +88,22 @@ function imagemTimbrado(imagem: ImagemTimbrado, largura: number) {
 }
 
 export function secaoDaMinuta(texto: string, timbrado?: Timbrado): ISectionOptions {
-  const colunasCotacoes = quantidadeColunasCotacoes(texto);
-  // Com três cotações ou mais (mais média e valor total), o quadro só cabe sem quebrar valores em página deitada.
-  const tamanhoPagina = colunasCotacoes >= 3 ? {
-    orientation: PageOrientation.LANDSCAPE,
-    width: 11906,
-    height: Math.min(31600, Math.max(16838, 9100 + colunasCotacoes * 1400)),
-  } : undefined;
-  const larguraUtil = (tamanhoPagina?.height ?? 11906) - 1701 - 1134;
+  const tamanhoPagina={width:11906,height:16838,orientation:PageOrientation.PORTRAIT};
+  const larguraUtil=11906-1701-1134;
   const filhos: (Paragraph | Table)[] = [];
   let tab: string[][] = [];
   let alinhamentos: Alinhamento[] = [];
   let assinatura = false;
   const fechaTabela = () => {
-    if (tab.length) { filhos.push(tabela(tab, larguraUtil, alinhamentos)); filhos.push(new Paragraph({ children: [] })); tab = []; alinhamentos = []; }
+    if (tab.length) {
+      const partes=partesDaTabela(tab,alinhamentos);
+      for(const [i,parte] of partes.entries()){
+        if(partes.length>1) filhos.push(new Paragraph({keepNext:true,children:runs(`Quadro — parte ${i+1} de ${partes.length}`,{bold:true,size:18})}));
+        filhos.push(tabela(parte.linhas,larguraUtil,parte.alinhamentos as Alinhamento[]));
+        filhos.push(new Paragraph({children:[]}));
+      }
+      tab=[];alinhamentos=[];
+    }
   };
   const linhas = texto.split("\n");
   for (const [indice, bruta] of linhas.entries()) {
@@ -119,7 +125,7 @@ export function secaoDaMinuta(texto: string, timbrado?: Timbrado): ISectionOptio
       assinatura = true;
       continue;
     } else if (s.startsWith("Preço de referência: ")) {
-      filhos.push(new Paragraph({ spacing: { before: 0, after: 160 }, children: runs(s, { size: 18 }) }));
+      filhos.push(new Paragraph({ alignment: AlignmentType.JUSTIFIED, spacing: { before: 0, after: 160 }, children: runs(s, { size: 18 }) }));
     } else {
       filhos.push(new Paragraph({ alignment: AlignmentType.JUSTIFIED, spacing: { after: 120, line: 360 }, children: runs(s) }));
     }
