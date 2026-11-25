@@ -65,6 +65,7 @@ export interface CotacaoItem {
   /** Validade da proposta, condições ou outras informações. */
   obs?: string;
   descarte?: DescartePreco;
+  apenas_referencia?: boolean;
 }
 export interface ItemSolicitacao {
   descricao: string;
@@ -76,7 +77,7 @@ export interface ItemSolicitacao {
 }
 
 export function valorDasCotacoes(cotacoes: CotacaoItem[], criterio: CriterioPreco = "media") {
-  const valores = cotacoes.flatMap((c) => !c.descarte && c.fornecedor.trim() && c.valor_unitario != null && c.valor_unitario > 0
+  const valores = cotacoes.flatMap((c) => !c.descarte && !c.apenas_referencia && c.fornecedor.trim() && c.valor_unitario != null && c.valor_unitario > 0
     ? [Math.round((c.valor_unitario + Number.EPSILON) * 100)] : []).sort((a, b) => a - b);
   if (!valores.length) return null;
   const meio = Math.floor(valores.length / 2);
@@ -94,7 +95,7 @@ export const TIPOS_ANEXOS_SOLICITACAO = ".pdf,.docx,.xlsx,.txt,.md,.csv,.jpg,.jp
 const real = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const numero = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 4 });
 const celula = (texto: string) => texto.replace(/\s*\n\s*/g, " ").replace(/\|/g, "/").trim();
-export const valorReferenciaDoItem = (i: ItemSolicitacao) => i.cotacoes?.some((c) => c.descarte) ? valorDasCotacoes(i.cotacoes, i.criterio) : i.valor_unitario;
+export const valorReferenciaDoItem = (i: ItemSolicitacao) => i.cotacoes?.some((c) => c.descarte || c.apenas_referencia) ? valorDasCotacoes(i.cotacoes, i.criterio) : i.valor_unitario;
 export const totalDoItem = (i: ItemSolicitacao) => { const v = valorReferenciaDoItem(i); return i.quantidade != null && v != null ? Math.round(i.quantidade * v * 100) / 100 : null; };
 /** Soma dos itens que têm quantidade e valor; null quando nenhum tem. */
 export function totalDosItens(itens: ItemSolicitacao[]) {
@@ -105,7 +106,7 @@ const CABECALHO_ITEM = "| Item | Descrição | Un. | Qtd. |";
 const CABECALHO_ANTERIOR = `${CABECALHO_ITEM} Valor unitário | Valor total |`;
 const CABECALHO_COTACOES = `${CABECALHO_ITEM} Valor unitário estimado | Valor total |`;
 // Linha logo abaixo do quadro que faz parte dele: o total antigo (fora da tabela) ou a nota do preço de referência.
-const RODAPE_DO_QUADRO = /^(?:\*\*(?:Total estimado da solicitação|Subtotal dos itens com valor)\*\* R\$\s|Preço de referência: |Análise crítica dos preços: |Preço descartado — item )/;
+const RODAPE_DO_QUADRO = /^(?:\*\*(?:Total estimado da solicitação|Subtotal dos itens com valor)\*\* R\$\s|Preço de referência: |Análise crítica dos preços: |Preço descartado — item |Preço somente de referência — item )/;
 const DESCRICAO_CRITERIO: Record<CriterioPreco, string> = { media: "média", mediana: "mediana", menor: "menor valor" };
 export const QUEBRA_NA_CELULA = "\u2028";
 const cabecalhoComFornecedores = (linha: string) => linha.replaceAll(QUEBRA_NA_CELULA, " ").startsWith(CABECALHO_ITEM + " Cotação 1 ");
@@ -119,7 +120,7 @@ function cotacoesPorFornecedor(itens: ItemSolicitacao[]) {
       const chave = normalizarCotacao(cotacao.fornecedor);
       const nome = celula(cotacao.fornecedor) || "Fornecedor a identificar";
       if (!fornecedores.has(chave)) fornecedores.set(chave, nome);
-      precos.set(chave, cotacao.descarte ? `~~${real(cotacao.valor_unitario)}~~` : real(cotacao.valor_unitario));
+      precos.set(chave, cotacao.descarte ? `~~${real(cotacao.valor_unitario)}~~` : `${real(cotacao.valor_unitario)}${cotacao.apenas_referencia ? " (ref.)" : ""}`);
     }
     return precos;
   });
@@ -131,7 +132,10 @@ export function analiseCriticaDosPrecos(itens: ItemSolicitacao[]) {
   const descartes = itens.flatMap((item, k) => (item.cotacoes ?? []).flatMap((c) => c.descarte ? [
     `Preço descartado — item ${k + 1} (${celula(item.descricao)}): ${celula(c.fornecedor)}; valor ${c.valor_unitario == null ? "não informado" : real(c.valor_unitario)}; motivo: ${MOTIVOS_DESCARTE[c.descarte.motivo]}; justificativa: ${celula(c.descarte.justificativa) || "a informar"}`,
   ] : []));
-  return descartes.length ? ["Preços riscados no quadro comparativo foram desconsiderados no cálculo do valor de referência.", ...descartes].join("\n") : SEM_DESCARTES;
+  const referencias = itens.flatMap((item, k) => (item.cotacoes ?? []).flatMap((c) => c.apenas_referencia ? [
+    `Preço somente de referência — item ${k + 1} (${celula(item.descricao)}): ${celula(c.fornecedor)}; valor ${c.valor_unitario == null ? "não informado" : real(c.valor_unitario)}. Mantido para consulta, sem integrar a média, a mediana ou o menor preço.`,
+  ] : []));
+  return [descartes.length ? "Preços riscados no quadro comparativo foram desconsiderados no cálculo do valor de referência." : SEM_DESCARTES, ...descartes, ...referencias].join("\n");
 }
 
 export function quantidadeColunasCotacoes(texto: string) {
@@ -246,9 +250,9 @@ function limparMarcadoresDeItens(linhas: string[], indiceQuadro: number) {
 }
 
 /** Atualiza um único quadro de itens e preserva as demais tabelas e seções do documento. */
-export function inserirItens(texto: string, itens: ItemSolicitacao[], modo: boolean | "marcador" = false) {
+export function inserirItens(texto: string, itens: ItemSolicitacao[], modo: boolean | "marcador" = false, incluirAnalise = true) {
   if (!texto.trim()) return texto;
-  const quadro = modo === "marcador" ? "[[Itens]]" : quadroDeItens(itens, modo);
+  const quadro = modo === "marcador" ? "[[Itens]]" : quadroDeItens(itens, modo, incluirAnalise);
   const linhas = texto.split("\n");
   const quadros = quadrosDosItens(linhas, itens);
   if (quadros.length) {
@@ -280,6 +284,25 @@ export function inserirItens(texto: string, itens: ItemSolicitacao[], modo: bool
     return linhas.join("\n");
   }
   return antesDaAssinatura(texto, `${TITULO_ITENS}\n${quadro}`);
+}
+
+export function documentoDaPesquisaDePrecos(texto: string, itens: ItemSolicitacao[]) {
+  let doc = inserirItens(texto, itens, true, false);
+  const analise = analiseCriticaDosPrecos(itens);
+  const cab = /^## [^\n]*Análise crítica dos preços[^\n]*\n?/im.exec(doc);
+  if (cab) {
+    const inicio = cab.index + cab[0].length, resto = doc.slice(inicio);
+    const limites = [resto.search(/^#{1,2} /m), resto.search(/^[ \t]*@ /m)].filter((n) => n >= 0);
+    const fim = inicio + (limites.length ? Math.min(...limites) : resto.length);
+    const anterior = doc.slice(inicio, fim).trim();
+    const automatico = anterior.startsWith(SEM_DESCARTES) || anterior.startsWith("Preços riscados no quadro comparativo");
+    const complemento = automatico ? anterior.match(/Análise complementar:[\s\S]*/)?.[0] ?? "" : anterior && !anterior.startsWith("[[") ? `Análise complementar: ${anterior}` : "";
+    doc = doc.slice(0, inicio) + [analise, complemento].filter(Boolean).join("\n\n") + "\n\n" + doc.slice(fim);
+  } else doc = antesDaAssinatura(doc, `## Análise crítica dos preços\n\n${analise}`);
+  const total = totalDosItens(itens);
+  const valor = total == null ? "[[PREENCHER: valor estimado com os preços usados no cálculo]]" : `**${real(total)} (${reaisPorExtenso(total)})**`;
+  doc = doc.replace(/O valor estimado da contratação é de (?:\*\*[^*\n]+\*\*|\[\[[^\n]+?\]\])\./g, `O valor estimado da contratação é de ${valor}.`);
+  return doc;
 }
 
 /** Renderiza os preços cotados no quadro da prévia e dos arquivos exportados. */

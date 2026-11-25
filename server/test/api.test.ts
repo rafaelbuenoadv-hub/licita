@@ -457,25 +457,10 @@ test("PCA aponta fracionamento quando dispensas da mesma natureza passam do limi
   assert.ok(painel.dados.fracionamento.some((x: any) => x.alerta === "excede"));
 });
 
-test("contrato: limite de acréscimo do art. 125 e papéis na medição", async () => {
+test("gestão de contratos não integra o sistema da fase interna", async () => {
   const lic = await new Cliente().entrar("lic@a.gov.br");
-  const c = await lic.post("/api/contratos", { processo_id: procId, numero: "12/2026", objeto: "Gavetário", contratada: "Construtora X", tipo_objeto: "obra", valor_inicial: 100000, inicio: "2026-11-01", fim: "2027-10-31", fiscal: "Fiscal" });
-  assert.equal(c.status, 201, JSON.stringify(c.dados));
-  const id = c.dados.id;
-  assert.equal((await lic.post(`/api/contratos/${id}/aditivos`, { numero: "1", tipo: "acrescimo", valor: 20000, justificativa: "Acréscimo de 2 gavetas por ajuste de projeto" })).status, 201);
-  const exc = await lic.post(`/api/contratos/${id}/aditivos`, { numero: "2", tipo: "acrescimo", valor: 6000, justificativa: "Novo acréscimo que passaria do limite" });
-  assert.equal(exc.status, 409);
-  assert.match(exc.dados.erro, /26,00%/);
-  const fiscal = await new Cliente().entrar("fiscal@a.gov.br");
-  const med = await fiscal.post(`/api/contratos/${id}/medicoes`, { referencia: "1ª medição", valor: 50000 });
-  assert.equal(med.status, 201);
-  assert.equal((await fiscal.post(`/api/contratos/${id}/medicoes/${med.dados.id}/situacao`, { situacao: "paga" })).status, 403);
-  assert.equal((await fiscal.post(`/api/contratos/${id}/medicoes/${med.dados.id}/situacao`, { situacao: "atestada" })).status, 200);
-  const det = await lic.get(`/api/contratos/${id}`);
-  assert.equal(det.dados.valor_atual, 120000);
-  assert.equal(det.dados.saldo, 70000);
-  assert.ok(det.dados.alertas.some((a: any) => /20,0%/.test(a.texto)));
-  assert.equal((await lic.get(`/api/processos/${procId}`)).dados.situacao, "contratado");
+  assert.equal((await lic.get("/api/contratos")).status, 404);
+  assert.equal((await lic.post("/api/contratos", { numero: "12/2026" })).status, 404);
 });
 
 test("admin gerencia usuários e limites do próprio órgão", async () => {
@@ -843,7 +828,7 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   r = await adm.post(`/api/processos/${id}/etapas/protocolo/concluir`);
   assert.equal(r.dados.concluida, true, JSON.stringify(r.dados.pendencias));
   assert.equal(r.dados.protocolado, true);
-  assert.equal(r.dados.proxima.id, "edital");
+  assert.equal(r.dados.proxima, null);
 });
 
 test("revisão avulsa preserva PDFs, versões e evidências dentro do órgão", async () => {
@@ -1031,7 +1016,7 @@ test("solicitação com objeto genérico, justificativa e itens com quantidade e
   // Texto livre, sem o campo [[Itens]]: o quadro entra antes da assinatura, uma única vez.
   const r3 = await admin.post(rota, corpo({ secretaria: "Governo", descricao: "# PEDIDO\nPrecisamos dos itens abaixo.\n\n@ Fulana", itens: itens.slice(0, 1) }));
   const s3 = (await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r3.dados.id);
-  assert.match(s3.descricao, /^# PEDIDO\nPrecisamos dos itens abaixo\.\n\n## Itens solicitados\n\| Item [\s\S]*R\$\s9\.000,00\*\* \|\n\n@ Fulana$/);
+  assert.match(s3.descricao, /^# PEDIDO\nPrecisamos dos itens abaixo\.\n\n## Itens solicitados\n\| Item [\s\S]*R\$\s9\.000,00\*\* \|\n\nAnálise crítica dos preços: Nenhum preço foi descartado[^\n]*\n\n@ Fulana$/);
   // Modelo do órgão com [[Itens]] sob outro título não recebe o quadro duas vezes.
   const r4 = await admin.post(rota, corpo({ secretaria: "Administração", descricao: "## Relação\n[[Itens]]\n\n@ Beltrano", itens: itens.slice(0, 1) }));
   const s4 = (await admin.get(`/api/processos/${id}`)).dados.solicitacoes.find((x: any) => x.id === r4.dados.id);
@@ -1377,12 +1362,12 @@ test("exclusão retira o processo das consultas e conserva o protocolo e a audit
   assert.notEqual(posterior.dados.protocolo, r.dados.protocolo);
 });
 
-test("trilha: fase interna (PAC, Solicitação, documentos e protocolo) antes da fase externa", async () => {
+test("trilha: somente as nove etapas da fase interna, do PAC ao Protocolo", async () => {
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const painel = async () => (await lic.get("/api/painel")).dados.processos.por_etapa as { id: string; numero: number; etapa: string; total: number }[];
   const antes = await painel();
-  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["solicitacao", 2], ["dfd", 3], ["etp", 4], ["precos", 5], ["tr", 6], ["dot", 7], ["fiscal", 8], ["protocolo", 9], ["edital", 10], ["parecer", 11], ["pub", 12]]);
-  assert.deepEqual(ETAPAS.map((e) => e.fase), ["interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna", "externa", "externa", "externa"]);
+  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["solicitacao", 2], ["dfd", 3], ["etp", 4], ["precos", 5], ["tr", 6], ["dot", 7], ["fiscal", 8], ["protocolo", 9]]);
+  assert.deepEqual(ETAPAS.map((e) => e.fase), ["interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna"]);
   const r = await lic.post("/api/processos", { objeto: "Compra de materiais para a educação", tipo: "bens", via: "licitacao", ano: 2099 });
   assert.equal(r.status, 201);
   const caminho = `/api/processos/${r.dados.id}`;
@@ -2021,7 +2006,7 @@ test("preços descartados persistem riscados, ficam fora dos cálculos e são re
   const relatorio = await documentoPrecos(p, { precos: { valor_total: "999999,00", analise_critica: "Nenhum preço foi descartado por inexequibilidade ou por ser excessivamente elevado." } }, { nome: "Pesquisador", cargo: "Compras" });
   assert.match(relatorio, /## 8\. Análise crítica dos preços/); assert.match(relatorio, /Não cobre o custo/); assert.match(relatorio, /R\$\s220,00/);
   assert.doesNotMatch(relatorio, /Nenhum preço foi descartado|999\.999,00/);
-  assert.match((await lic.get(processo)).dados.sugestoes_campos.precos.analise_critica, /Preço inexequível/);
+  assert.equal((await lic.get(processo)).dados.sugestoes_campos.precos.analise_critica, undefined);
   const alterar = (itens: unknown) => lic.put(url, { anterior: s.descricao, descricao: s.descricao, itens_anteriores: s.itens, itens });
   const todos = structuredClone(s.itens); todos[0].cotacoes.forEach((c: any) => { c.descarte = { motivo: "elevado", justificativa: "Fora da referência validada para este item." }; });
   assert.equal((await alterar(todos)).status, 200); s = await ler();
@@ -2105,4 +2090,120 @@ test("processo completo reúne últimas versões e todos os anexos em PDF e Word
   // Um anexo inválido deve identificar o problema, sem baixar um processo incompleto.
   await pool.query("insert into orcamentos (processo_id,fornecedor,nome,arquivo,texto,usuario_id) values ($1,'Fonte','danificado.pdf',$2,'',$3)", [id, Buffer.from("%PDF-danificado"), usuarioId]);
   const invalido = await lic.get(`${rota}/completo.pdf`); assert.equal(invalido.status, 422); assert.match(invalido.dados.erro, /danificado.pdf/);
+});
+
+test("fase interna conclui no Protocolo e preserva o histórico externo sem reabrir etapas retiradas", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Preparação da contratação de materiais", tipo: "bens", via: "licitacao", ano: 2041, requisitante: "Educação" });
+  const rota = `/api/processos/${id}`;
+  const uid = (await q1("select id from usuarios where email='lic@a.gov.br'"))!.id;
+  for (const etapa of ["edital", "parecer", "pub"]) {
+    await pool.query("insert into minutas (processo_id,etapa,versao,texto,origem,usuario_id) values ($1,$2,1,$3,'manual',$4)", [id, etapa, `# Documento\nEXTERNO_HISTORICO_${etapa}`, uid]);
+    await pool.query("insert into campos_etapa (processo_id,etapa,valores,usuario_id) values ($1,$2,'{\"registro\":\"histórico\"}',$3)", [id, etapa, uid]);
+    assert.equal((await lic.get(`${rota}/minutas/${etapa}`)).status, 404);
+    assert.equal((await lic.post(`${rota}/minutas/${etapa}`, { texto: "Alterar documento retirado" })).status, 404);
+    assert.equal((await lic.post(`${rota}/etapas/${etapa}/concluir`)).status, 404);
+  }
+  let det = (await lic.get(rota)).dados;
+  assert.equal(det.trilha.etapas.length, 9);
+  assert.equal(det.trilha.atual.id, "pac");
+  assert.ok(!Object.keys(det.campos).some((e) => ["edital", "parecer", "pub"].includes(e)));
+  assert.equal(det.minutas.length, 0);
+  assert.equal((await lic.post(`${rota}/situacao`, { situacao: "publicado" })).status, 400);
+  assert.equal((await lic.post(`${rota}/situacao`, { situacao: "contratado" })).status, 400);
+  const antes = (await lic.get("/api/painel")).dados.processos;
+  const pb = { tipo: "bens", via: "licitacao" } as const;
+  for (const e of ETAPAS) for (const item of itensDe(e, pb)) await pool.query("insert into checagens (processo_id,item,usuario_id) values ($1,$2,$3) on conflict do nothing", [id, item.id, uid]);
+  await pool.query("insert into campos_etapa (processo_id,etapa,valores,usuario_id) values ($1,'dot','{\"dotacao\":\"Dotação indicada\"}',$2)", [id, uid]);
+  await preencherCampos(lic, id, ETAPAS.at(-1)!);
+  assert.equal((await lic.post(`${rota}/minutas/protocolo/dos-campos`)).status, 200);
+  const fechar = await lic.post(`${rota}/etapas/protocolo/concluir`);
+  assert.equal(fechar.status, 200); assert.equal(fechar.dados.concluida, true, JSON.stringify(fechar.dados));
+  assert.equal(fechar.dados.protocolado, true); assert.equal(fechar.dados.proxima, null);
+  det = (await lic.get(rota)).dados;
+  assert.equal(det.concluido, true);
+  assert.equal(det.trilha.atual.id, "protocolo");
+  assert.ok(det.trilha.etapas.every((e: any) => e.estado === "concluida"));
+  const depois = (await lic.get("/api/painel")).dados;
+  assert.equal(depois.processos.em_preparo, antes.em_preparo - 1);
+  assert.equal(depois.processos.concluidos, antes.concluidos + 1);
+  assert.ok(depois.processos.por_etapa.every((e: any) => !["edital", "parecer", "pub"].includes(e.id)));
+  assert.equal(depois.contratos, undefined);
+  const restantes = await q1("select count(*)::int as total from minutas where processo_id=$1 and etapa=any($2::text[])", [id, ["edital", "parecer", "pub"]]);
+  assert.equal(restantes!.total, 3);
+  for (const formato of ["pdf", "docx"]) {
+    const r = await lic.get(`${rota}/completo.${formato}`);
+    assert.equal(r.status, 200);
+    const texto = await extrairTexto(`processo.${formato}`, r.dados);
+    assert.doesNotMatch(texto, /EXTERNO_HISTORICO_|fase externa/i);
+    assert.match(texto, /ENCAMINHAMENTO/i);
+  }
+  if (process.env.LICITA_QA_DIR) {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(`${process.env.LICITA_QA_DIR}/fase-interna-qa.json`, JSON.stringify(det));
+  }
+});
+
+test("pesquisa de preços salva cálculo, referência e descarte com concorrência e documentos atualizados", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br"), outro = await new Cliente().entrar("admin@b.gov.br"), jur = await new Cliente().entrar("jur@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de materiais para análise dos preços", tipo: "bens", via: "licitacao", ano: 2042 });
+  const rota = `/api/processos/${id}`;
+  const criar = await lic.post(`${rota}/solicitacoes`, { chave_envio: randomUUID(), secretaria: "Educação", descricao: "# SOLICITAÇÃO\n[[Itens]]\n\n@ Titular", itens: [
+    { descricao: "Mesa", unidade: "UN", quantidade: 2, valor_unitario: null, cotacoes: [10, 100, 120, 1000].map((v, i) => ({ fornecedor: `Fonte ${i + 1}`, orcamento_id: null, valor_unitario: v })) },
+    { descricao: "Frete", unidade: "SERV", quantidade: 1, valor_unitario: 50 },
+  ] });
+  assert.equal(criar.status, 201);
+  const ler = async () => (await lic.get(rota)).dados.solicitacoes[0];
+  let s = await ler();
+  const montar = (s: any, usos: string[]) => ({ solicitacoes: [{ id: s.id, itens_anteriores: s.itens, analises: s.itens.map((item: any, i: number) => ({ indice: i, criterio: "media", cotacoes: (item.cotacoes ?? []).map((c: any, j: number) => ({ indice: j, uso: usos[j], ...(usos[j] === "descartado" ? { descarte: { motivo: "elevado", justificativa: "Valor acima das referências equivalentes pesquisadas." } } : {}) })) })) }] });
+  const escolhas = montar(s, ["referencia", "calculo", "calculo", "descartado"]);
+  assert.equal((await lic.put(`${rota}/pesquisa-precos`, escolhas)).status, 409, "respeita a ordem das etapas");
+  const uid = (await q1("select id from usuarios where email='lic@a.gov.br'"))!.id;
+  for (const e of ETAPAS.slice(0, ETAPAS.findIndex((e) => e.id === "precos"))) for (const item of itensDe(e, { tipo: "bens", via: "licitacao" })) await pool.query("insert into checagens (processo_id,item,usuario_id) values ($1,$2,$3) on conflict do nothing", [id, item.id, uid]);
+  for (const item of ["p7", "f2"]) await pool.query("insert into checagens (processo_id,item,usuario_id) values ($1,$2,$3)", [id, item, uid]);
+  const { quadroDeItens } = await import("../../shared/solicitacao.js");
+  const antiga = '# RELATÓRIO\n## 5. Quadro comparativo de preços\n'+quadroDeItens(s.itens,true,false)+'\n\n## 8. Análise crítica dos preços\nAnálise manual mantida.\n\n## 9. Valor estimado da contratação\nO valor estimado da contratação é de **R$ 999.999,00 (valor antigo)**.\n\n@ Pesquisador';
+  await pool.query("insert into minutas (processo_id,etapa,versao,texto,origem,usuario_id) values ($1,'precos',1,$2,'manual',$3)", [id, antiga, uid]);
+  assert.equal((await outro.put(`${rota}/pesquisa-precos`, escolhas)).status, 404);
+  assert.equal((await jur.put(`${rota}/pesquisa-precos`, escolhas)).status, 403);
+  const invalida = structuredClone(escolhas); invalida.solicitacoes[0].analises[0].cotacoes[3].descarte!.justificativa = " ";
+  assert.equal((await lic.put(`${rota}/pesquisa-precos`, invalida)).status, 400);
+  const salva = await lic.put(`${rota}/pesquisa-precos`, escolhas);
+  assert.equal(salva.status, 200, JSON.stringify(salva.dados));
+  assert.equal(salva.dados.campos.valor_total, "270,00");
+  assert.equal((await lic.put(`${rota}/pesquisa-precos`, escolhas)).status, 409, "não sobrepõe uma versão antiga dos preços");
+  s = await ler();
+  assert.equal(s.itens[0].valor_unitario, 110);
+  assert.equal(s.itens[0].cotacoes[0].apenas_referencia, true);
+  assert.equal(s.itens[0].cotacoes[0].descarte, undefined);
+  assert.equal(s.itens[0].cotacoes[3].descarte.motivo, "elevado");
+  assert.equal(s.itens[1].valor_unitario, 50);
+  assert.match(s.descricao, /10,00 \(ref\.\)/);
+  assert.match(s.descricao, /~~R\$\s1\.000,00~~/);
+  const det = (await lic.get(rota)).dados;
+  assert.ok(!det.checagens.some((c: any) => ["p7", "f2"].includes(c.item)));
+  assert.equal(det.campos.precos.valor_total, "270,00");
+  const pesquisa = (await lic.get(`${rota}/minutas/precos`)).dados.vigente.texto;
+  assert.match(pesquisa, /Somente|somente/); assert.match(pesquisa, /Análise manual mantida/); assert.match(pesquisa, /270,00/); assert.doesNotMatch(pesquisa, /999\.999,00/);
+  for (const formato of ["docx", "pdf"]) {
+    const doc = await lic.get(`${rota}/minutas/precos/${formato}`); assert.equal(doc.status, 200);
+    const texto = (await extrairTexto(`pesquisa.${formato}`, doc.dados)).replace(/\s+/g, " ");
+    assert.match(texto, /10,00 \(ref\.\)/); assert.match(texto, /270,00/); assert.match(texto, /Análise manual mantida/); assert.doesNotMatch(texto, /999\.999,00/);
+  }
+  assert.match((await q1("select texto from minutas where processo_id=$1 and etapa='precos' and versao=1", [id]))!.texto, /999\.999,00/, "a versão original da minuta continua preservada");
+  const historico = await lic.get(`${rota}/minutas/precos/docx?versao=1`);
+  assert.match(await extrairTexto("pesquisa.docx", historico.dados), /999\.999,00/);
+  assert.equal((await lic.get(`${rota}/minutas/precos`)).dados.vigente.versao, 2);
+
+  const todasRef = await lic.put(`${rota}/pesquisa-precos`, montar(s, ["referencia", "referencia", "referencia", "referencia"]));
+  assert.equal(todasRef.status, 200); s = await ler(); assert.equal(s.itens[0].valor_unitario, null);
+  const concluir = await lic.post(`${rota}/etapas/precos/concluir`);
+  assert.ok(concluir.dados.pendencias.some((p: any) => p.codigo === "precos"));
+  const restaurar = await lic.put(`${rota}/pesquisa-precos`, montar(s, ["calculo", "calculo", "calculo", "calculo"]));
+  assert.equal(restaurar.status, 200); s = await ler(); assert.equal(s.itens[0].valor_unitario, 307.5);
+  assert.ok(s.itens[0].cotacoes.every((c: any) => !c.descarte && !c.apenas_referencia));
+  if (process.env.LICITA_QA_DIR) {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(`${process.env.LICITA_QA_DIR}/pesquisa-precos-qa.json`, JSON.stringify((await lic.get(rota)).dados));
+  }
 });

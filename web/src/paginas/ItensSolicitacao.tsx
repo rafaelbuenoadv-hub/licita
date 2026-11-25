@@ -10,7 +10,7 @@ import { BuscaPncpItem } from "./BuscaPncpItem";
 import { BuscaPncpLote } from "./BuscaPncpLote";
 import { ItensOrcamentos } from "./ItensOrcamentos";
 
-export interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string; obs?: string; descarte?: DescartePreco }
+export interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string; obs?: string; descarte?: DescartePreco; apenas_referencia?: boolean }
 // escolhas: destino definido à mão na conferência (índice do item, ou null para lançar como item novo).
 type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[]; escolhas: Record<number, number | null> };
 export const cotacaoPreenchida = (c: LinhaCotacao) => c.orcamentoId != null || !!c.fornecedor.trim() || !!c.valor.trim();
@@ -32,7 +32,7 @@ export function linhasDosItens(itens: ItemSolicitacao[], orcamentos: OrcamentoLi
       orcamentoId: c.orcamento_id,
       fornecedor: limparNomeFornecedor(c.fornecedor) || nomeFornecedorOrcamento(orcamentos.find((o) => o.id === c.orcamento_id)),
       valor: c.valor_unitario == null ? "" : String(c.valor_unitario).replace(".", ","),
-      fonte: c.fonte, link: c.link, consultadoEm: c.consultado_em, obs: c.obs, descarte: c.descarte,
+      fonte: c.fonte, link: c.link, consultadoEm: c.consultado_em, obs: c.obs, descarte: c.descarte, apenas_referencia: c.apenas_referencia,
     }));
     if (!cotacoes.length) cotacoes.push(cotacaoVazia());
     return {
@@ -66,6 +66,7 @@ export function lerLinhas(linhas: LinhaItem[]): { itens: ItemSolicitacao[]; erro
       if (c.descarte && (!valor || !c.descarte.justificativa.trim())) erroDescarte ??= `Item ${k + 1} — informe o preço e a justificativa do descarte de ${fornecedor || "cada fonte"}.`;
       cotacoes.push({
         orcamento_id: c.orcamentoId, fornecedor, valor_unitario: valor,
+        ...(c.apenas_referencia ? { apenas_referencia: true } : {}),
         ...(c.descarte ? { descarte: { ...c.descarte, justificativa: c.descarte.justificativa.trim() } } : {}),
         ...(c.fonte ? { fonte: c.fonte } : {}), ...(c.link ? { link: c.link.trim() } : {}),
         ...(c.consultadoEm ? { consultado_em: c.consultadoEm } : {}),

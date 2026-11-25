@@ -4,14 +4,16 @@ import { api, brl } from "../api";
 import { TRILHA_PROCESSO, VIAS, type EtapaNaTrilha } from "../../../shared/etapas";
 import { tem, useEu } from "../main";
 
-const SIT: Record<string, [string, string]> = { preparacao: ["Em preparo", "cur"], publicado: ["Publicado", "ok"], contratado: ["Contratado", "ok"], cancelado: ["Cancelado", "bad"] };
+const SIT: Record<string, [string, string]> = { preparacao: ["Em preparo", "cur"], concluido: ["Fase interna concluída", "ok"], cancelado: ["Cancelado", "bad"] };
+
+const situacaoInterna = (p: { situacao: string; concluido: boolean }) => p.situacao === "cancelado" ? "cancelado" : p.concluido ? "concluido" : "preparacao";
 
 export function Processos() {
   const { eu } = useEu();
   const [params, setParams] = useSearchParams();
   const ano = params.get("ano") ?? String(new Date().getFullYear());
-  const etapa = params.get("etapa") ?? "";
-  const situacao = params.get("situacao") ?? "";
+  const etapa = TRILHA_PROCESSO.some((e) => e.id === params.get("etapa")) ? params.get("etapa")! : "";
+  const situacao = Object.hasOwn(SIT, params.get("situacao") ?? "") ? params.get("situacao")! : "";
   const filtrar = (chave: "ano" | "etapa" | "situacao", valor: string) => {
     const proximos = new URLSearchParams(params);
     proximos.set(chave, valor);
@@ -57,7 +59,7 @@ export function Processos() {
       });
     return () => { ativo = false; };
   }, [ano]);
-  const f = (lista ?? []).filter((p) => !situacao || p.situacao === situacao).filter((p) => !etapa || p.trilha.atual.id === etapa).filter((p) => !busca || `${p.protocolo} ${p.numero} ${p.objeto} ${p.procedimento} ${p.requisitante} ${p.areas_adicionais?.join(" ") ?? ""}`.toLowerCase().includes(busca.toLowerCase()));
+  const f = (lista ?? []).filter((p) => !situacao || situacaoInterna(p) === situacao).filter((p) => !etapa || p.trilha.atual.id === etapa).filter((p) => !busca || `${p.protocolo} ${p.numero} ${p.objeto} ${p.procedimento} ${p.requisitante} ${p.areas_adicionais?.join(" ") ?? ""}`.toLowerCase().includes(busca.toLowerCase()));
   return (
     <>
       <div className="row"><h1>Processos</h1>{podeEditar && <Link className="btn pri" to="/processos/novo">Novo processo</Link>}</div>
@@ -95,7 +97,7 @@ export function Processos() {
                 <td className="r">{brl(p.valor_estimado)}</td>
                 <td><span className="bar" aria-hidden>{p.trilha.etapas.map((e: EtapaNaTrilha) => <i key={e.id} className={e.estado === "concluida" ? "ok" : e.estado === "atual" && !p.concluido ? "cur" : ""} />)}</span>
                   <div className="small muted">{p.concluido ? "Etapas concluídas" : `${p.trilha.atual.numero}. ${p.trilha.atual.nome}`}</div></td>
-                <td><span className={"pill " + SIT[p.situacao][1]}>{SIT[p.situacao][0]}</span></td>
+                <td><span className={"pill " + SIT[situacaoInterna(p)][1]}>{SIT[situacaoInterna(p)][0]}</span></td>
                 {podeEditar && <td onClick={(e) => e.stopPropagation()}><div className="tools">
                   <Link className="btn sm" to={`/processos/${p.id}?editar=1`} aria-label={`Editar processo ${p.protocolo}`}>Editar</Link>
                   {podeExcluir && <button type="button" className="btn sm danger" disabled={excluindo}

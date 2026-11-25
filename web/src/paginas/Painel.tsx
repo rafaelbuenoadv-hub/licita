@@ -17,6 +17,7 @@ export function Painel() {
         <Link className="btn pri" to="/processos/novo">Novo processo</Link></div>
       <div className="kpis">
         <div className="panel kpi"><span className="lbl">Processos em preparo</span><b>{d.processos.em_preparo}</b></div>
+        <div className="panel kpi"><span className="lbl">Fase interna concluída</span><b>{d.processos.concluidos}</b></div>
         <div className="panel kpi"><span className="lbl">Parados há 15 dias ou mais</span><b>{d.processos.parados.length}</b></div>
       </div>
 

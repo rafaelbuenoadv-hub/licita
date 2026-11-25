@@ -2,7 +2,7 @@
 // Tudo aqui é regra fixa; funciona mesmo com a IA indisponível.
 import { q, q1 } from "./db.js";
 import { secretariosDoProcesso } from "./portarias.js";
-import { totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
+import { valorDasCotacoes, totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
 import { consultarPca, type ItemConsultaPca } from "../shared/consulta-pca.js";
 import { ETAPAS, camposFaltando, itensDe, pendencias, temValor, type Checks, type Etapa, type Tipo, type Via, type Valores } from "../shared/etapas.js";
 
@@ -56,6 +56,10 @@ export async function conferirEtapa(p: Proc, e: Etapa, checks: Checks, campos: R
   }
   if (e.id === "tr" && v.matriz_obrigatoria === "sim" && v.matriz !== "sim") {
     l.push({ codigo: "matriz", texto: "Em obra de grande vulto ou contratação integrada ou semi-integrada a matriz de alocação de riscos é obrigatória (art. 22, § 3º).", onde: "campos", alvo: "matriz", bloqueia: true });
+  }
+  if (e.id === "precos") {
+    const itens = (await q<{ itens: ItemSolicitacao[] }>("select itens from solicitacoes_processo where processo_id=$1", [p.id])).flatMap((s) => s.itens ?? []);
+    for (const [i, item] of itens.entries()) if (item.cotacoes?.length && valorDasCotacoes(item.cotacoes, item.criterio) == null) l.push({ codigo: "precos", texto: `O item ${i + 1} (${item.descricao}) não possui preço usado no cálculo. Classifique ao menos uma cotação válida para formar o valor estimado.`, onde: "campos", bloqueia: true });
   }
   if (e.id === "protocolo") {
     if (!temValor(campos.dot?.dotacao)) l.push({ codigo: "dotacao", texto: "A dotação indicada pela Contabilidade ainda não foi registrada na etapa \"Dotação orçamentária\". Sem ela o processo não é protocolado.", onde: "campos", alvo: "dotacao", bloqueia: true });

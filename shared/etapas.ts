@@ -11,10 +11,9 @@ export type { Campo, ValorCampo, Valores } from "./campos.js";
 
 /** auto: marcado pelo sistema (ex.: todos os campos obrigatórios da etapa preenchidos). */
 export interface Item { id: string; texto: string; base?: string; cond?: Condicao; auto?: boolean }
-export type Fase = "interna" | "externa";
+export type Fase = "interna";
 export const FASES: Record<Fase, { nome: string; quem: string }> = {
   interna: { nome: "Fase interna", quem: "Secretaria demandante" },
-  externa: { nome: "Fase externa", quem: "Departamento de Licitações e Contratos" },
 };
 export interface Etapa {
   id: string;
@@ -258,7 +257,7 @@ Subitens numerados (1.1, 1.2...). Local e data; assinatura do titular da área r
   {
     id: "dot", nome: "Dotação orçamentária", doc: "Solicitação de reserva de dotação orçamentária",
     fase: "interna", campos: CAMPOS.dot,
-    oque: "A Secretaria solicita formalmente à Contabilidade a reserva ou indicação da dotação compatível com o objeto, com base no TR ou PB já elaborado. Sem essa indicação o processo não pode ser protocolado: ela é pré-condição para a Declaração de Adequação Orçamentária emitida na fase externa. Solicite com antecedência — esta etapa depende de outro setor.",
+    oque: "A Secretaria solicita formalmente à Contabilidade a reserva ou indicação da dotação compatível com o objeto, com base no TR ou PB já elaborado. Sem essa indicação o processo não pode ser protocolado. Solicite com antecedência — esta etapa depende de outro setor.",
     base: [{ rotulo: "Art. 150" }, { rotulo: "Art. 72, IV", url: U.a72 }],
     papeis: ["requisitante", "contratacao", "autoridade"],
     itens: [
@@ -322,105 +321,10 @@ Local e data; assinatura do responsável pela Secretaria`,
 Identificação do processo; Secretaria demandante; objeto
 1. Documentos da fase interna encaminhados (verificação no PAC, solicitação das secretarias, DFD, ETP, pesquisa de preços, TR/PB com análise de riscos, indicação de dotação, indicação do fiscal)
 2. Observações ao Departamento
-3. Pedido de providências da fase externa
+3. Encaminhamento do processo completo para análise e providências do Departamento
 Local e data; assinatura do responsável pela Secretaria`,
   },
-  {
-    id: "edital", nome: "Edital e contrato", doc: "Edital (ou aviso de contratação direta) e minuta de contrato",
-    fase: "externa", campos: [],
-    oque: "Reúne as regras da disputa e do contrato. Na dispensa eletrônica, o instrumento é o aviso de contratação direta; na inexigibilidade não há disputa, e a etapa trata da minuta de contrato.",
-    base: [{ rotulo: "Art. 25", url: U.a25 }, { rotulo: "Art. 18, V, VI e VIII", url: U.a18 }, { rotulo: "Art. 72", url: U.a72 }],
-    papeis: ["contratacao"],
-    itens: [
-      it("ed0", "Declaração de adequação orçamentária emitida pela Contabilidade, com a dotação e o saldo", "Art. 72, IV"),
-      it("o3", "Agente de contratação ou comissão designado por ato publicado", "Arts. 7º e 8º"),
-      it("ed1", "Instrumento completo: objeto, convocação, julgamento, habilitação, recursos, penalidades, fiscalização e gestão, entrega e pagamento", "Art. 25, caput", "naoinex"),
-      it("ed2", "Modalidade, critério de julgamento e modo de disputa motivados", "Art. 18, VIII", "lic"),
-      it("ed3", "Instrumento com vocabulário de contratação direta, sem termos de pregão", "", "disp"),
-      it("ed4", "Minuta de contrato como anexo", "Art. 18, VI"),
-      it("ed5", "Termo de Referência anexado na mesma versão e data da pasta de planejamento"),
-      it("ed6", "Exigências de habilitação idênticas às do Termo de Referência", "", "naoinex"),
-      it("ed7", "Índice de reajuste com data-base vinculada ao orçamento estimado", "Art. 25, § 7º"),
-      it("ed8", "Tratamento de microempresas e empresas de pequeno porte previsto", "LC 123/2006", "naoinex"),
-      it("ed9", "Remissões a itens e anexos conferidas; numeração dos subitens sem saltos"),
-      it("ed10", "Autos numerados, sem folhas faltando"),
-    ],
-    atencao: [
-      "Edital juntado sem algumas folhas é ressalva frequente nos pareceres.",
-      "Remissão a anexo que não existe ou que mudou de número.",
-      "Cláusulas de contrato de compra coladas em contrato de obra (recebimento, reajuste, multa).",
-    ],
-    modelo: `EDITAL (ou AVISO DE CONTRATAÇÃO DIRETA)
-Preâmbulo (órgão, procedimento, fundamento, data e plataforma da sessão)
-1. Objeto
-2. Participação
-3. Esclarecimentos e impugnação
-4. Proposta
-5. Lances
-6. Julgamento
-7. Habilitação
-8. Recurso
-9. Tratamento de microempresas e empresas de pequeno porte
-10. Adjudicação e homologação
-11. Sanções
-12. Disposições gerais
-Relação de anexos (Termo de Referência; modelos de declaração; minuta de contrato)
-Local e data; assinatura da autoridade ou do agente de contratação`,
-  },
-  {
-    id: "parecer", nome: "Parecer jurídico", doc: "Relatório de saneamento (resposta ao parecer)",
-    fase: "externa", campos: [],
-    oque: "O órgão jurídico faz o controle prévio de legalidade. Se o parecer devolver o processo em diligência, cada ressalva recebe uma providência e um documento, reunidos no relatório de saneamento.",
-    base: [{ rotulo: "Art. 53", url: U.a53 }, { rotulo: "Art. 72, III", url: U.a72 }],
-    papeis: ["juridico", "contratacao"],
-    itens: [
-      it("j1", "Autos completos e numerados enviados ao órgão jurídico", "Art. 53, caput"),
-      it("j2", "Parecer jurídico emitido e juntado", "Art. 53; § 4º na contratação direta"),
-      it("j3", "Cada ressalva e recomendação respondida com providência e documento (ou parecer sem ressalvas)"),
-      it("j4", "Peças retificadas substituídas em todos os lugares em que aparecem"),
-      it("j5", "Análise complementar concluída, sem ressalva pendente"),
-    ],
-    atencao: [
-      "Responder ressalva por ressalva, na ordem do parecer, indicando as folhas do documento juntado.",
-      "Peça retificada deve dizer qual versão substitui e em atendimento a qual item do parecer.",
-      "Registrar em separado as decisões de mérito tomadas pela Administração.",
-    ],
-    modelo: `RELATÓRIO DE SANEAMENTO
-Resposta à diligência do Parecer Jurídico nº ...
-Identificação do processo e do procedimento
-Destinatário (órgão jurídico e parecerista)
-Parágrafo de encaminhamento; objeto, valor estimado e fundamento
-1. Ressalvas obstativas (quadro Nº | Ressalva | Providência adotada | Documento juntado (fls.))
-2. Recomendações não obstativas (quadro Nº | Recomendação | Providência adotada | Documento)
-3. Decisões de mérito adotadas pela Administração (alíneas)
-4. Pedido (análise complementar)
-Local e data; assinaturas do setor de licitações e da área requisitante`,
-  },
-  {
-    id: "pub", nome: "Autorização e publicação", doc: "Extrato para publicação",
-    fase: "externa", campos: [],
-    oque: "A autoridade autoriza e o instrumento é divulgado. Daqui em diante corre o prazo para propostas.",
-    base: [{ rotulo: "Art. 53, § 3º", url: U.a53 }, { rotulo: "Art. 54", url: U.a54 }, { rotulo: "Art. 55", url: U.a55 }, { rotulo: "Art. 75, § 3º", url: U.a75p3 }, { rotulo: "Art. 72, VIII e parágrafo único", url: U.a72 }],
-    papeis: ["autoridade", "contratacao"],
-    itens: [
-      it("u1", "Autoridade competente determinou a divulgação do edital", "Art. 53, § 3º", "lic"),
-      it("u2", "Inteiro teor do edital e dos anexos divulgado no PNCP", "Art. 54, caput", "lic"),
-      it("u3", "Extrato publicado no diário oficial e em jornal diário de grande circulação", "Art. 54, § 1º", "lic"),
-      it("u4", "Todos os anexos disponíveis em sítio oficial na mesma data, sem exigir cadastro", "Art. 25, § 3º", "lic"),
-      it("u5", "Data da sessão respeita o prazo mínimo para propostas, contado da divulgação", "Art. 55", "lic"),
-      it("u6", "Aviso divulgado em sítio eletrônico oficial por no mínimo 3 dias úteis", "Art. 75, § 3º", "disp"),
-      it("u7", "Razão da escolha do contratado e justificativa de preço nos autos", "Art. 72, VI e VII", "inex"),
-      it("u8", "Comprovação de habilitação e qualificação mínima do contratado", "Art. 72, V", "inex"),
-      it("u9", "Autorização da autoridade competente", "Art. 72, VIII", "direta"),
-      it("u10", "Ato de autorização ou extrato do contrato divulgado em sítio eletrônico oficial", "Art. 72, parágrafo único", "direta"),
-    ],
-    atencao: [
-      "Prazos mínimos do art. 55, em dias úteis: bens por menor preço ou maior desconto, 8; serviços comuns e obras comuns por menor preço, 10; serviços e obras especiais por menor preço, 25; técnica e preço, 35.",
-      "Alteração do edital que afete as propostas reabre o prazo (art. 55, § 1º).",
-    ],
-    modelo: `EXTRATO PARA PUBLICAÇÃO
-Órgão; procedimento e número; processo administrativo; objeto; valor estimado (se divulgado); fundamento legal; critério de julgamento; data, hora e plataforma da sessão ou período de envio de propostas; onde obter o inteiro teor; local, data e autoridade`,
-  },
+
 ];
 
 export interface ProcessoBase { tipo: Tipo; via: Via }

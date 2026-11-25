@@ -210,7 +210,7 @@ export function NovoProcesso() {
       {msg && <p className={"note " + (msg.tipo ?? "")}>{msg.t}</p>}
       <form className="panel pad stack" onSubmit={criar}>
         <CamposProcesso d={d} set={setD} plano={plano} novo />
-        <p className="small muted">O processo recebe um protocolo automático ao ser criado. O nº do processo administrativo e o do procedimento são gerados por último, quando a trilha chega à etapa de autorização e publicação.</p>
+        <p className="small muted">O processo recebe um protocolo automático ao ser criado. O nº do processo administrativo e o do procedimento são gerados por último, quando a trilha chega ao Protocolo.</p>
         <div><button className="btn pri" disabled={busy !== ""}>{busy === "salvar" ? "Criando…" : "Criar e abrir a trilha"}</button></div>
       </form>
     </>

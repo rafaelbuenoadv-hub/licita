@@ -47,3 +47,22 @@ test("descartar uma cotação afeta apenas o preço daquele item", () => {
   assert.equal(quadro.match(/~~R\$\s10,00~~/g)?.length, 1);
   assert.match(quadro, /R\$\s55,00/);
 });
+
+test("somente referência permanece visível e não compõe nenhum cálculo", async () => {
+  const { documentoDaPesquisaDePrecos } = await import("../../shared/solicitacao.js");
+  const fontes = cotacoes.map((c, i) => i === 0 ? { ...c, descarte: undefined, apenas_referencia: true } : c);
+  assert.equal(valorDasCotacoes(fontes), 110);
+  assert.equal(valorDasCotacoes(fontes, "menor"), 100);
+  assert.equal(valorDasCotacoes(fontes, "mediana"), 110);
+  const novo = { ...item, cotacoes: fontes };
+  const quadro = quadroDeItens([novo], true);
+  assert.match(quadro, /R\$\s10,00 \(ref\.\)/);
+  assert.doesNotMatch(quadro, /~~R\$\s10,00~~/);
+  assert.match(quadro, /Preço somente de referência — item 1/);
+  const base = '# RELATÓRIO\n## 5. Quadro comparativo de preços\n'+quadroDeItens([item],true,false)+'\n\n## 8. Análise crítica dos preços\nAnálise manual preservada.\n\n## 9. Valor estimado\nO valor estimado da contratação é de **R$ 999.999,00 (valor antigo)**.\n\n@ Responsável';
+  const doc = documentoDaPesquisaDePrecos(base, [novo]);
+  assert.match(doc, /Análise manual preservada/);
+  assert.match(doc, /R\$\s220,00/);
+  assert.doesNotMatch(doc, /999\.999,00/);
+  assert.equal(documentoDaPesquisaDePrecos(doc, [novo]), doc);
+});

@@ -3,7 +3,7 @@ import { q, q1 } from "./db.js";
 import { secretariosDoProcesso } from "./portarias.js";
 import { documentoDfd } from "./modelo-dfd.js";
 import { documentoEtp, documentoPrecos, documentoTr } from "./modelos-fase-interna.js";
-import { analiseCriticaDosPrecos, totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
+import { totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
 import {
   ETAPAS, TIPOS, VIAS, camposFaltando, camposVisiveis, itemDosCampos, itensDe, textoDoCampo, temValor,
   type Etapa, type Tipo, type Valores, type Via,
@@ -16,7 +16,7 @@ interface Proc {
 
 export async function camposDo(processoId: number): Promise<Record<string, Valores>> {
   const rows = await q<{ etapa: string; valores: Valores }>("select etapa, valores from campos_etapa where processo_id=$1", [processoId]);
-  return Object.fromEntries(rows.map((r) => [r.etapa, r.valores]));
+  return Object.fromEntries(rows.filter((r) => ETAPAS.some((e) => e.id === r.etapa)).map((r) => [r.etapa, r.valores]));
 }
 
 /** Marca (ou desmarca) o item automático "Campos da etapa preenchidos" conforme os campos gravados. */
@@ -84,7 +84,6 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
       vi: valorTexto,
     },
     precos: {
-      analise_critica: itens.length ? analiseCriticaDosPrecos(itens) : "",
       parametros: (nOrcamentos?.n ?? 0) > 0 && p.tipo !== "obra" ? ["fornecedores"] : [],
       valor_total: total != null ? moeda(total) : "",
     },
@@ -137,7 +136,7 @@ export async function documentoDosCampos(p: Proc, e: Etapa, campos: Record<strin
   }
   if (e.id === "protocolo") {
     l.push(`## ${++n}. Encaminhamento`,
-      "Encaminha-se o processo, com os documentos da fase interna (verificação no PAC, solicitação das secretarias, DFD, ETP, pesquisa de preços e memória de cálculo, Termo de Referência ou Projeto Básico com análise de riscos, indicação de dotação orçamentária e indicação do fiscal do contrato), ao Departamento de Licitações e Contratos, para as providências da fase externa.");
+      "Encaminha-se o processo, com os documentos da fase interna (verificação no PAC, solicitação das secretarias, DFD, ETP, pesquisa de preços e memória de cálculo, Termo de Referência ou Projeto Básico com análise de riscos, indicação de dotação orçamentária e indicação do fiscal do contrato), ao Departamento de Licitações e Contratos, para análise e providências de sua competência.");
   }
   if (e.id === "dot") {
     l.push(`## ${++n}. Pedido`, "Solicita-se à Contabilidade a reserva e a indicação da dotação orçamentária compatível com o objeto, para as parcelas que vencem no exercício (Lei nº 14.133/2021, art. 150).");

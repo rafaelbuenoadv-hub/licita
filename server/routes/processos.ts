@@ -1,7 +1,7 @@
 import { montarProcessoCompleto } from "../processo-completo.js";
 import { anexosDaRequisicao, apoiosComTextoLocal, hashDoAnexo, incorporarApoios, nomeAnexoEnviado, parametrosApoios, receberAnexosSolicitacao, referenciasApoios, salvarApoios } from "../anexos-solicitacao.js";
 import { fornecedorNoTexto, limparNomeFornecedor, nomeDoArquivoSemExtensao, nomeFornecedorOrcamento, type OrcamentoLido } from "../../shared/orcamentos.js";
-import { documentoDaSolicitacao, planejamentoDoProcesso, prazoDoProcesso, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao, type TopicoSolicitacao } from "../../shared/solicitacao.js";
+import { documentoDaSolicitacao, documentoDaPesquisaDePrecos, planejamentoDoProcesso, prazoDoProcesso, LIMITE_SOLICITACAO, MODELO_SOLICITACAO, valorDasCotacoes, normalizarCotacao, type ItemSolicitacao, type TopicoSolicitacao } from "../../shared/solicitacao.js";
 import { modeloSolicitacao, preencherSolicitacao } from "../solicitacao.js";
 import { inserirTitularesDfd, preencherPortarias, secretariosDoProcesso, sugestoesCadastro } from "../portarias.js";
 import { consultarPca, type ItemConsultaPca } from "../../shared/consulta-pca.js";
@@ -80,7 +80,7 @@ export async function salvarMinuta(processoId: number, etapa: string, texto: str
     return { versao, nova: true };
   });
 }
-function exigeEtapaEditavel(req: Request, p: Processo, checks: Checks, etapaId: string) {
+export function exigeEtapaEditavel(req: Request, p: Processo, checks: Checks, etapaId: string) {
   const ix = ETAPAS.findIndex((e) => e.id === etapaId);
   if (ix < 0) throw new ErroHttp(404, "Etapa inexistente.");
   if (!podeMarcar(req.usuario!.papeis, ETAPAS[ix])) throw new ErroHttp(403, `Seu perfil não atua na etapa "${ETAPAS[ix].nome}".`);
@@ -112,8 +112,12 @@ async function timbradoDoProcesso(orgaoId: number, codigo: unknown) {
   return timbrado;
 }
 
-/** A numeração é liberada quando só falta a última etapa (autorização e publicação) ou tudo já foi concluído. */
+/** A numeração é liberada quando só falta a última etapa (Protocolo) ou tudo já foi concluído. */
 export const numeracaoLiberada = (p: Processo, c: Checks) => atual(p, c) >= ETAPAS.length - 1 || concluido(p, c);
+
+async function itensDoProcesso(processo: number) {
+  return (await q<{ itens: ItemSolicitacao[] }>("select itens from solicitacoes_processo where processo_id=$1 order by id", [processo])).flatMap((s) => s.itens ?? []);
+}
 
 const ROTULO_PROC: Record<Via, string> = { licitacao: "Licitação", dispensa: "Dispensa", inexigibilidade: "Inexigibilidade" };
 /** Sugere o próximo número: maior "N/ano" já usado pelo órgão no exercício, mais um. Quem grava pode ajustar. */
@@ -153,8 +157,9 @@ const itensSolicitacao = z.array(z.object({
     link: z.string().trim().max(1500).optional(),
     consultado_em: z.iso.date().optional(),
     obs: z.string().trim().max(1000).optional(),
+    apenas_referencia: z.boolean().optional(),
     descarte: z.object({ motivo: z.enum(["inexequivel", "elevado"]), justificativa: z.string().trim().min(1, "Justifique o descarte do preço.").max(2000) }).optional(),
-  })).max(20).optional(),
+  }).refine((c) => !(c.descarte && c.apenas_referencia), "Um preço descartado não pode ser marcado também como somente referência.")).max(20).optional(),
 })).max(200);
 
 export const itensSolicitacaoOpcionais = z.preprocess((valor) => {
@@ -288,7 +293,7 @@ export function rotasProcessos() {
     const checagens = await q(
       `select c.item, c.em, u.nome as usuario from checagens c left join usuarios u on u.id = c.usuario_id where c.processo_id = $1`, [p.id]);
     const minutas = await q(
-      `select distinct on (etapa) etapa, versao, origem, criado_em from minutas where processo_id = $1 order by etapa, versao desc`, [p.id]);
+      `select distinct on (etapa) etapa, versao, origem, criado_em from minutas where processo_id = $1 and etapa = any($2::text[]) order by etapa, versao desc`, [p.id, ETAPAS.map((e) => e.id)]);
     const anexos = await q("select id, nome, length(texto) as caracteres, criado_em from anexos where processo_id = $1 order by id", [p.id]);
     const orcamentos = await q(
       `select o.id, coalesce(o.fornecedor_manual, o.fornecedor) as fornecedor, o.fornecedor_manual, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, o.dados, o.lido_em, u.nome as usuario
@@ -540,7 +545,7 @@ export function rotasProcessos() {
     const p = await processoDo(req);
     const d = z.object({ numero: z.string().trim().min(1).max(60), procedimento: z.string().trim().min(1).max(120) }).parse(req.body);
     if (p.situacao === "cancelado") throw new ErroHttp(409, "Processo cancelado.");
-    if (!numeracaoLiberada(p, await checksDo(p.id))) throw new ErroHttp(409, "O nº do processo e o do procedimento são gerados por último: conclua as etapas anteriores à publicação.");
+    if (!numeracaoLiberada(p, await checksDo(p.id))) throw new ErroHttp(409, "O nº do processo e o do procedimento são gerados por último: conclua as etapas anteriores ao Protocolo.");
     await q("update processos set numero=$1, procedimento=$2, atualizado_em=now() where id=$3", [d.numero, d.procedimento, p.id]);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "processo.numerado", detalhe: d });
     res.json({ ok: true });
@@ -548,8 +553,7 @@ export function rotasProcessos() {
 
   r.post("/processos/:id/situacao", exigePapel("contratacao", "autoridade"), async (req, res) => {
     const p = await processoDo(req);
-    const { situacao } = z.object({ situacao: z.enum(["preparacao", "publicado", "contratado", "cancelado"]) }).parse(req.body);
-    if (situacao === "publicado" && !concluido(p, await checksDo(p.id))) throw new ErroHttp(409, "Só é possível marcar como publicado com todas as etapas concluídas.");
+    const { situacao } = z.object({ situacao: z.enum(["preparacao", "cancelado"]) }).parse(req.body);
     await q("update processos set situacao=$1, atualizado_em=now() where id=$2", [situacao, p.id]);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "processo.situacao", detalhe: { situacao } });
     res.json({ ok: true });
@@ -652,6 +656,7 @@ export function rotasProcessos() {
     const p = await processoDo(req);
     if (!etapaPorId(String(req.params.etapa))) throw new ErroHttp(404, "Etapa inexistente.");
     const vig = await minutaVigente(p.id, String(req.params.etapa));
+    if (vig && req.params.etapa === "precos") vig.texto = documentoDaPesquisaDePrecos(vig.texto, await itensDoProcesso(p.id));
     const versoes = await q(
       `select m.versao, m.origem, m.criado_em, u.nome as autor, length(m.texto) as caracteres from minutas m left join usuarios u on u.id = m.usuario_id
         where m.processo_id=$1 and m.etapa=$2 order by m.versao desc`, [p.id, req.params.etapa]);
@@ -705,7 +710,8 @@ export function rotasProcessos() {
     const vig = await minutaVigente(p.id, e.id);
     if (!vig) throw new ErroHttp(404, "Minuta não encontrada.");
     if (vig.versao !== versao) throw new ErroHttp(409, "A minuta foi alterada por outra pessoa. Recarregue antes de aplicar.");
-    const { texto, aplicados } = aplicarPendencias(vig.texto, valores);
+    const base = e.id === "precos" ? documentoDaPesquisaDePrecos(vig.texto, await itensDoProcesso(p.id)) : vig.texto;
+    const { texto, aplicados } = aplicarPendencias(base, valores);
     if (!aplicados) throw new ErroHttp(400, "Preencha ao menos um campo antes de aplicar.");
     const r1 = await salvarMinuta(p.id, e.id, texto, "pendencias", req.usuario!.id, versao);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "minuta.pendencias", detalhe: { etapa: e.id, versao: r1.versao, aplicados } });
@@ -722,7 +728,8 @@ export function rotasProcessos() {
       : await minutaVigente(p.id, String(req.params.etapa));
     if (!e || !m) throw new ErroHttp(404, "Minuta não encontrada.");
     const timbrado = await timbradoDoProcesso(p.orgao_id, req.query.timbrado);
-    const buf = await exportar(m.texto, e.doc ?? e.nome, timbrado);
+    const texto = e.id === "precos" && !v ? documentoDaPesquisaDePrecos(m.texto, await itensDoProcesso(p.id)) : m.texto;
+    const buf = await exportar(texto, e.doc ?? e.nome, timbrado);
     const nome = `${e.nome} - ${p.numero ? `PA ${p.numero}` : `Protocolo ${p.protocolo}`} - v${m.versao}.${formato}`.replace(/[\\/:*?"<>|]/g, "-");
     enviarArquivo(res, nome, buf);
   });

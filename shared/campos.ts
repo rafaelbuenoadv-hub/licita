@@ -94,8 +94,8 @@ export const CAMPOS: Record<string, Campo[]> = {
       ajuda: "Fonte única só é aceita com justificativa expressa da impossibilidade de diversificar." },
     { id: "metodo", rotulo: "Método de cálculo", tipo: "opcao", opcoes: [["media", "Média"], ["mediana", "Mediana"], ["menor", "Menor preço"], ["outro", "Outro (explicar na memória de cálculo)"]] },
     { id: "memoria", rotulo: "Memória de cálculo", tipo: "area", ajuda: "Fontes consultadas, datas e horas de acesso, o cálculo adotado e a razão da escolha." },
-    { id: "analise_critica", rotulo: "Análise crítica dos preços", tipo: "area",
-      ajuda: "Marque os preços descartados na tabela de orçamentos e informe o motivo e a justificativa. O relatório registra os descartes automaticamente; use este campo para complementar a análise (Dec. 2.533/2024, art. 11, §§ 2º e 3º)." },
+    { id: "analise_critica", rotulo: "Análise complementar dos preços (opcional)", tipo: "area", opcional: true,
+      ajuda: "Classifique os preços no quadro de tratamento desta etapa. O relatório registra automaticamente os valores usados, somente de referência e descartados. Use este campo para complementar a análise (Dec. 2.533/2024, art. 11, §§ 2º e 3º)." },
     { id: "bdi", rotulo: "BDI e encargos sociais", tipo: "texto", cond: "obra", ajuda: "Percentuais adotados e onde está a composição." },
     { id: "data_base", rotulo: "Data-base do orçamento", tipo: "texto", ajuda: "Mês e ano de referência dos preços, igual em todas as peças." },
     { id: "valor_total", rotulo: "Valor estimado total (R$)", tipo: "valor" },
@@ -158,7 +158,7 @@ export const CAMPOS: Record<string, Campo[]> = {
 
 CAMPOS.protocolo = [
   { id: "responsavel", rotulo: "Responsável pelo encaminhamento", tipo: "texto", ajuda: "Nome e cargo de quem protocola em nome da Secretaria." },
-  { id: "observacoes", rotulo: "Observações ao Departamento de Licitações", tipo: "area", opcional: true, ajuda: "Prazos, urgência ou informações úteis para a fase externa." },
+  { id: "observacoes", rotulo: "Observações ao Departamento de Licitações", tipo: "area", opcional: true, ajuda: "Prazos, urgência ou informações úteis ao encaminhamento do processo." },
 ];
 
 export const MARCAS_OBRIGATORIAS: Record<string, string[]> = { "fiscal.declaracoes": ["sem_vinculo", "segregacao"] };

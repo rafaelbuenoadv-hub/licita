@@ -3,7 +3,7 @@ import { PDFDocument } from "pdf-lib";
 import { Document, Packer, Paragraph, ImageRun, TextRun, PageOrientation, Header, Footer } from "docx";
 import { q, q1 } from "./db.js";
 import { ETAPAS, TIPOS, VIAS, type Valores } from "../shared/etapas.js";
-import { documentoDaSolicitacao, type ItemSolicitacao, type TopicoSolicitacao } from "../shared/solicitacao.js";
+import { documentoDaPesquisaDePrecos, documentoDaSolicitacao, type ItemSolicitacao, type TopicoSolicitacao } from "../shared/solicitacao.js";
 import { documentoDosCampos, camposDo } from "./campos.js";
 import { secaoDaMinuta, type Timbrado } from "./docx.js";
 import { minutaParaPdf } from "./pdf.js";
@@ -54,7 +54,7 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
       if (!solicitacoes.length) ausentes.push(e.nome);
     }
     const minuta = minutas.find((m) => m.etapa === e.id);
-    if (minuta) pecas.push({ titulo: `${e.doc ?? e.nome} — versão ${minuta.versao}`, texto: minuta.texto });
+    if (minuta) pecas.push({ titulo: `${e.doc ?? e.nome} — versão ${minuta.versao}`, texto: e.id === "precos" ? documentoDaPesquisaDePrecos(minuta.texto, solicitacoes.flatMap((s) => s.itens)) : minuta.texto });
     else if (e.id !== "solicitacao" && temCampos(campos[e.id])) pecas.push({ titulo: `${e.doc ?? e.nome} — campos salvos`, texto: await documentoDosCampos(p, e, campos, autores.find((a) => a.etapa === e.id) ?? { nome: "[[Responsável pela etapa]]", cargo: "" }) });
     else if (e.fase === "interna" && e.id !== "solicitacao") ausentes.push(e.nome);
     const pesquisa = pesquisas.find((x) => x.etapa === e.id);

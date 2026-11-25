@@ -136,7 +136,7 @@ export async function documentoPrecos(p: Proc, campos: Record<string, Valores>, 
   const analise = analiseCriticaDosPrecos(c.itens);
   l.push("## 8. Análise crítica dos preços", analise);
   const complemento = pr("analise_critica");
-  if (complemento && complemento !== analise && complemento !== SEM_DESCARTES && !complemento.startsWith("Preços riscados no quadro comparativo")) l.push(`Análise complementar: ${complemento}`);
+  if (complemento && complemento !== analise && !complemento.startsWith(SEM_DESCARTES) && !complemento.startsWith("Preços riscados no quadro comparativo")) l.push(`Análise complementar: ${complemento}`);
   if (obra) l.push("## 9. BDI e encargos sociais", pr("bdi") || falta("BDI e encargos sociais"));
   const valorCampo = typeof campos.precos?.valor_total === "string" ? Number((campos.precos.valor_total as string).replace(/\./g, "").replace(",", ".")) : NaN;
   const valor = c.itens.length ? c.total : Number.isFinite(valorCampo) && valorCampo > 0 ? valorCampo : c.total;

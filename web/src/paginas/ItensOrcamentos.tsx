@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from "react";
 import { brl, numBR } from "../api";
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
-import { MOTIVOS_DESCARTE, SEM_DESCARTES, CRITERIOS_PRECO, FONTES_COTACAO, valorDasCotacoes, normalizarCotacao, type DescartePreco as DadosDescarte, type CriterioPreco, type FonteCotacao, type ItemSolicitacao } from "../../../shared/solicitacao";
+import { CRITERIOS_PRECO, FONTES_COTACAO, valorDasCotacoes, normalizarCotacao, type CriterioPreco, type FonteCotacao, type ItemSolicitacao } from "../../../shared/solicitacao";
 import type { ResultadoPncp } from "../../../shared/pncp";
 import { BuscaPncpItem } from "./BuscaPncpItem";
 import { cotacaoPreenchida, dataConsulta, linhaVazia, lerLinhas, type LinhaCotacao, type LinhaItem } from "./ItensSolicitacao";
@@ -154,17 +154,13 @@ export function ItensOrcamentos(props: Props) {
                       proximo?.focus(); proximo?.select();
                     }}
                     onChange={(e) => alterarPreco(k, col.chave, col.nome, col.fonte, col.arquivo, e.target.value)} />
-                  {c && valorValido(c) && <DescarteDoPreco cotacao={c} rotulo={`cotação ${j + 1} do item ${n + 1}`} disabled={props.ocupado || !!props.anexando}
-                    alterar={(descarte) => setLinhas((lista) => lista.map((x, i) => i === k ? { ...x, cotacoes: x.cotacoes.map((v) => chaveCotacao(v) === col.chave ? { ...v, descarte } : v) } : x))} />}
+                  {(c?.descarte || c?.apenas_referencia) && <span className="small muted">{c.descarte ? "Descartado" : "Somente referência"} · tratado na Pesquisa de preços</span>}
 
                 </td>;
 
               })}
               <td className="r num">{item?.valor_unitario != null ? brl(item.valor_unitario) : <span className="muted">A pesquisar</span>}
-                <select className="criterio-tabela" aria-label={`Critério de preço do item ${n + 1}`} value={l.criterio ?? "media"} disabled={props.ocupado || !!props.anexando}
-                  onChange={(e) => setLinhas((lista) => lista.map((x, i) => i === k ? { ...x, criterio: e.target.value as CriterioPreco } : x))}>
-                  {Object.entries(CRITERIOS_PRECO).map(([chave, nome]) => <option key={chave} value={chave}>{nome}</option>)}
-                </select>
+                <span className="small muted">{CRITERIOS_PRECO[l.criterio ?? "media"]} · Pesquisa de preços</span>
               </td>
               <td><div className="acoes-preco">
                 <button type="button" className="btn sm orc" onClick={() => setOrcamentosDe({ k })}>Mais opções{valores.length ? ` (${valores.length})` : ""}</button>
@@ -179,7 +175,7 @@ export function ItensOrcamentos(props: Props) {
           })}</tbody>
         </table></div>}
       {cotacoesTabela.length > 0 && <p className="small muted">Digite ou corrija os preços diretamente nas células. Média, mediana ou menor valor e o total são recalculados na hora. Depois, salve a solicitação.</p>}
-      <p className="small muted">{linhas.some((l) => l.cotacoes.some((c) => c.descarte)) ? "Preços riscados estão fora do cálculo. Os motivos e as justificativas serão incluídos nos documentos. Desmarque para reincluir o preço." : SEM_DESCARTES}</p>
+      <p className="small muted">Defina os valores usados no cálculo, somente de referência e descartados na etapa Pesquisa de preços.</p>
       <div className="valor-preliminar"><span>Valor preliminar</span><b>{lidas.itens.length && total ? brl(Math.round(total * 100) / 100) + (algumSemValor ? " (parcial)" : "") : "A pesquisar"}</b></div>
       {lidas.erro && <p className="small aviso-anexo" role="status">{lidas.erro}</p>}
       <div className="tools fim">
@@ -201,25 +197,6 @@ export function ItensOrcamentos(props: Props) {
       {orcamentosDe && linhas[orcamentosDe.k] && <ModalOrcamentos {...props} k={orcamentosDe.k} focarPncp={!!orcamentosDe.pncp} fechar={() => setOrcamentosDe(null)} />}
     </div>
   );
-}
-
-/** O descarte preserva o preço e o comprovante; afeta apenas o cálculo deste item. */
-function DescarteDoPreco({ cotacao, rotulo, disabled, alterar }: { cotacao: LinhaCotacao; rotulo: string; disabled: boolean; alterar: (valor: DadosDescarte | undefined) => void }) {
-  const d = cotacao.descarte;
-  return <div className="descarte-preco">
-    <label className="marcar-descarte"><input type="checkbox" checked={!!d} disabled={disabled} aria-label={`Descartar preço da ${rotulo}`}
-      onChange={(e) => alterar(e.target.checked ? { motivo: "inexequivel", justificativa: "" } : undefined)} />Descartar do cálculo</label>
-    {d && <>
-      <span className="small fora-calculo">Fora do cálculo</span>
-      <label>Motivo<select aria-label={`Motivo do descarte da ${rotulo}`} value={d.motivo} disabled={disabled}
-        onChange={(e) => alterar({ ...d, motivo: e.target.value as DadosDescarte["motivo"] })}>
-        {Object.entries(MOTIVOS_DESCARTE).map(([valor, nome]) => <option key={valor} value={valor}>{nome}</option>)}
-      </select></label>
-      <label>Justificativa<textarea aria-label={`Justificativa do descarte da ${rotulo}`} rows={3} maxLength={2000} required value={d.justificativa} disabled={disabled}
-        placeholder="Explique por que este preço foi desconsiderado."
-        onChange={(e) => alterar({ ...d, justificativa: e.target.value })} /></label>
-    </>}
-  </div>;
 }
 
 /** Janela que abre como diálogo modal e fecha com Esc ou no X. */
@@ -370,8 +347,7 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
                   <td>{c.fornecedor || "—"}{c.obs && <div className="small muted">{c.obs}</div>}{c.link && <div className="small">{/^https?:\/\//.test(c.link) ? <a href={c.link} target="_blank" rel="noopener noreferrer">link</a> : c.link}</div>}</td>
                   <td className="r num">{valorValido(c) ? <span className={c.descarte ? "valor-descartado" : undefined}>{brl(numBR(c.valor)!)}</span> : <input aria-label="Valor unitário" className="valor-inline" inputMode="decimal" placeholder="informar" defaultValue={c.valor}
                     onBlur={(e) => alterarLinha({ cotacoes: linha.cotacoes.map((x, n) => (n === i ? { ...x, valor: e.target.value.trim() } : x)) })} />}
-                    {valorValido(c) && <DescarteDoPreco cotacao={c} rotulo={`fonte ${i + 1} do item ${k + 1}`} disabled={ocupado || !!anexando}
-                      alterar={(descarte) => alterarLinha({ cotacoes: linha.cotacoes.map((x, n) => n === i ? { ...x, descarte } : x) })} />}
+                    {(c.descarte || c.apenas_referencia) && <div className="small muted">{c.descarte ? "Descartado" : "Somente referência"} · Pesquisa de preços</div>}
                   </td>
                   <td className="small">{c.orcamentoId != null ? <a className="anexo-ok" href={`/api${caminho}/${c.orcamentoId}/arquivo`}>✓ {nomeArquivo(c.orcamentoId)}</a>
                     : <button type="button" className="lnk" onClick={() => { setAnexarEm(i); arquivo.current?.click(); }}>Anexar (opcional)</button>}</td>
@@ -397,7 +373,7 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
         </div>
 
         <aside className="stack orc-lado">
-          <div className="orc-consolidar"><b>Consolidar valor estimado</b><span className="small">Escolha o critério que será aplicado ao item e reaproveitado nos documentos.</span></div>
+          <div className="orc-consolidar"><b>Consolidar valor estimado</b><span className="small">O critério e o tratamento dos valores são definidos na etapa Pesquisa de preços.</span></div>
           {cartoes.map(([c, texto]) => {
             const v = valorDasCotacoes(comprovadas, c);
             const ativo = criterio === c && v != null;
@@ -405,10 +381,10 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
               <span>{CRITERIOS_PRECO[c]}</span>
               <b>{v != null ? brl(v) : "Sem preço válido"}</b>
               <span className="small muted">{texto}</span>
-              <button type="button" className={"btn" + (ativo ? " pri" : "")} disabled={v == null} onClick={() => alterarLinha({ criterio: c })}>{ativo ? `✓ ${CRITERIOS_PRECO[c]} em uso` : `Usar ${CRITERIOS_PRECO[c].toLowerCase()}`}</button>
+              {ativo && <span className="small">Critério em uso</span>}
             </div>;
           })}
-          <p className="small muted">{comprovadas.filter((c) => c.valor_unitario != null && !c.descarte).length} {comprovadas.filter((c) => c.valor_unitario != null && !c.descarte).length === 1 ? "valor" : "valores"} no cálculo. O anexo do orçamento é opcional.</p>
+          <p className="small muted">{comprovadas.filter((c) => c.valor_unitario != null && !c.descarte && !c.apenas_referencia).length} {comprovadas.filter((c) => c.valor_unitario != null && !c.descarte && !c.apenas_referencia).length === 1 ? "valor" : "valores"} no cálculo. O anexo do orçamento é opcional.</p>
         </aside>
       </div>
       <div className="tools fim"><button type="button" className="btn" onClick={fechar}>Fechar</button></div>

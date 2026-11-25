@@ -394,3 +394,5 @@ dialog.janela::backdrop{background:#10182788}
 .tabela-itens-orc .descarte-preco input[type=checkbox],.descarte-preco input[type=checkbox]{min-width:0;width:15px;height:15px;margin:0;flex-shrink:0}
 .descarte-preco select,.descarte-preco textarea{width:100%;min-width:0;font-size:12px;white-space:normal}
 .descarte-preco .fora-calculo{display:block;margin-top:5px;color:var(--muted);font-weight:600}
+
+.tabela-pesquisa-precos th{min-width:140px;white-space:normal}.tabela-pesquisa-precos td{vertical-align:top}.tabela-pesquisa-precos .tratamento-cotacao{min-width:190px}.tabela-pesquisa-precos label{display:flex;flex-direction:column;gap:5px;font-size:12px;margin-top:8px}.tabela-pesquisa-precos select,.tabela-pesquisa-precos textarea{width:100%;min-width:0}.tratamento-cotacao>span{display:block;margin-top:6px}

@@ -7,6 +7,7 @@ import { ETAPAS, ETAPAS_INTERNAS, FASES, TIPOS, VIAS, feita, feitos, itensDe, li
 import { CamposEtapa, ItemPac, ProtocoloChecklist } from "./CamposEtapa";
 import { tem, useEu } from "../main";
 import { CamposProcesso, paraApi, type DadosProc, type PlanoConsulta } from "./NovoProcesso";
+import { PesquisaPrecos } from "./PesquisaPrecos";
 import { ExportarProcesso } from "./ExportarProcesso";
 import { Solicitacoes } from "./Solicitacoes";
 
@@ -16,6 +17,7 @@ const ACOES: Record<string, string> = {
   "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.lido": "pediu a leitura de orçamento à IA", "orcamento.fornecedor": "identificou o fornecedor do orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
   "minuta.titulares": "incluiu os titulares no DFD",
   "solicitacao.incluida": "adicionou solicitação de secretaria", "solicitacao.alterada": "editou solicitação de secretaria",
+  "precos.analisados": "classificou os preços na pesquisa",
   "ia.sugestoes": "pediu sugestões à IA", "campos.salvos": "salvou os campos da etapa", "minuta.campos": "montou o documento com os campos", "processo.protocolado": "protocolou o processo no Departamento de Licitações", "contrato.criado": "registrou contrato",
 };
 
@@ -56,7 +58,7 @@ export function ProcessoPg() {
           <span className="small muted">{[TIPOS[p.tipo as keyof typeof TIPOS], VIAS[p.via as keyof typeof VIAS], brl(p.valor_estimado), `Exercício ${p.ano}`].join(" · ")}</span>
         </div>
         <div className="tools">
-          {p.situacao !== "preparacao" && <span className={"pill " + (p.situacao === "cancelado" ? "bad" : "ok")}>{{ publicado: "Publicado", contratado: "Contratado", cancelado: "Cancelado" }[p.situacao as string]}</span>}
+          {(p.concluido || p.situacao === "cancelado") && <span className={"pill " + (p.situacao === "cancelado" ? "bad" : "ok")}>{p.situacao === "cancelado" ? "Cancelado" : "Fase interna concluída"}</span>}
           <Link className="btn" to="/processos">Todos os processos</Link>
         </div>
       </div>
@@ -111,7 +113,7 @@ function Numeracao({ p, recarregar, setAviso }: { p: any; recarregar: () => Prom
       <summary>Nº do processo e do procedimento{tem ? "" : " (gerados por último)"}</summary>
       <form className="pad stack" onSubmit={gravar}>
         <p className="small muted">
-          {!p.numeracao.liberada ? `Até o fim da preparação o processo é identificado só pelo protocolo ${p.protocolo}. A numeração é liberada quando a trilha chega à etapa de autorização e publicação.`
+          {!p.numeracao.liberada ? `Até o fim da preparação o processo é identificado só pelo protocolo ${p.protocolo}. A numeração é liberada quando a trilha chega ao Protocolo.`
             : tem ? "Numeração gravada. Quem atua em contratações pode corrigir, se necessário."
             : "A trilha chegou à última etapa. O sistema sugere os próximos números do exercício; confira com a numeração oficial do órgão e ajuste antes de gravar."}
         </p>
@@ -161,11 +163,10 @@ function Dados({ p, recarregar, setAviso, abrir }: { p: any; recarregar: () => P
         <p className="small muted">Mudar o tipo de objeto ou a forma de contratação altera os itens de conferência; marcações que deixarem de existir são removidas.</p>
         <div className="tools">
           {pode && <button className="btn pri">Salvar dados</button>}
-          {tem(eu, "contratacao", "autoridade") && p.concluido && p.situacao === "preparacao" && <button type="button" className="btn" onClick={() => situacao("publicado")}>Marcar como publicado</button>}
           {tem(eu, "contratacao", "autoridade") && p.situacao !== "cancelado" && (confirma
             ? <><button type="button" className="btn danger" onClick={() => situacao("cancelado")}>Confirmar cancelamento</button><button type="button" className="btn" onClick={() => setConfirma(false)}>Voltar</button></>
             : <button type="button" className="btn danger sm" onClick={() => setConfirma(true)}>Cancelar processo</button>)}
-          {tem(eu, "contratacao", "autoridade") && p.situacao === "cancelado" && <button type="button" className="btn" onClick={() => situacao("preparacao")}>Reabrir processo</button>}
+          {tem(eu, "contratacao", "autoridade") && p.situacao !== "preparacao" && <button type="button" className="btn" onClick={() => situacao("preparacao")}>Reabrir fase interna</button>}
         </div>
       </form>
     </details>
@@ -256,7 +257,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
   return (
     <section className="panel" style={{ minWidth: 0 }}>
       <div className="sec">
-        <div className="row"><div><span className="lbl">{e.fase === "interna" ? `Etapa ${numero} de ${ETAPAS_INTERNAS} · Fase interna (${FASES.interna.quem})` : `Fase externa (${FASES.externa.quem}) · etapa ${numero}`}</span><h2>{e.nome}</h2></div>
+        <div className="row"><div><span className="lbl">{`Etapa ${numero} de ${ETAPAS_INTERNAS} · Fase interna (${FASES.interna.quem})`}</span><h2>{e.nome}</h2></div>
           <span className={"pill " + (ok ? "ok" : lib ? "cur" : "")}>{ok ? "Concluída" : lib ? `${nf} de ${its.length} itens` : "Bloqueada"}</span></div>
         {e.doc && <p className="small muted">Documento da etapa: {e.doc}</p>}
         <p style={{ maxWidth: "72ch" }}>{e.oque}</p>
@@ -268,6 +269,8 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
         const novo = await recarregar();
         if (novo) { const m = mesclarCampos(novo, "pac"); setVals(m.valores); setSujo(m.sugeridos.length > 0); }
       }} />}
+      {e.id === "precos" && <PesquisaPrecos processo={p} editavel={editavel && p.situacao === "preparacao"} recarregar={recarregar}
+        aoSalvar={(campos) => { setVals((v) => ({ ...v, ...campos })); setVersaoMinuta((v) => v + 1); }} irAosItens={() => irPara("solicitacao")} />}
       {e.campos.length > 0 && <CamposEtapa e={e} p={p} valores={vals} editavel={editavel} sujo={sujo} gravando={gravandoCampos}
         sugeridos={mesclarCampos(p, e.id).sugeridos.filter((k) => vals[k] === p.sugestoes_campos?.[e.id]?.[k])}
         mudar={(v) => { setVals(v); setSujo(true); setConf(null); }} salvar={() => salvarCampos()}
