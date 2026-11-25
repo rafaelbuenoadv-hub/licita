@@ -26,6 +26,8 @@ const minutaDe = (processo: number, etapa: string) =>
 export async function conferirEtapa(p: Proc, e: Etapa, checks: Checks, campos: Record<string, Valores>): Promise<Pendencia[]> {
   const l: Pendencia[] = [];
   const v = campos[e.id] ?? {};
+  const revisoes = await q<{ etapa: string; motivo: string }>("select etapa,motivo from revisoes_documentos where processo_id=$1 and ($2='protocolo' or etapa=$2)", [p.id, e.id]);
+  for (const r of revisoes) l.push({ codigo: "revisao", texto: `${ETAPAS.find((x) => x.id === r.etapa)?.nome ?? r.etapa}: revisão necessária. ${r.motivo}`, onde: "minuta", alvo: r.etapa, bloqueia: true });
   for (const c of camposFaltando(e, p, v)) {
     l.push({ codigo: "campo", texto: c.tipo === "marcas" && e.id === "fiscal" ? `Marque as declarações sobre o fiscal: ${c.rotulo.toLowerCase()}.` : `Preencha o campo "${c.rotulo}".`, onde: "campos", alvo: c.id, bloqueia: true });
   }

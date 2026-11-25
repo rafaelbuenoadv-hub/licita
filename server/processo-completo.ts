@@ -25,7 +25,7 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
     q<{ id: number; solicitacao_id: number; nome: string; arquivo: Buffer }>("select a.id,a.solicitacao_id,a.nome,a.arquivo from solicitacao_anexos a join solicitacoes_processo s on s.id=a.solicitacao_id where s.processo_id=$1 order by a.id", [p.id]),
     q<{ id: number; nome: string; arquivo: Buffer }>("select id,nome,arquivo from orcamentos where processo_id=$1 order by id", [p.id]),
     q<{ etapa: string; texto: string; versao: number }>("select distinct on (etapa) etapa,texto,versao from minutas where processo_id=$1 order by etapa,versao desc", [p.id]),
-    q<{ nome: string; texto: string; arquivo: Buffer | null }>("select nome,texto,arquivo from anexos where processo_id=$1 order by id", [p.id]),
+    q<{ nome: string; texto: string; etapa: string; criado_em: string; arquivo: Buffer | null }>("select nome,texto,etapa,criado_em,arquivo from anexos where processo_id=$1 order by id", [p.id]),
     q<{ etapa: string; texto: string; fontes: { titulo: string; url: string }[] }>("select distinct on (etapa) etapa,texto,fontes from pesquisas_minuta where processo_id=$1 order by etapa,id desc", [p.id]),
     q1<{ nome: string }>("select nome from orgaos where id=$1", [p.orgao_id]),
     q<{ etapa: string; nome: string; cargo: string }>("select c.etapa,u.nome,u.cargo from campos_etapa c join usuarios u on u.id=c.usuario_id where c.processo_id=$1 and u.orgao_id=$2", [p.id, p.orgao_id]),
@@ -70,6 +70,8 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
     if (e) anexosPecas.push({ titulo: `Pesquisa de apoio — ${e.nome}`, texto: `# PESQUISA DE APOIO — ${e.nome}\n\n${pesquisa.texto}\n\n## Fontes\n${pesquisa.fontes.map((f) => `${f.titulo}: ${f.url}`).join("\n")}` });
   }
   for (const a of anexos) {
+    const referencia = a.etapa ? ETAPAS.find((e) => e.id === a.etapa)?.nome ?? a.etapa : "Processo";
+    anexosPecas.push({ titulo: `Registro de juntada — ${nomeLinha(a.nome)}`, texto: `# REGISTRO DE JUNTADA\n\nArquivo: ${nomeLinha(a.nome)}\n\nPeça de referência: ${referencia}\n\nJuntado em: ${new Date(a.criado_em).toLocaleString("pt-BR", {timeZone:"America/Sao_Paulo"})}` });
     if (a.arquivo) incluirArquivo(a.nome, a.arquivo, "Anexo do processo");
     else anexosPecas.push({ titulo: `Anexo do processo — ${nomeLinha(a.nome)} (registro em texto)`, texto: `# ${nomeLinha(a.nome)}\n\n${a.texto}` });
   }
@@ -77,7 +79,8 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
     for (const a of arquivosRevisao.filter((a) => a.revisao_id === r.id)) incluirArquivo(a.nome, a.arquivo, `Revisão ${r.numero}`);
     for (const m of minutasRevisao.filter((m) => m.revisao_id === r.id)) anexosPecas.push({ titulo: `Revisão ${r.numero} — ${m.tipo}`, texto: m.texto });
   }
-  const capa = [`# PROCESSO COMPLETO`, orgao?.nome ?? "", `Protocolo: ${p.protocolo}`, p.numero && `Processo administrativo: ${p.numero}`, p.procedimento && `Procedimento: ${p.procedimento}`, `Objeto: ${p.objeto}`, `Área requisitante: ${[p.requisitante, ...p.areas_adicionais].filter(Boolean).join("; ")}`, `Tipo: ${TIPOS[p.tipo]} · Forma: ${VIAS[p.via]}`, `Situação: ${p.situacao}`, p.obs && `Observações: ${p.obs}`, `Exportado em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`, "Reúne as últimas versões salvas dos documentos e os anexos disponíveis.", ausentes.length && `Etapas internas sem documento salvo ou campos preenchidos: ${ausentes.join("; ")}.`].filter(Boolean).join("\n\n");
+  const revisoesPendentes = await q<{etapa:string;motivo:string}>("select etapa,motivo from revisoes_documentos where processo_id=$1",[p.id]);
+  const capa = [`# PROCESSO COMPLETO`, orgao?.nome ?? "", `Protocolo: ${p.protocolo}`, p.numero && `Processo administrativo: ${p.numero}`, p.procedimento && `Procedimento: ${p.procedimento}`, `Objeto: ${p.objeto}`, `Área requisitante: ${[p.requisitante, ...p.areas_adicionais].filter(Boolean).join("; ")}`, `Tipo: ${TIPOS[p.tipo]} · Forma: ${VIAS[p.via]}`, `Situação: ${p.situacao}`, p.obs && `Observações: ${p.obs}`, `Exportado em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`, "Reúne as últimas versões salvas dos documentos e os anexos disponíveis.", revisoesPendentes.length && `REVISÃO NECESSÁRIA: ${revisoesPendentes.map((r)=>`${ETAPAS.find((e)=>e.id===r.etapa)?.nome??r.etapa}: ${r.motivo}`).join("; ")}` , ausentes.length && `Etapas internas sem documento salvo ou campos preenchidos: ${ausentes.join("; ")}.`].filter(Boolean).join("\n\n");
   return { capa, pecas: [...pecas, ...anexosPecas] };
 }
 

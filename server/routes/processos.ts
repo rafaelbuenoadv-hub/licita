@@ -58,7 +58,7 @@ export async function processoDo(req: Request, id = Number(req.params.id)) {
   return p;
 }
 export async function checksDo(processoId: number): Promise<Checks> {
-  const rows = await q("select item from checagens where processo_id = $1", [processoId]);
+  const rows = await q("select item from checagens where processo_id=$1 union all select 'revisao.'||etapa as item from revisoes_documentos where processo_id=$1", [processoId]);
   return Object.fromEntries(rows.map((r) => [r.item, true]));
 }
 export async function minutaVigente(processoId: number, etapa: string) {
@@ -255,7 +255,7 @@ export function rotasProcessos() {
     const ano = req.query.ano ? Number(req.query.ano) : null;
     const rows = await q(
       `select p.id, p.protocolo, p.numero, p.procedimento, p.objeto, p.tipo, p.via, p.valor_estimado, p.ano, p.situacao, p.requisitante, p.areas_adicionais, p.atualizado_em,
-              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
+              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') || coalesce((select array_agg('revisao.'||etapa) from revisoes_documentos r where r.processo_id=p.id), '{}') as itens
          from processos p where p.orgao_id = $1 and p.excluido_em is null and ($2::int is null or p.ano = $2) order by p.atualizado_em desc`,
       [req.usuario!.orgao_id, ano]);
     res.json(rows.map(({ itens, ...p }) => {
@@ -295,23 +295,24 @@ export function rotasProcessos() {
       `select c.item, c.em, u.nome as usuario from checagens c left join usuarios u on u.id = c.usuario_id where c.processo_id = $1`, [p.id]);
     const minutas = await q(
       `select distinct on (etapa) etapa, versao, origem, criado_em from minutas where processo_id = $1 and etapa = any($2::text[]) order by etapa, versao desc`, [p.id, ETAPAS.map((e) => e.id)]);
-    const anexos = await q("select id, nome, length(texto) as caracteres, criado_em from anexos where processo_id = $1 order by id", [p.id]);
+    const revisoes_documentos = await q("select etapa,motivo,em from revisoes_documentos where processo_id=$1 order by em", [p.id]);
+    const anexos = await q("select id, nome, etapa, length(texto) as caracteres, criado_em from anexos where processo_id = $1 order by id", [p.id]);
     const orcamentos = await q(
       `select o.id, coalesce(o.fornecedor_manual, o.fornecedor) as fornecedor, o.fornecedor_manual, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, o.dados, o.lido_em, u.nome as usuario
          from orcamentos o left join usuarios u on u.id = o.usuario_id where o.processo_id = $1 order by o.id`, [p.id]);
     const solicitacoes = await q(
-      `select s.id, s.secretaria, s.referencia, s.descricao, s.nome_arquivo, s.objeto, s.justificativa, s.informacoes, s.itens, s.orcamentos_ocultos, s.topicos_adicionais,
-        coalesce((select jsonb_agg(jsonb_build_object('id',a.id,'nome',a.nome) order by a.id) from solicitacao_anexos a where a.solicitacao_id=s.id), '[]') as apoios
+      `select s.id, s.secretaria, s.referencia, s.descricao, s.nome_arquivo, s.criado_em, s.objeto, s.justificativa, s.informacoes, s.itens, s.orcamentos_ocultos, s.topicos_adicionais,
+        coalesce((select jsonb_agg(jsonb_build_object('id',a.id,'nome',a.nome,'criado_em',a.criado_em) order by a.id) from solicitacao_anexos a where a.solicitacao_id=s.id), '[]') as apoios
         from solicitacoes_processo s where s.processo_id=$1 order by s.id`, [p.id],
     );
     const orgao = await q1<{ nome: string; cnpj: string | null }>("select nome, cnpj from orgaos where id=$1", [p.orgao_id]);
     const secretarias = await q<{ secretaria: string }>("select secretaria from secretarios where orgao_id=$1 order by secretaria", [p.orgao_id]);
-    const c: Checks = Object.fromEntries(checagens.map((x) => [x.item, true]));
+    const c: Checks = Object.fromEntries([...checagens.map((x) => [x.item, true]), ...revisoes_documentos.map((x) => [`revisao.${x.etapa}`, true])]);
     const campos = await camposDo(p.id);
     const pca_item = p.pca_item_id ? await q1(
       "select ano, descricao, ordem_oficial, periodo_oficial, prioridade, modalidade_prevista, requisitante from pca_itens where id=$1 and orgao_id=$2", [p.pca_item_id, p.orgao_id]) : null;
     res.json({
-      ...p, campos, pca_item, sugestoes_campos: await sugestoesDosCampos(p, campos), checagens, minutas, anexos, orcamentos, solicitacoes, timbrados: timbradosDoOrgao(orgao), secretarias: secretarias.map((s) => s.secretaria), etapa_atual: atual(p, c), concluido: concluido(p, c),
+      ...p, revisoes_documentos, campos, pca_item, sugestoes_campos: await sugestoesDosCampos(p, campos), checagens, minutas, anexos, orcamentos, solicitacoes, timbrados: timbradosDoOrgao(orgao), secretarias: secretarias.map((s) => s.secretaria), etapa_atual: atual(p, c), concluido: concluido(p, c),
       trilha: trilhaDoProcesso(p, c),
       numeracao: { liberada: numeracaoLiberada(p, c), sugestao: await sugestaoNumeracao(p) },
       pode: { editar: temPapel(req.usuario!, "requisitante", "contratacao"), numerar: temPapel(req.usuario!, "contratacao", "autoridade"), etapas: ETAPAS.filter((e) => podeMarcar(req.usuario!.papeis, e)).map((e) => e.id) },
@@ -616,10 +617,45 @@ export function rotasProcessos() {
     await q("update processos set pca_item_id=$1, atualizado_em=now() where id=$2", [pca_item_id, p.id]);
     await q(`insert into campos_etapa (processo_id, etapa, valores, usuario_id) values ($1,'pac',$2,$3)
       on conflict (processo_id, etapa) do update set valores=excluded.valores, usuario_id=excluded.usuario_id, atualizado_em=now()`,
-      [p.id, JSON.stringify(limparValores(ETAPAS[0], valores)), req.usuario!.id]);
-    await sincronizarCampos({ ...p, pca_item_id }, req.usuario!.id, [ETAPAS[0]]);
+      [p.id, JSON.stringify(limparValores(etapaPorId("pac")!, valores)), req.usuario!.id]);
+    await sincronizarCampos({ ...p, pca_item_id }, req.usuario!.id, [etapaPorId("pac")!]);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "pac.vinculado", detalhe: { pca_item_id } });
     res.json({ ok: true });
+  });
+
+  r.put("/processos/:id/etp/rascunho", async (req, res) => {
+    const p = await processoDo(req);
+    exigeEtapaEditavel(req, p, await checksDo(p.id), "planejamento");
+    const schema = z.object({ valores: z.record(z.string(), z.string().max(20000)), anterior: z.record(z.string(), z.union([z.string(),z.array(z.string())])) });
+    const d = schema.parse(req.body);
+    const permitidos = new Set(["i", "ii", "iii", "iv", "v"]);
+    const parcial = Object.fromEntries(Object.entries(d.valores).filter(([k]) => permitidos.has(k)));
+    await tx(async (c) => {
+      await c.query("select id from processos where id=$1 for update", [p.id]);
+      const { rows: [atual] } = await c.query("select valores from campos_etapa where processo_id=$1 and etapa='etp'", [p.id]);
+      const valores = atual?.valores ?? {};
+      if (JSON.stringify(valores, Object.keys(valores).sort()) !== JSON.stringify(d.anterior, Object.keys(d.anterior).sort())) throw new ErroHttp(409, "O ETP mudou. Recarregue antes de salvar o rascunho.");
+      await c.query("insert into campos_etapa (processo_id,etapa,valores,usuario_id) values ($1,'etp',$2::jsonb,$3) on conflict (processo_id,etapa) do update set valores=excluded.valores,usuario_id=excluded.usuario_id,atualizado_em=now()", [p.id, JSON.stringify({ ...valores, ...parcial }), req.usuario!.id]);
+      await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
+      await auditar({ orgao:p.orgao_id, processo:p.id, usuario:req.usuario!.id, acao:"etp.rascunho" },c);
+    });
+    res.json({ ok:true });
+  });
+
+  r.post("/processos/:id/revisoes-documentos/:etapa/confirmar", async (req,res) => {
+    const p=await processoDo(req), etapa=String(req.params.etapa);
+    exigeEtapaEditavel(req,p,await checksDo(p.id),etapa);
+    const { versao, em }=z.object({versao:z.number().int().positive(),em:z.string().datetime()}).parse(req.body);
+    await tx(async(c)=>{
+      await c.query("select id from processos where id=$1 for update",[p.id]);
+      const { rows:[m] }=await c.query("select versao from minutas where processo_id=$1 and etapa=$2 order by versao desc limit 1",[p.id,etapa]);
+      if(m?.versao!==versao) throw new ErroHttp(409,"A versão mudou. Recarregue antes de confirmar a revisão.");
+      const limpo=await c.query("delete from revisoes_documentos where processo_id=$1 and etapa=$2 and em=$3::timestamptz returning etapa",[p.id,etapa,em]);
+      if(!limpo.rowCount) throw new ErroHttp(409,"As informações mudaram. Recarregue e confira novamente.");
+      await c.query("update processos set atualizado_em=now() where id=$1",[p.id]);
+      await auditar({orgao:p.orgao_id,processo:p.id,usuario:req.usuario!.id,acao:"documento.revisado",detalhe:{etapa,versao}},c);
+    });
+    res.json({ok:true});
   });
 
   // Campos de preenchimento da etapa.
@@ -754,7 +790,8 @@ export function rotasProcessos() {
     if (!req.file) throw new ErroHttp(400, "Envie um arquivo.");
     const nome = nomeEnviado(req.file);
     const texto = await extrairTexto(nome, req.file.buffer);
-    const a = await q1("insert into anexos (processo_id, nome, texto, usuario_id, arquivo) values ($1,$2,$3,$4,$5) returning id", [p.id, nome, texto, req.usuario!.id, req.file.buffer]);
+    const etapa = z.string().refine((x) => !x || !!etapaPorId(x), "Peça de referência inválida.").parse(req.body.etapa ?? "");
+    const a = await q1("insert into anexos (processo_id, nome, texto, usuario_id, arquivo, etapa) values ($1,$2,$3,$4,$5,$6) returning id", [p.id, nome, texto, req.usuario!.id, req.file.buffer, etapa]);
     await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "anexo.incluido", detalhe: { nome } });
     res.status(201).json({ id: a.id, caracteres: texto.length });
   });
@@ -763,6 +800,15 @@ export function rotasProcessos() {
     const a = await q1("select id, nome, texto from anexos where id=$1 and processo_id=$2", [Number(req.params.aid), p.id]);
     if (!a) throw new ErroHttp(404, "Documento não encontrado.");
     res.json(a);
+  });
+  r.put("/processos/:id/anexos/:aid/referencia", exigePapel("requisitante", "contratacao", "juridico"), async(req,res)=>{
+    const p=await processoDo(req);
+    const {etapa}=z.object({etapa:z.string().refine((x)=>!x||!!etapaPorId(x))}).parse(req.body);
+    const a=await q1("update anexos set etapa=$1 where id=$2 and processo_id=$3 returning id",[etapa,Number(req.params.aid),p.id]);
+    if(!a) throw new ErroHttp(404,"Documento não encontrado.");
+    await q("update processos set atualizado_em=now() where id=$1",[p.id]);
+    await auditar({orgao:p.orgao_id,processo:p.id,usuario:req.usuario!.id,acao:"anexo.referencia",detalhe:{id:a.id,etapa}});
+    res.json({ok:true});
   });
   r.delete("/processos/:id/anexos/:aid", exigePapel("requisitante", "contratacao"), async (req, res) => {
     const p = await processoDo(req);

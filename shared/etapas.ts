@@ -13,7 +13,7 @@ export type { Campo, ValorCampo, Valores } from "./campos.js";
 export interface Item { id: string; texto: string; base?: string; cond?: Condicao; auto?: boolean }
 export type Fase = "interna";
 export const FASES: Record<Fase, { nome: string; quem: string }> = {
-  interna: { nome: "Fase interna", quem: "Secretaria demandante" },
+  interna: { nome: "Preparação pela secretaria", quem: "Secretaria demandante" },
 };
 export interface Etapa {
   id: string;
@@ -58,6 +58,20 @@ const campos = (etapa: string): Item => ({ id: `${etapa}.campos`, texto: "Campos
 
 export const ETAPAS: Etapa[] = [
   {
+    id: "solicitacao", nome: "Instrução do processo", doc: null,
+    fase: "interna", campos: [],
+    oque: "Cadastre os dados de cada Secretaria: objeto, justificativa, informações de apoio, itens, quantidades, orçamentos e anexos. A etapa não gera documento próprio: as informações alimentam o DFD, o ETP e a pesquisa de preços.",
+    base: [{ rotulo: "Art. 18, I", url: U.a18 }, { rotulo: "Art. 23" }],
+    papeis: ["requisitante", "contratacao"],
+    // Etapa sem conferência obrigatória: registrar a solicitação é recomendado, mas não trava o andamento.
+    itens: [],
+    atencao: [
+      "Descreva o objeto sem marca e com quantidades que tenham memória de cálculo.",
+      "Orçamentos com mais de 6 meses antes da divulgação do edital não servem para a pesquisa de preços (art. 23, § 1º, IV).",
+    ],
+    modelo: null,
+  },
+  {
     id: "pac", nome: "Verificar no PAC", doc: "Registro da verificação no Plano Anual de Contratações", docOpcional: true,
     fase: "interna", campos: CAMPOS.pac,
     oque: "Confirme se o objeto já consta do Plano Anual de Contratações (PAC) vigente e no mês planejado para início. Busque o objeto no PAC e vincule o item ao processo. Se não consta, registre a justificativa da inclusão extraordinária.",
@@ -76,20 +90,6 @@ Identificação do processo; Secretaria demandante; objeto
 1. Consta do PAC vigente (item e mês previsto) — ou justificativa da inclusão extraordinária
 2. Início no mês planejado, ou motivo da alteração do cronograma
 Local e data; assinatura do responsável pela Secretaria`,
-  },
-  {
-    id: "solicitacao", nome: "Instrução do processo", doc: null,
-    fase: "interna", campos: [],
-    oque: "Cadastre os dados de cada Secretaria: objeto, justificativa, informações de apoio, itens, quantidades, orçamentos e anexos. A etapa não gera documento próprio: as informações alimentam o DFD, o ETP e a pesquisa de preços.",
-    base: [{ rotulo: "Art. 18, I", url: U.a18 }, { rotulo: "Art. 23" }],
-    papeis: ["requisitante", "contratacao"],
-    // Etapa sem conferência obrigatória: registrar a solicitação é recomendado, mas não trava o andamento.
-    itens: [],
-    atencao: [
-      "Descreva o objeto sem marca e com quantidades que tenham memória de cálculo.",
-      "Orçamentos com mais de 6 meses antes da divulgação do edital não servem para a pesquisa de preços (art. 23, § 1º, IV).",
-    ],
-    modelo: null,
   },
   {
     id: "dfd", nome: "DFD", doc: "Documento de Formalização da Demanda (DFD)",
@@ -121,6 +121,13 @@ Identificação do processo e do procedimento
 9. Forma de contratação (fundamento legal, critério de julgamento, modo de disputa)
 10. Ratificação dos atos anteriores (somente se houver estudos anteriores ao pedido)
 Local e data; assinatura do titular da área requisitante; ratificação do setor de licitações e contratos`,
+  },
+  {
+    id: "planejamento", nome: "Planejamento técnico — início do ETP", doc: null,
+    fase: "interna", campos: [], papeis: ["requisitante", "contratacao"], itens: [],
+    oque: "Inicie o ETP com a necessidade, os requisitos, as quantidades e as alternativas. Os dados ficam no mesmo ETP que será concluído após a pesquisa de preços. Esta etapa não gera uma peça separada.",
+    base: [{ rotulo: "Art. 6º, XX; art. 18, § 1º", url: U.a18 }],
+    atencao: ["Defina os requisitos e estude as alternativas antes de solicitar preços para a solução."], modelo: null,
   },
   {
     id: "precos", nome: "Pesquisa de preços", doc: "Pesquisa de preços e memória de cálculo",
@@ -163,7 +170,7 @@ Identificação do processo; órgão; objeto
 Local e data; assinaturas do agente de contratação e do responsável técnico`,
   },
   {
-    id: "etp", nome: "Estudo Técnico Preliminar", doc: "Estudo Técnico Preliminar (ETP)",
+    id: "etp", nome: "Conclusão do ETP", doc: "Estudo Técnico Preliminar (ETP)",
     fase: "interna", campos: CAMPOS.etp ?? [],
     oque: "Mostra o problema a resolver e a melhor solução, para que se avalie a viabilidade técnica e econômica. Os incisos I, IV, VI, VIII e XIII (★) são o conteúdo mínimo; os demais devem constar ou ter a ausência justificada. Em obras e serviços comuns de engenharia o ETP é opcional no Município, desde que não haja prejuízo técnico (Dec. 2.533/2024, art. 8º).",
     base: [{ rotulo: "Art. 18, §§ 1º a 3º", url: U.a18 }, { rotulo: "Dec. 2.533/2024, arts. 7º e 8º" }],
@@ -282,17 +289,17 @@ Ofício da Secretaria demandante à Contabilidade; identificação do processo
 Local e data; assinatura do responsável pela Secretaria`,
   },
   {
-    id: "fiscal", nome: "Fiscal do contrato", doc: "Indicação do fiscal do contrato",
+    id: "fiscal", nome: "Indicação de gestor e fiscais", doc: "Indicação do fiscal do contrato",
     fase: "interna", campos: CAMPOS.fiscal,
     oque: "Indique o servidor que atuará como fiscal do futuro contrato — preferencialmente efetivo, com atribuições ou formação compatíveis com o objeto e sem vínculo com o contratado — e o substituto, que também deve ser servidor apto e sem vínculo com o contratado.",
     base: [{ rotulo: "Art. 7º", url: U.a7 }, { rotulo: "Art. 117" }, { rotulo: "Dec. 2.533/2024, art. 5º" }],
     papeis: ["requisitante", "contratacao"],
     itens: [
       campos("fiscal"),
-      it("o4", "Fiscal e substituto designados pela autoridade competente, respeitada a segregação de funções", "Art. 7º, § 1º; art. 117; Dec. 2.533/2024, art. 5º"),
+      it("o4", "Gestor, fiscal e substituto indicados para designação pela autoridade competente, respeitada a segregação de funções", "Art. 7º, § 1º; art. 117; Dec. 2.533/2024, art. 5º"),
     ],
     atencao: [
-      "Designar como fiscal quem elaborou o projeto, o orçamento ou o ETP fere a segregação de funções.",
+      "A indicação não substitui o ato formal de designação pela autoridade competente; avalie a segregação das funções mais suscetíveis a risco.",
       "O fiscal anota as ocorrências e comunica aos superiores o que ultrapassar a sua competência (art. 117, §§ 1º e 2º).",
     ],
     modelo: `INDICAÇÃO DE FISCAL DO CONTRATO
@@ -304,9 +311,9 @@ Identificação do processo; Secretaria demandante; objeto
 Local e data; assinatura do responsável pela Secretaria`,
   },
   {
-    id: "protocolo", nome: "Protocolo", doc: "Encaminhamento ao Departamento de Licitações e Contratos",
+    id: "protocolo", nome: "Conferência, encaminhamento e protocolo", doc: "Encaminhamento ao Departamento de Licitações e Contratos",
     fase: "interna", campos: CAMPOS.protocolo,
-    oque: "Encerra a fase interna. Confira o checklist e protocole o processo completo no Departamento de Licitações e Contratos. A partir daí a responsabilidade passa a ser do Departamento.",
+    oque: "Encerra a preparação pela secretaria. Confira os documentos e suas revisões e protocole o conjunto no Departamento de Licitações e Contratos. A fase interna prossegue com as providências técnicas, jurídicas e da autoridade competente, conforme o caso.",
     base: [{ rotulo: "Art. 18, caput", url: U.a18 }, { rotulo: "Dec. 2.533/2024, art. 5º" }],
     papeis: ["requisitante", "contratacao"],
     itens: [
@@ -345,7 +352,7 @@ export function vale(p: ProcessoBase, c?: Condicao): boolean {
 }
 export const itensDe = (e: Etapa, p: ProcessoBase) => e.itens.filter((i) => vale(p, i.cond));
 export const feitos = (e: Etapa, p: ProcessoBase, c: Checks) => itensDe(e, p).filter((i) => c[i.id]).length;
-export const feita = (e: Etapa, p: ProcessoBase, c: Checks) => feitos(e, p, c) === itensDe(e, p).length;
+export const feita = (e: Etapa, p: ProcessoBase, c: Checks) => !c[`revisao.${e.id}`] && feitos(e, p, c) === itensDe(e, p).length;
 export function liberada(ix: number, p: ProcessoBase, c: Checks) {
   for (let k = 0; k < ix; k++) if (!feita(ETAPAS[k], p, c)) return false;
   return true;

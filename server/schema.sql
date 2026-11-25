@@ -715,3 +715,67 @@ update secretarios s set nome = 'Amanda Carvalho Vanzeli', portaria = '698/2026'
 from orgaos o
 where o.id = s.orgao_id and s.codigo_portal = 'obras' and s.nome = 'Antônio Vincenzi'
   and regexp_replace(coalesce(o.cnpj, ''), '[^0-9]', '', 'g') = '77008068000141';
+
+-- Alertas de revisão preservam integralmente as versões já emitidas.
+create table if not exists revisoes_documentos (
+  processo_id int not null references processos(id) on delete cascade,
+  etapa text not null,
+  motivo text not null,
+  em timestamptz(3) not null default now(),
+  primary key (processo_id, etapa)
+);
+create or replace function sinalizar_revisao_documentos(pid int, etapas text[], razao text) returns void language sql as $$
+  insert into revisoes_documentos (processo_id,etapa,motivo)
+  select distinct processo_id,etapa,razao from minutas where processo_id=pid and etapa=any(etapas)
+  on conflict (processo_id,etapa) do update set motivo=excluded.motivo,em=now();
+$$;
+create or replace function revisar_documentos_por_instrucao() returns trigger language plpgsql as $$
+begin
+  if TG_OP='UPDATE' then
+    if (OLD.objeto,OLD.justificativa,OLD.informacoes,OLD.itens,OLD.topicos_adicionais) is not distinct from (NEW.objeto,NEW.justificativa,NEW.informacoes,NEW.itens,NEW.topicos_adicionais) then return NEW; end if;
+  end if;
+  perform sinalizar_revisao_documentos(NEW.processo_id,array['dfd','precos','etp','tr','dot','fiscal','protocolo'],'Os dados, itens ou preços da instrução foram alterados. Confira a compatibilidade desta versão.');
+  return NEW;
+end $$;
+drop trigger if exists revisar_instrucao on solicitacoes_processo;
+create trigger revisar_instrucao after insert or update on solicitacoes_processo for each row execute function revisar_documentos_por_instrucao();
+create or replace function revisar_documentos_por_campos() returns trigger language plpgsql as $$
+declare afetadas text[];
+begin
+  if TG_OP='UPDATE' then if OLD.valores=NEW.valores then return NEW; end if; end if;
+  afetadas=case NEW.etapa
+    when 'pac' then array['pac','dfd','etp','tr','protocolo']
+    when 'dfd' then array['dfd','etp','tr','dot','protocolo']
+    when 'precos' then array['precos','etp','tr','dot','protocolo']
+    when 'etp' then array['etp','tr','protocolo']
+    when 'tr' then array['tr','protocolo']
+    when 'dot' then array['dot','protocolo']
+    when 'fiscal' then array['fiscal','protocolo']
+    when 'protocolo' then array['protocolo']
+    else array[]::text[] end;
+  perform sinalizar_revisao_documentos(NEW.processo_id,afetadas,'As informações de '||case NEW.etapa when 'pac' then 'verificação no PAC' when 'dfd' then 'DFD' when 'precos' then 'pesquisa de preços' when 'etp' then 'ETP' when 'tr' then 'Termo de Referência' when 'dot' then 'dotação orçamentária' when 'fiscal' then 'indicação de gestor e fiscais' else 'encaminhamento' end||' foram alteradas. Revise o documento e suas referências.');
+  return NEW;
+end $$;
+drop trigger if exists revisar_campos on campos_etapa;
+create trigger revisar_campos after insert or update on campos_etapa for each row execute function revisar_documentos_por_campos();
+create or replace function revisar_documentos_por_processo() returns trigger language plpgsql as $$
+begin
+  if (OLD.objeto,OLD.tipo,OLD.via,OLD.valor_estimado,OLD.requisitante,OLD.areas_adicionais) is distinct from (NEW.objeto,NEW.tipo,NEW.via,NEW.valor_estimado,NEW.requisitante,NEW.areas_adicionais) then
+    perform sinalizar_revisao_documentos(NEW.id,array['dfd','precos','etp','tr','dot','fiscal','protocolo'],'O objeto, os responsáveis ou o valor do processo foram alterados.');
+  end if;
+  return NEW;
+end $$;
+drop trigger if exists revisar_processo on processos;
+create trigger revisar_processo after update on processos for each row execute function revisar_documentos_por_processo();
+create or replace function nova_versao_revisada() returns trigger language plpgsql as $$
+begin
+  delete from revisoes_documentos where processo_id=NEW.processo_id and etapa=NEW.etapa;
+  return NEW;
+end $$;
+drop trigger if exists revisar_nova_versao on minutas;
+create trigger revisar_nova_versao after insert on minutas for each row execute function nova_versao_revisada();
+alter table anexos add column if not exists etapa text not null default '';
+
+-- Registros antigos sem data de juntada conhecida permanecem sem data.
+alter table solicitacao_anexos add column if not exists criado_em timestamptz;
+alter table solicitacao_anexos alter column criado_em set default now();

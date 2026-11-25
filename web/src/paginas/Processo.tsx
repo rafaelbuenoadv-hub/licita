@@ -1,3 +1,4 @@
+import { PlanejamentoEtp } from "./PlanejamentoEtp";
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { compararOrcamentos, nomeFornecedorOrcamento, type DadosOrcamento } from "../../../shared/orcamentos";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -17,6 +18,7 @@ const ACOES: Record<string, string> = {
   "minuta.pendencias": "preencheu campos pendentes", "anexo.incluido": "anexou documento", "orcamento.incluido": "anexou orçamento", "orcamento.removido": "removeu orçamento", "orcamento.lido": "pediu a leitura de orçamento à IA", "orcamento.fornecedor": "identificou o fornecedor do orçamento", "orcamento.valor": "informou valor de orçamento", "anexo.removido": "removeu documento",
   "minuta.titulares": "incluiu os titulares no DFD",
   "solicitacao.incluida": "cadastrou informações da instrução", "solicitacao.alterada": "editou informações da instrução",
+  "etp.rascunho": "salvou o planejamento inicial do ETP", "documento.revisado": "confirmou a revisão do documento", "anexo.referencia": "vinculou o anexo à peça",
   "precos.analisados": "classificou os preços na pesquisa",
   "ia.sugestoes": "pediu sugestões à IA", "campos.salvos": "salvou os campos da etapa", "minuta.campos": "montou o documento com os campos", "processo.protocolado": "protocolou o processo no Departamento de Licitações", "contrato.criado": "registrou contrato",
 };
@@ -42,7 +44,7 @@ export function ProcessoPg() {
 
   if (erro) return <p className="note bad">{erro}</p>;
   if (!p) return <p className="muted">Carregando processo…</p>;
-  const checks: Checks = Object.fromEntries(p.checagens.map((c: { item: string }) => [c.item, true]));
+  const checks: Checks = Object.fromEntries([...p.checagens.map((c: { item: string }) => [c.item, true]), ...(p.revisoes_documentos ?? []).map((r: {etapa:string}) => [`revisao.${r.etapa}`,true])]);
   const trilha = p.trilha as TrilhaProcesso;
   const pedida = params.get("aba");
   const aberta = trilha.etapas.find((etapa) => etapa.id === pedida) ?? trilha.atual;
@@ -58,7 +60,7 @@ export function ProcessoPg() {
           <span className="small muted">{[TIPOS[p.tipo as keyof typeof TIPOS], VIAS[p.via as keyof typeof VIAS], brl(p.valor_estimado), `Exercício ${p.ano}`].join(" · ")}</span>
         </div>
         <div className="tools">
-          {(p.concluido || p.situacao === "cancelado") && <span className={"pill " + (p.situacao === "cancelado" ? "bad" : "ok")}>{p.situacao === "cancelado" ? "Cancelado" : "Fase interna concluída"}</span>}
+          {(p.concluido || p.situacao === "cancelado") && <span className={"pill " + (p.situacao === "cancelado" ? "bad" : "ok")}>{p.situacao === "cancelado" ? "Cancelado" : "Preparação pela secretaria concluída"}</span>}
           <Link className="btn" to="/processos">Todos os processos</Link>
         </div>
       </div>
@@ -73,7 +75,8 @@ export function ProcessoPg() {
             const selecionada = etapa.id === aberta.id;
             const estilo = { atual: "cur", concluida: "ok", disponivel: "", bloqueada: "lock" }[etapa.estado];
             const formal = ETAPAS[etapa.numero - 1];
-            const status = { atual: `${feitos(formal, p, checks)} de ${itensDe(formal, p).length} itens`,
+            const precisaRevisar = (p.revisoes_documentos ?? []).some((r: {etapa:string}) => r.etapa === etapa.id);
+            const status = precisaRevisar ? "Revisão necessária" : etapa.id === "planejamento" && Object.keys(p.campos.etp ?? {}).length ? (feita(ETAPAS.find((x)=>x.id==="etp")!,p,checks) ? "Mesmo ETP concluído" : "ETP em elaboração") : { atual: `${feitos(formal, p, checks)} de ${itensDe(formal, p).length} itens`,
               concluida: "Concluída", disponivel: "Disponível", bloqueada: "Bloqueada" }[etapa.estado];
             const inicioFase = etapa.numero === 1 || ETAPAS[etapa.numero - 2].fase !== formal.fase;
             return (<Fragment key={etapa.id}>
@@ -194,8 +197,17 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
     catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
     finally { setSalvando(null); }
   };
+  const planejamentoRef = useRef<{salvar:()=>Promise<boolean>}>(null);
   const prox = ETAPAS[ix + 1];
   const editavel = lib && atua && p.situacao !== "cancelado";
+  const revisao = (p.revisoes_documentos ?? []).find((r: {etapa:string}) => r.etapa === e.id);
+  const documento = p.minutas.find((m: {etapa:string})=>m.etapa===e.id);
+  const confirmarRevisao = async () => {
+    try {
+      await api.post(`/processos/${p.id}/revisoes-documentos/${e.id}/confirmar`, {versao:documento.versao,em:revisao.em});
+      await recarregar(); setAviso({t:"Revisão da versão atual registrada no histórico.",tipo:"ok"});
+    } catch(er:any) {setAviso({t:er.message,tipo:"bad"});}
+  };
   const [vals, setVals] = useState<Valores>(() => mesclarCampos(p, e.id).valores);
   const [sujo, setSujo] = useState(() => mesclarCampos(p, e.id).sugeridos.length > 0);
   const [gravandoCampos, setGravandoCampos] = useState(false);
@@ -228,13 +240,14 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
   const concluir = async () => {
     setConferindo(true);
     try {
+      if (e.id === "planejamento" && !(await planejamentoRef.current?.salvar())) return;
       if (e.campos.length && sujo && !(await salvarCampos(true))) return;
       const r = await api.post(`/processos/${p.id}/etapas/${e.id}/concluir`);
       await recarregar();
       if (!r.concluida) { setConf(r.pendencias); return; }
       setConf(null);
       const avisos = (r.pendencias as { texto: string }[]).map((x) => x.texto).join(" ");
-      setAviso({ t: r.protocolado ? `Fase interna concluída: processo protocolado no Departamento de Licitações e Contratos.${avisos ? ` Atenção: ${avisos}` : ""}` : `${e.nome}: etapa conferida e concluída.${avisos ? ` Atenção: ${avisos}` : ""}`, tipo: avisos ? "" : "ok" });
+      setAviso({ t: r.protocolado ? `Preparação pela secretaria concluída: processo protocolado no Departamento de Licitações e Contratos.${avisos ? ` Atenção: ${avisos}` : ""}` : `${e.nome}: etapa conferida e concluída.${avisos ? ` Atenção: ${avisos}` : ""}`, tipo: avisos ? "" : "ok" });
       if (r.proxima) irPara(r.proxima.id);
     } catch (er: any) { setAviso({ t: er.message, tipo: "bad" }); }
     finally { setConferindo(false); }
@@ -258,13 +271,19 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
     <section className="panel" style={{ minWidth: 0 }}>
       <div className="sec">
         <div className="row"><div><span className="lbl">{`Etapa ${numero} de ${ETAPAS_INTERNAS} · Fase interna (${FASES.interna.quem})`}</span><h2>{e.nome}</h2></div>
-          <span className={"pill " + (ok ? "ok" : lib ? "cur" : "")}>{ok ? "Concluída" : lib ? `${nf} de ${its.length} itens` : "Bloqueada"}</span></div>
+          <span className={"pill " + (ok ? "ok" : lib ? "cur" : "")}>{revisao ? "Revisão necessária" : ok ? "Concluída" : lib ? `${nf} de ${its.length} itens` : "Bloqueada"}</span></div>
         {e.doc && <p className="small muted">Documento da etapa: {e.doc}</p>}
         <p style={{ maxWidth: "72ch" }}>{e.oque}</p>
         <div className="base">{e.base.map((b: any) => b.url ? <a key={b.rotulo} href={b.url} target="_blank" rel="noopener">{b.rotulo}</a> : <span key={b.rotulo}>{b.rotulo}</span>)}</div>
         {!lib && <p className="note">Conclua a etapa "{ETAPAS[p.etapa_atual].nome}" para liberar esta.</p>}
         {lib && !atua && <p className="note">Seu perfil acompanha esta etapa, mas quem preenche e marca os itens é: {e.papeis.join(", ")}.</p>}
       </div>
+      {revisao && <div className="sec note"><strong>Revisão necessária</strong><p>{revisao.motivo}</p><p className="small">Confira a minuta e seus anexos. Você pode gerar uma nova versão ou confirmar a revisão da versão atual.</p>
+        {editavel && documento && <button className="btn" disabled={sujo} onClick={confirmarRevisao}>Confirmar revisão da versão {documento.versao}</button>}
+        {sujo && <p className="small">Salve os campos antes de confirmar a revisão.</p>}
+      </div>}
+      {e.id === "planejamento" && <PlanejamentoEtp ref={planejamentoRef} processo={p} editavel={editavel} recarregar={recarregar} />}
+      {e.id === "etp" && <p className="sec note">{ok ? "ETP concluído" : "ETP em elaboração"}. Confira o rascunho iniciado no planejamento, incorpore a pesquisa de preços e conclua a viabilidade da contratação.</p>}
       {e.id === "pac" && <ItemPac p={p} editavel={editavel} setAviso={setAviso} aoVincular={async () => {
         const novo = await recarregar();
         if (novo) { const m = mesclarCampos(novo, "pac"); setVals(m.valores); setSujo(m.sugeridos.length > 0); }
@@ -313,7 +332,7 @@ function Etapa({ p, e, ix, numero, checks, recarregar, setAviso, irPara }: any) 
         <div className="tools">
           {lib && atua && p.situacao !== "cancelado" && <button className="btn pri" disabled={conferindo} onClick={concluir}>{conferindo ? "Conferindo…" : e.id === "protocolo" ? "Protocolar no Departamento de Licitações" : prox ? "Concluir e avançar" : "Conferir e concluir"}</button>}
           {prox ? <button className="btn" disabled={!ok} onClick={() => irPara(prox.id)}>{ok ? "" : `Faltam ${its.length - nf} · `}{prox.nome} →</button>
-            : <span className={"pill " + (ok ? "ok" : "")}>{ok ? "Fase preparatória concluída" : "Última etapa"}</span>}
+            : <span className={"pill " + (ok ? "ok" : "")}>{ok ? "Preparação pela secretaria concluída" : "Última etapa"}</span>}
         </div>
       </div>
     </section>
@@ -359,7 +378,7 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
   const inclusao = (v: string) => v === "incluso" ? "incluído" : v === "nao_incluso" ? "não incluído" : "não informado";
   return (
     <div className="sec"><span className="lbl">Orçamentos</span>
-      <p className="small muted">Consulte as propostas do processo. Os itens e as cotações são registrados na Instrução do processo, na etapa 2.</p>
+      <p className="small muted">Consulte as propostas do processo. Os itens e as cotações são registrados na Instrução do processo, na etapa 1.</p>
       {lista.length === 0 ? <p className="muted">Nenhum orçamento anexado.</p> :
         <div className="tw"><table className="t">
           <thead><tr><th>Orçamento</th><th>Fornecedor</th><th className="r">Valor (R$)</th><th /></tr></thead>
@@ -397,7 +416,7 @@ function Orcamentos({ p, recarregar, setAviso, irAosItens }: { p: any; recarrega
         </table></div>}
       {alertas.length > 0 && <div role="status"><span className="lbl">Pontos de atenção na comparação</span>
         <ul className="pends">{alertas.map((a, k) => <li key={k} className="aviso"><span>{a.texto}</span></li>)}</ul></div>}
-      <button className="btn sm" type="button" onClick={irAosItens}>Ir à Instrução do processo (etapa 2)</button>
+      <button className="btn sm" type="button" onClick={irAosItens}>Ir à Instrução do processo (etapa 1)</button>
     </div>
   );
 }
@@ -599,10 +618,11 @@ function Minuta({ p, e, editavel, setAviso, camposSujos, salvarCampos }: { p: an
 function Anexos({ p, recarregar, podeIncluir }: { p: any; recarregar: () => Promise<any>; podeIncluir: boolean }) {
   const [msg, setMsg] = useState<{ t: string; tipo?: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [referencia, setReferencia] = useState("");
   const enviar = async (f: File | undefined) => {
     if (!f) return;
     setBusy(true); setMsg(null);
-    try { const fd = new FormData(); fd.append("arquivo", f); const r = await api.post(`/processos/${p.id}/anexos`, fd); await recarregar(); setMsg({ t: `"${f.name}" anexado (${r.caracteres.toLocaleString("pt-BR")} caracteres lidos).`, tipo: "ok" }); }
+    try { const fd = new FormData(); fd.append("arquivo", f); fd.set("etapa", referencia); const r = await api.post(`/processos/${p.id}/anexos`, fd); await recarregar(); setMsg({ t: `"${f.name}" anexado (${r.caracteres.toLocaleString("pt-BR")} caracteres lidos).`, tipo: "ok" }); }
     catch (e: any) { setMsg({ t: e.message, tipo: "bad" }); }
     finally { setBusy(false); }
   };
@@ -610,12 +630,12 @@ function Anexos({ p, recarregar, podeIncluir }: { p: any; recarregar: () => Prom
   return (
     <section className="panel">
       <div className="pad-s row"><div><h2>Documentos de apoio</h2><p className="small muted">Memorandos, planilhas, levantamentos e peças antigas que ficam juntos do processo.</p></div>
-        {podeIncluir && <><label className="btn" htmlFor="anexo">{busy ? "Lendo…" : "Anexar documento"}</label>
+        {podeIncluir && <><label>Peça de referência<select value={referencia} onChange={(e)=>setReferencia(e.target.value)}><option value="">Processo em geral</option>{ETAPAS.filter((x)=>x.doc).map((x)=><option key={x.id} value={x.id}>{x.nome}</option>)}</select></label><label className="btn" htmlFor="anexo">{busy ? "Lendo…" : "Anexar documento"}</label>
           <input id="anexo" type="file" accept=".docx,.pdf,.txt,.md,.csv" hidden disabled={busy} onChange={(e) => { enviar(e.target.files?.[0]); e.target.value = ""; }} /></>}</div>
       {msg && <p className={"note " + (msg.tipo ?? "")} style={{ margin: "0 12px 12px" }}>{msg.t}</p>}
       {p.anexos.length === 0 ? <p className="pad-s muted">Nenhum documento anexado.</p> :
         <div className="tw"><table className="t"><tbody>{p.anexos.map((a: any) => (
-          <tr key={a.id}><td>{a.nome}</td><td className="small muted">{a.caracteres.toLocaleString("pt-BR")} caracteres</td><td className="small muted">{dataHora(a.criado_em)}</td>
+          <tr key={a.id}><td>{a.nome}</td><td>{podeIncluir ? <select aria-label={`Peça de referência de ${a.nome}`} value={a.etapa ?? ""} onChange={async(ev)=>{try{await api.put(`/processos/${p.id}/anexos/${a.id}/referencia`,{etapa:ev.target.value});await recarregar();}catch(er:any){setMsg({t:er.message,tipo:"bad"});}}}><option value="">Processo em geral</option>{ETAPAS.filter((x)=>x.doc).map((x)=><option key={x.id} value={x.id}>{x.nome}</option>)}</select> : ETAPAS.find((x)=>x.id===a.etapa)?.nome ?? "Processo em geral"}</td><td className="small muted">{a.caracteres.toLocaleString("pt-BR")} caracteres</td><td className="small muted">{dataHora(a.criado_em)}</td>
             <td className="r">{podeIncluir && <button className="lnk" onClick={() => remover(a.id)}>Remover</button>}</td></tr>))}</tbody></table></div>}
     </section>
   );

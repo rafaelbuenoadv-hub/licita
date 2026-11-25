@@ -4,7 +4,7 @@ import { api, brl } from "../api";
 import { TRILHA_PROCESSO, VIAS, type EtapaNaTrilha } from "../../../shared/etapas";
 import { tem, useEu } from "../main";
 
-const SIT: Record<string, [string, string]> = { preparacao: ["Em preparo", "cur"], concluido: ["Fase interna concluída", "ok"], cancelado: ["Cancelado", "bad"] };
+const SIT: Record<string, [string, string]> = { preparacao: ["Em preparo", "cur"], concluido: ["Preparação pela secretaria concluída", "ok"], cancelado: ["Cancelado", "bad"] };
 
 const situacaoInterna = (p: { situacao: string; concluido: boolean }) => p.situacao === "cancelado" ? "cancelado" : p.concluido ? "concluido" : "preparacao";
 

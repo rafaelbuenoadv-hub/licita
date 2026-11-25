@@ -174,7 +174,7 @@ test("cria processo e respeita ordem das etapas e papéis", async () => {
   assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: "pac.campos", marcado: true })).status, 400);
   // Conclui a verificação no PAC: campos (fora do PAC, com autorização) e conferência.
   assert.equal((await req.put(`/api/processos/${procId}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda surgida após a aprovação do PAC." } })).status, 200);
-  for (const i of itensDe(ETAPAS[0], { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
+  for (const i of itensDe(ETAPAS.find((e)=>e.id==="pac")!, { tipo: "obra", via: "dispensa" }).filter((x) => !x.auto)) {
     assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
   }
   // A etapa 2 (Solicitação) não trava: o processo segue direto para o DFD.
@@ -185,7 +185,7 @@ test("cria processo e respeita ordem das etapas e papéis", async () => {
     assert.equal((await req.post(`/api/processos/${procId}/checagens`, { item: i.id, marcado: true })).status, 200);
   }
   const det = await req.get(`/api/processos/${procId}`);
-  assert.equal(det.dados.etapa_atual, 3);
+  assert.equal(det.dados.etapa_atual, 4);
   assert.equal(det.dados.checagens[0].usuario, "req");
   // Jurídico não atua na solicitação.
   const jur = await new Cliente().entrar("jur@a.gov.br");
@@ -716,7 +716,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   await admin.post(`/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
   r = await admin.post(pac);
   assert.equal(r.dados.concluida, true);
-  assert.deepEqual(r.dados.proxima, { id: "solicitacao", nome: "Instrução do processo" });
+  assert.deepEqual(r.dados.proxima, { id: "dfd", nome: "DFD" });
   // Etapa 2: a solicitação não é obrigatória para avançar.
   const sol = await admin.post(`/api/processos/${id}/etapas/solicitacao/concluir`);
   assert.deepEqual([sol.dados.concluida, sol.dados.pendencias], [true, []]);
@@ -776,7 +776,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   for (const i of itensDe(ETAPAS[2], { tipo: "bens", via: "licitacao" }).filter((x) => !x.auto)) await admin.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
   r = await admin.post(rota);
   assert.equal(r.dados.concluida, true);
-  assert.deepEqual(r.dados.proxima, { id: "precos", nome: "Pesquisa de preços" });
+  assert.deepEqual(r.dados.proxima, { id: "planejamento", nome: "Planejamento técnico — início do ETP" });
 
   // Apagar um campo obrigatório desmarca o item do sistema e a etapa volta a ficar pendente.
   assert.equal((await admin.put(`/api/processos/${id}/campos/dfd`, { valores: { ...dfd, contato: " " } })).status, 200);
@@ -815,9 +815,10 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   }
   assert.match((await adm.post(`/api/processos/${id}/minutas/fiscal/dos-campos`)).status === 200 ? (await adm.get(`/api/processos/${id}/minutas/fiscal`)).dados.vigente.texto : "", /^# INDICAÇÃO DO FISCAL DO CONTRATO\n/);
   assert.equal((await adm.put(`/api/processos/${id}/campos/fiscal`, { valores: { ...(await lic.get(`/api/processos/${id}`)).dados.campos.fiscal, substituto_nome: "Outra pessoa" } })).status, 200);
+  await adm.post(`/api/processos/${id}/minutas/fiscal/dos-campos`);
   for (const i of itensDe(ETAPAS[fiscal], pb).filter((x) => !x.auto)) await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
   r = await adm.post(`/api/processos/${id}/etapas/fiscal/concluir`);
-  assert.deepEqual([r.dados.concluida, r.dados.protocolado, r.dados.proxima], [true, false, { id: "protocolo", nome: "Protocolo" }]);
+  assert.deepEqual([r.dados.concluida, r.dados.protocolado, r.dados.proxima], [true, false, { id: "protocolo", nome: "Conferência, encaminhamento e protocolo" }]);
 
   // Etapa 8: sem dotação indicada e sem Solicitação, não protocola.
   await preencherCampos(adm, id, ETAPAS[fiscal + 1]);
@@ -830,6 +831,10 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   assert.match(texto, /^# ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES E CONTRATOS/);
   assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo.*instrução do processo, DFD/);
   assert.equal((await adm.put(`/api/processos/${id}/campos/dot`, { valores: { ...det.campos.dot, dotacao: "02.001 3.3.90.39" } })).status, 200);
+  await adm.post(`/api/processos/${id}/minutas/protocolo/dos-campos`);
+  const aposDotacao=(await adm.get(`/api/processos/${id}`)).dados;
+  const alerta=aposDotacao.revisoes_documentos.find((x:any)=>x.etapa==="protocolo");
+  if(alerta) assert.equal((await adm.post(`/api/processos/${id}/revisoes-documentos/protocolo/confirmar`,{versao:aposDotacao.minutas.find((m:any)=>m.etapa==="protocolo").versao,em:alerta.em})).status,200);
   for (const i of itensDe(ETAPAS[fiscal + 1], pb).filter((x) => !x.auto)) await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
   r = await adm.post(`/api/processos/${id}/etapas/protocolo/concluir`);
   assert.equal(r.dados.concluida, true, JSON.stringify(r.dados.pendencias));
@@ -1368,12 +1373,12 @@ test("exclusão retira o processo das consultas e conserva o protocolo e a audit
   assert.notEqual(posterior.dados.protocolo, r.dados.protocolo);
 });
 
-test("trilha: somente as nove etapas da fase interna, do PAC ao Protocolo", async () => {
+test("trilha: somente as dez etapas da preparação pela secretaria", async () => {
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const painel = async () => (await lic.get("/api/painel")).dados.processos.por_etapa as { id: string; numero: number; etapa: string; total: number }[];
   const antes = await painel();
-  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["pac", 1], ["solicitacao", 2], ["dfd", 3], ["precos", 4], ["etp", 5], ["tr", 6], ["dot", 7], ["fiscal", 8], ["protocolo", 9]]);
-  assert.deepEqual(ETAPAS.map((e) => e.fase), ["interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna", "interna"]);
+  assert.deepEqual(antes.map(({ id, numero }) => [id, numero]), [["solicitacao", 1], ["pac", 2], ["dfd", 3], ["planejamento", 4], ["precos", 5], ["etp", 6], ["tr", 7], ["dot", 8], ["fiscal", 9], ["protocolo", 10]]);
+  assert.deepEqual(ETAPAS.map((e) => e.fase), Array(10).fill("interna"));
   const r = await lic.post("/api/processos", { objeto: "Compra de materiais para a educação", tipo: "bens", via: "licitacao", ano: 2099 });
   assert.equal(r.status, 201);
   const caminho = `/api/processos/${r.dados.id}`;
@@ -1381,8 +1386,8 @@ test("trilha: somente as nove etapas da fase interna, do PAC ao Protocolo", asyn
   assert.equal((await lista()).trilha.atual.id, "pac");
   const inicio = (await lic.get(caminho)).dados;
   assert.equal(inicio.trilha.atual.id, "pac");
-  assert.equal(inicio.trilha.etapas[1].estado, "bloqueada");
-  assert.equal((await painel())[0].total, antes[0].total + 1);
+  assert.equal(inicio.trilha.etapas[1].estado, "atual");
+  assert.equal((await painel()).find((e)=>e.id==="pac")!.total, antes.find((e)=>e.id==="pac")!.total + 1);
 
   const pedido = await lic.post(`${caminho}/solicitacoes`, {
     chave_envio: randomUUID(), secretaria: "Educação", descricao: "Reposição de material de ensino.",
@@ -1390,7 +1395,7 @@ test("trilha: somente as nove etapas da fase interna, do PAC ao Protocolo", asyn
   assert.equal(pedido.status, 201);
   const seguir = (await lic.get(caminho)).dados;
   assert.equal(seguir.trilha.atual.id, "pac");
-  assert.equal(seguir.etapa_atual, 0);
+  assert.equal(seguir.etapa_atual, 1);
 });
 
 test("conciliação: a mesma linha escrita de outro jeito pelo fornecedor cai no item certo, sem duplicar", () => {
@@ -1837,7 +1842,7 @@ test("verificação do PAC integra a solicitação e os arquivos exportados com 
   assert.match(sol.descricao, /Item 19 — Cadeiras/);
   assert.match(sol.descricao, /Reposição antecipada para o início das aulas/);
   assert.match(sol.descricao, /Texto manual preservado/);
-  assert.deepEqual(det.trilha.etapas.slice(0, 2).map((e: any) => e.id), ["pac", "solicitacao"]);
+  assert.deepEqual(det.trilha.etapas.slice(0, 2).map((e: any) => e.id), ["solicitacao", "pac"]);
   // Uma nova verificação deve entrar no documento baixado, mesmo antes de reeditar o texto salvo.
   assert.equal((await lic.put(`${processo}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Demanda extraordinária após ampliação da escola." } })).status, 200);
   const word = await lic.get(`${processo}/solicitacoes/${sol.id}/docx`);
@@ -1857,7 +1862,7 @@ test("verificação do PAC integra a solicitação e os arquivos exportados com 
   }
   det = (await lic.get(processo)).dados;
   assert.equal(det.campos.pac.consta, "nao");
-  assert.deepEqual(det.trilha.etapas.slice(0, 2).map((e: any) => e.id), ["pac", "solicitacao"]);
+  assert.deepEqual(det.trilha.etapas.slice(0, 2).map((e: any) => e.id), ["solicitacao", "pac"]);
 });
 
 test("documentos de apoio acompanham o PDF da solicitação e o PDF completo preserva os originais", async () => {
@@ -2114,7 +2119,7 @@ test("fase interna conclui no Protocolo e preserva o histórico externo sem reab
     assert.equal((await lic.post(`${rota}/etapas/${etapa}/concluir`)).status, 404);
   }
   let det = (await lic.get(rota)).dados;
-  assert.equal(det.trilha.etapas.length, 9);
+  assert.equal(det.trilha.etapas.length, 10);
   assert.equal(det.trilha.atual.id, "pac");
   assert.ok(!Object.keys(det.campos).some((e) => ["edital", "parecer", "pub"].includes(e)));
   assert.equal(det.minutas.length, 0);
@@ -2226,7 +2231,7 @@ test("instrução cadastra dados sem montar documento e alimenta DFD e ETP sem a
   const criada = await lic.post(caminho, base); assert.equal(criada.status, 201, JSON.stringify(criada.dados));
   const ler = async () => (await lic.get(rota)).dados;
   let p = await ler(), s = p.solicitacoes[0];
-  assert.equal(p.trilha.etapas[1].nome, "Instrução do processo");
+  assert.equal(p.trilha.etapas[0].nome, "Instrução do processo");
   assert.equal(s.descricao, ""); assert.equal(s.informacoes, base.informacoes); assert.equal(p.minutas.length, 0);
   assert.equal((await lic.get(`${caminho}/${s.id}/pdf`)).status, 404, "o cadastro novo não cria uma solicitação exportável");
   assert.equal(p.sugestoes_campos.dfd.objeto, base.objeto_solicitacao);
@@ -2282,4 +2287,59 @@ test("instrução cadastra dados sem montar documento e alimenta DFD e ETP sem a
       writeFileSync(`${process.env.LICITA_QA_DIR}/${nome}.pdf`, await minutaParaPdf(texto, nome));
     }
   }
+});
+
+test("planejamento inicia o mesmo ETP antes dos preços; revisões preservam versões e anexos registram referência e juntada", async () => {
+  const adm=await new Cliente().entrar("admin@a.gov.br"), outro=await new Cliente().entrar("admin@b.gov.br");
+  const pb={tipo:"bens",via:"licitacao"} as const;
+  const criado=await adm.post("/api/processos",{objeto:"Aquisição de mesas para planejamento técnico",...pb,ano:2044,requisitante:"Educação"});
+  const id=criado.dados.id, rota=`/api/processos/${id}`;
+  const endpoint=`${rota}/etp/rascunho`;
+  assert.equal((await adm.put(endpoint,{valores:{i:"Necessidade"},anterior:{}})).status,409);
+  assert.equal((await outro.put(endpoint,{valores:{},anterior:{}})).status,404);
+  for(const e of ETAPAS.slice(0,ETAPAS.findIndex((e)=>e.id==="planejamento"))){
+    await preencherCampos(adm,id,e);
+    for(const item of itensDe(e,pb).filter((x)=>!x.auto)) assert.equal((await adm.post(`${rota}/checagens`,{item:item.id,marcado:true})).status,200);
+  }
+  await pool.query("insert into campos_etapa (processo_id,etapa,valores) values ($1,'etp',$2::jsonb)",[id,JSON.stringify({vi:"Estimativa manual preservada"})]);
+  const anterior={vi:"Estimativa manual preservada"};
+  const valores={i:"Atender novas salas",iii:"Mesas adequadas à faixa etária",iv:"20 mesas",v:"Compra e locação foram analisadas",xiii:"Não deve ser gravado pelo rascunho"};
+  assert.equal((await adm.put(endpoint,{valores,anterior})).status,200);
+  assert.equal((await adm.put(endpoint,{valores,anterior})).status,409);
+  let p=(await adm.get(rota)).dados;
+  assert.equal(p.campos.etp.i,valores.i);assert.equal(p.campos.etp.vi,anterior.vi);assert.equal(p.campos.etp.xiii,undefined);
+  assert.equal(p.minutas.length,0);
+  assert.equal((await adm.post(`${rota}/minutas/etp/dos-campos`)).status,409,"não emite o ETP final antes dos preços");
+  const pesquisa=ETAPAS.find((e)=>e.id==="precos")!;
+  await preencherCampos(adm,id,pesquisa);
+  for(const item of itensDe(pesquisa,pb).filter((x)=>!x.auto)) await adm.post(`${rota}/checagens`,{item:item.id,marcado:true});
+  assert.equal((await adm.post(`${rota}/minutas/etp/dos-campos`)).status,200);
+  const v1=(await adm.get(`${rota}/minutas/etp`)).dados.vigente;
+  assert.match(v1.texto,/Atender novas salas/);
+  assert.equal((await adm.post(`${rota}/minutas/dfd`,{texto:"# DFD\nVersão anterior preservada"})).status,200);
+  const fd=new FormData();fd.set("chave_envio",randomUUID());fd.set("secretaria","Educação");fd.set("cadastro","true");fd.set("objeto_solicitacao","Mesas para as novas salas");fd.set("informacoes","Entrega com montagem no local.");
+  assert.equal((await adm.post(`${rota}/solicitacoes`,fd)).status,201);
+  p=(await adm.get(rota)).dados;
+  assert.ok(p.revisoes_documentos.some((r:any)=>r.etapa==="etp"));
+  assert.ok(p.revisoes_documentos.some((r:any)=>r.etapa==="dfd"));
+  assert.equal(p.trilha.atual.id,"dfd");
+  assert.equal((await adm.get(`${rota}/minutas/etp`)).dados.vigente.texto,v1.texto);
+  const doc=(await adm.get(`${rota}/minutas/dfd`)).dados.vigente;
+  const rev=p.revisoes_documentos.find((r:any)=>r.etapa==="dfd");
+  assert.equal((await adm.post(`${rota}/revisoes-documentos/dfd/confirmar`,{versao:doc.versao,em:"2000-01-01T00:00:00.000Z"})).status,409);
+  assert.equal((await adm.post(`${rota}/revisoes-documentos/dfd/confirmar`,{versao:doc.versao,em:rev.em})).status,200);
+  assert.equal((await adm.post(`${rota}/revisoes-documentos/dfd/confirmar`,{versao:doc.versao,em:rev.em})).status,409);
+  assert.equal((await adm.post(`${rota}/minutas/etp/dos-campos`)).status,200);
+  const atual=(await adm.get(`${rota}/minutas/etp`)).dados;
+  assert.equal(atual.vigente.versao,v1.versao+1);assert.match(atual.vigente.texto,/Entrega com montagem/);
+  assert.equal(atual.versoes.length,2);
+  assert.ok(!(await adm.get(rota)).dados.revisoes_documentos.some((r:any)=>r.etapa==="etp"));
+  const anexo=new FormData();anexo.set("arquivo",new Blob(["Comprovante do planejamento"]),"planejamento.txt");anexo.set("etapa","etp");
+  const enviado=await adm.post(`${rota}/anexos`,anexo);assert.equal(enviado.status,201);
+  p=(await adm.get(rota)).dados;const salvo=p.anexos.find((a:any)=>a.id===enviado.dados.id);
+  assert.equal(salvo.etapa,"etp");assert.ok(salvo.criado_em);
+  assert.equal((await adm.put(`${rota}/anexos/${salvo.id}/referencia`,{etapa:"tr"})).status,200);
+  assert.equal((await outro.put(`${rota}/anexos/${salvo.id}/referencia`,{etapa:"dfd"})).status,404);
+  const corrigido=(await adm.get(rota)).dados.anexos.find((a:any)=>a.id===salvo.id);
+  assert.equal(corrigido.criado_em,salvo.criado_em);assert.equal(corrigido.etapa,"tr");
 });

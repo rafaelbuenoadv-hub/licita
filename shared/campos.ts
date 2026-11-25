@@ -148,7 +148,7 @@ export const CAMPOS: Record<string, Campo[]> = {
     { id: "fiscal_compatibilidade", rotulo: "Atribuições ou formação compatíveis com o objeto", tipo: "area" },
     { id: "substituto_nome", rotulo: "Fiscal substituto", tipo: "texto" },
     { id: "substituto_matricula", rotulo: "Matrícula e cargo do substituto", tipo: "texto" },
-    { id: "gestor", rotulo: "Gestor do contrato", tipo: "texto", opcional: true, ajuda: "Se já definido." },
+    { id: "gestor", rotulo: "Gestor do contrato indicado", tipo: "texto", opcional: true, ajuda: "Indicação para posterior designação formal pela autoridade competente." },
     { id: "declaracoes", rotulo: "Declarações", tipo: "marcas", opcoes: [
       ["sem_vinculo", "O fiscal e o substituto não têm vínculo com possíveis contratados (art. 7º, III)"],
       ["segregacao", "O fiscal não acumula funções mais suscetíveis a risco neste processo (art. 7º, § 1º)"],

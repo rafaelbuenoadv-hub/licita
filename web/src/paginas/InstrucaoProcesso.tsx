@@ -1,13 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, brl } from "../api";
+import { api, brl, dataHora } from "../api";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
 import { TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDosItens, type ItemSolicitacao, type TopicoSolicitacao } from "../../../shared/solicitacao";
 import type { OrcamentoLido } from "../../../shared/orcamentos";
 
 interface Registro {
-  id: number; secretaria: string; referencia: string; objeto: string; justificativa: string; informacoes: string;
+  id: number; criado_em?: string; secretaria: string; referencia: string; objeto: string; justificativa: string; informacoes: string;
   descricao: string; itens: ItemSolicitacao[]; topicos_adicionais?: TopicoSolicitacao[]; orcamentos_ocultos?: number[];
-  nome_arquivo: string | null; apoios: { id: number; nome: string }[];
+  nome_arquivo: string | null; apoios: { id: number; nome: string; criado_em?: string }[];
 }
 interface Props {
   processo: { id: number; objeto: string; requisitante: string; areas_adicionais: string[]; situacao: string;
@@ -98,7 +98,7 @@ export function InstrucaoProcesso({ processo, recarregar }: Props) {
         </fieldset>
         <fieldset className="wide itens-sol stack"><legend>Documentos de apoio</legend>
           <label>Anexar documentos de apoio<input type="file" multiple accept={TIPOS_ANEXOS_SOLICITACAO} onChange={(e) => { const selecionados = Array.from(e.target.files ?? []); setApoios((atuais) => [...atuais, ...selecionados]); e.target.value = ""; }} /></label>
-          {edicao?.apoios.map((a) => <a key={a.id} href={`/api${caminho}/${edicao.id}/apoios/${a.id}`}>{a.nome}</a>)}
+          {edicao?.apoios.map((a) => <a key={a.id} href={`/api${caminho}/${edicao.id}/apoios/${a.id}`}>{a.nome}{a.criado_em ? ` · Juntado em ${dataHora(a.criado_em)}` : ""}</a>)}
           {apoios.map((a, i) => <div key={`${a.name}-${i}`}>{a.name} <button type="button" className="lnk" onClick={() => setApoios(apoios.filter((_, k) => i !== k))}>Remover arquivo</button></div>)}
           {!edicao && <label>Documento de origem (opcional)<input type="file" accept=".pdf,.docx,.txt,.md,.csv" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} /></label>}
           <p className="small muted">Até 20 MB por arquivo. Os anexos acompanham o processo completo.</p>
@@ -115,13 +115,14 @@ export function InstrucaoProcesso({ processo, recarregar }: Props) {
     {aviso && <p className={`note ${aviso.erro ? "bad" : "ok"}`} role={aviso.erro ? "alert" : "status"}>{aviso.texto}</p>}
     {processo.solicitacoes.map((s) => <article key={s.id} className="panel pad stack">
       <div className="row"><h4>{s.secretaria}{s.referencia ? ` · ${s.referencia}` : ""}</h4>{pode && !aberto && <button type="button" className="btn sm" onClick={() => abrir(s)}>Editar dados da instrução</button>}</div>
+      {s.criado_em && <p className="small muted">Dados registrados em {dataHora(s.criado_em)} · Documentos de apoio à instrução.</p>}
       <p><strong>Objeto:</strong> {s.objeto || processo.objeto}</p>
       {s.justificativa && <p style={{ whiteSpace: "pre-wrap" }}><strong>Justificativa:</strong> {s.justificativa}</p>}
       {s.informacoes && <p style={{ whiteSpace: "pre-wrap" }}><strong>Informações complementares:</strong> {s.informacoes}</p>}
       <p className="small muted">{s.itens.length} itens{totalDosItens(s.itens) != null ? ` · Estimativa: ${brl(totalDosItens(s.itens))}` : ""} · Dados de apoio ao DFD e ao ETP.</p>
       {(s.topicos_adicionais ?? []).map((t, i) => <p key={i} style={{ whiteSpace: "pre-wrap" }}><strong>{t.titulo}</strong>{t.conteudo && `\n${t.conteudo}`}</p>)}
       {s.nome_arquivo && <a href={`/api${caminho}/${s.id}/arquivo`}>{s.nome_arquivo}</a>}
-      {s.apoios.map((a) => <a key={a.id} href={`/api${caminho}/${s.id}/apoios/${a.id}`}>{a.nome}</a>)}
+      {s.apoios.map((a) => <a key={a.id} href={`/api${caminho}/${s.id}/apoios/${a.id}`}>{a.nome}{a.criado_em ? ` · Juntado em ${dataHora(a.criado_em)}` : ""}</a>)}
       {s.descricao && <details><summary>Registro anterior preservado</summary><pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{s.descricao}</pre></details>}
     </article>)}
   </section>;

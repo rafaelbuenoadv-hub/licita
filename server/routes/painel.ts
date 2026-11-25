@@ -11,7 +11,7 @@ export function rotasPainel() {
     const ano = new Date().getFullYear();
     const procs = await q(
       `select p.id, p.protocolo, p.numero, p.objeto, p.tipo, p.via, p.situacao, p.atualizado_em,
-              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') as itens
+              coalesce((select array_agg(item) from checagens c where c.processo_id = p.id), '{}') || coalesce((select array_agg('revisao.'||etapa) from revisoes_documentos r where r.processo_id=p.id), '{}') as itens
          from processos p where p.orgao_id=$1 and p.excluido_em is null and p.situacao <> 'cancelado' order by p.atualizado_em`, [orgao]);
     const ativos = procs.map(({ itens, ...p }) => {
       const c: Checks = Object.fromEntries((itens as string[]).map((i) => [i, true]));
