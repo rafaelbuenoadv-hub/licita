@@ -11,7 +11,7 @@ import { minutaParaPdf } from "./pdf.js";
 import { arquivoDoProcessoParaPdf, paginasDoPdfParaWord } from "./arquivo-processo.js";
 import type { Processo } from "./routes/processos.js";
 
-export const ORDEM_DOCUMENTOS_PROCESSO = ["protocolo", "dfd", "etp", "precos", "tr", "dot", "fiscal"] as const;
+export const ORDEM_DOCUMENTOS_PROCESSO = ["protocolo", "dfd", "precos", "etp", "tr", "dot", "fiscal"] as const;
 
 interface Peca { titulo: string; texto?: string; nome?: string; arquivo?: Buffer; referencias?: string[] }
 const nomeLinha = (s: string) => s.replace(/[\r\n]/g, " ");

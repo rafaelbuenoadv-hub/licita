@@ -30,7 +30,7 @@ export function ExportarProcesso({ processo, salvarPendentes }: {
         <option value="">Sem timbrado</option>
         {processo.timbrados!.map((t) => <option key={t.codigo} value={t.codigo}>{t.nome}</option>)}
       </select></label>}
-    <p className="small muted">Ordem: Encaminhamento → DFD → ETP → Pesquisa de preços → Termo de Referência → Dotação → Fiscal do contrato. Anexos ao final.</p>
+    <p className="small muted">Ordem: Encaminhamento → DFD → Pesquisa de preços → ETP → Termo de Referência → Dotação → Fiscal do contrato. Anexos ao final.</p>
     <div className="tools">
       <button type="button" className="btn pri" disabled={!!gerando} onClick={() => gerar("pdf")}>Gerar processo completo em PDF</button>
       <button type="button" className="btn" disabled={!!gerando} onClick={() => gerar("docx")}>Gerar processo completo em Word</button>

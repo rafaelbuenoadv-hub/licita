@@ -2062,7 +2062,7 @@ test("processo completo reúne últimas versões e todos os anexos em PDF e Word
   assert.doesNotMatch(textoPdf, /VERSAO_ANTIGA_NAO_INCLUIR|NAO_VAZAR_OUTRO_PROCESSO/);
   assert.equal(textoPdf.match(/ORIGINAL_PRIMEIRA_PAGINA/g)?.length, 1);
   assert.doesNotMatch(textoPdf, /CORPO_DA_SOLICITACAO/);
-  const ordem = ["ENCAMINHAMENTO_PRIMEIRO", "DFD_ATUAL_EDITAVEL", "ETP_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "TR_ATUAL_EDITAVEL", "DOTACAO_ATUAL", "FISCAL_ATUAL", "ORIGINAL_PRIMEIRA_PAGINA"];
+  const ordem = ["ENCAMINHAMENTO_PRIMEIRO", "DFD_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "ETP_ATUAL_EDITAVEL", "TR_ATUAL_EDITAVEL", "DOTACAO_ATUAL", "FISCAL_ATUAL", "ORIGINAL_PRIMEIRA_PAGINA"];
   for (let i = 1; i < ordem.length; i++) assert.ok(textoPdf.indexOf(ordem[i-1]) < textoPdf.indexOf(ordem[i]), `ordem: ${ordem[i-1]} antes de ${ordem[i]}`);
   assert.ok(textoPdf.indexOf("DFD_ATUAL_EDITAVEL") < textoPdf.indexOf("ETP_ATUAL_EDITAVEL"));
   const unido = await PDFDocument.load(pdf.dados);
