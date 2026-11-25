@@ -82,17 +82,19 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
       ii: pacTexto,
       iv: primeiro(v("dfd", "quantidade"), quantidades),
       vi: valorTexto,
+      ...padroesEtp(p.tipo),
     },
     precos: {
       parametros: (nOrcamentos?.n ?? 0) > 0 && p.tipo !== "obra" ? ["fornecedores"] : [],
       valor_total: total != null ? moeda(total) : "",
     },
-    tr: p.tipo === "obra" ? {} : {
+    tr: p.tipo === "obra" ? (({ e: _e, f: _f, g: _g, h: _h, ...parametros }) => parametros)(padroesTr(p.tipo, p.via, v("dfd", "modalidade"))) : {
       a: [primeiro(v("dfd", "objeto"), p.objeto), v("etp", "iv")].filter(Boolean).join("\n"),
       b: v("etp", "i") ? `Conforme o Estudo Técnico Preliminar: ${v("etp", "i")}` : "",
       c: v("etp", "vii"),
       d: v("etp", "iii"),
       i: [v("precos", "valor_total") && `Valor estimado: R$ ${v("precos", "valor_total")}.`, v("precos", "memoria")].filter(Boolean).join("\n"),
+      ...padroesTr(p.tipo, p.via, v("dfd", "modalidade")),
     },
     dot: {
       valor_total: primeiro(v("precos", "valor_total"), total != null ? moeda(total) : ""),
@@ -107,6 +109,42 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
     }
   }
   return sug;
+}
+
+/** Textos de partida do ETP para os incisos que costumam ter resposta padrão; o usuário ajusta ao caso. */
+function padroesEtp(tipo: string) {
+  const bens = tipo === "bens";
+  return {
+    ix: `Atender à necessidade descrita neste estudo com economicidade, assegurando a continuidade ${bens ? "do abastecimento" : "dos serviços"} e o melhor aproveitamento dos recursos humanos, materiais e financeiros do Município.`,
+    x: "Não há providências prévias à celebração do contrato além da designação formal do gestor e do fiscal, que já possuem conhecimento para acompanhar a execução do objeto.",
+    xi: "Não foram identificadas contratações correlatas ou interdependentes que interfiram na presente contratação.",
+    xii: bens
+      ? "Não são esperados impactos ambientais significativos. A contratada deverá observar a legislação ambiental, inclusive quanto ao descarte adequado de embalagens e resíduos e à logística reversa, quando aplicável."
+      : "Não são esperados impactos ambientais significativos. A contratada deverá observar a legislação ambiental e dar destinação adequada aos resíduos gerados na execução.",
+  };
+}
+
+/** Textos de partida do Termo de Referência (alíneas de execução, gestão, pagamento e seleção e os parâmetros das cláusulas padrão). */
+function padroesTr(tipo: string, via: string, modalidade: string) {
+  const bens = tipo === "bens";
+  const entrega = bens ? "fornecimento" : "execução dos serviços";
+  const ordem = bens ? "ordem de fornecimento" : "ordem de serviço";
+  const selecao = via === "licitacao"
+    ? `O fornecedor será selecionado por meio de ${modalidade || "Pregão Eletrônico"}, com critério de julgamento de menor preço por item. Serão exigidos os documentos de habilitação jurídica, fiscal, social e trabalhista e econômico-financeira previstos nos arts. 62 a 69 da Lei nº 14.133/2021, na medida necessária à garantia do cumprimento das obrigações.`
+    : via === "dispensa"
+      ? "Contratação direta por dispensa de licitação, com seleção da proposta de menor preço, preferencialmente por meio de aviso de contratação direta, observados os documentos de habilitação compatíveis com o objeto (art. 72 da Lei nº 14.133/2021)."
+      : "Contratação direta por inexigibilidade de licitação, com fornecedor cuja escolha está justificada nos autos (arts. 72 e 74 da Lei nº 14.133/2021), observados os documentos de habilitação compatíveis com o objeto.";
+  return {
+    e: `O ${entrega} será realizado de forma ${bens ? "parcelada, conforme a demanda da Secretaria requisitante" : "contínua, conforme as necessidades da Secretaria requisitante"}, mediante ${ordem} emitida pelo setor competente, no prazo e no local definidos neste Termo de Referência.`,
+    f: "A execução será acompanhada e fiscalizada por gestor e fiscal designados pela autoridade competente (arts. 7º e 117 da Lei nº 14.133/2021), que anotarão em registro próprio as ocorrências, determinarão o necessário à regularização das falhas e atestarão as notas fiscais.",
+    g: `O pagamento corresponderá às quantidades efetivamente ${bens ? "entregues" : "executadas"} e recebidas, mediante nota fiscal atestada pelo fiscal do contrato, observadas as condições de pagamento deste Termo de Referência.`,
+    h: selecao,
+    prazo_execucao: `até 15 (quinze) dias corridos, contados do recebimento da ${ordem}`,
+    vigencia: "12 (doze) meses, contados da assinatura do contrato",
+    prazo_pagamento: "até 30 (trinta) dias, contados do atesto da nota fiscal",
+    reajuste: "IPCA/IBGE",
+    subcontratacao: "nao",
+  };
 }
 
 const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];

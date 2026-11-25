@@ -757,7 +757,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   assert.ok(doc.texto.startsWith("# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS\n\n# FORMALIZAÇÃO DE DEMANDA\n\n"));
   assert.ok(doc.texto.includes(`Protocolo ${protocolo} · Exercício 2028`));
   assert.match(doc.texto, /Decretos Municipais nº 2\.532\/2024, nº 2\.533\/2024, nº 2\.548\/2024 e nº 2\.549\/2024, a presente formalização de demanda/);
-  assert.match(doc.texto, /## INFORMAÇÕES GERAIS\n\n\*\*Objeto\*\*\n\nCadeiras escolares, sem marca\./);
+  assert.match(doc.texto, /## INFORMAÇÕES GERAIS\n\n\*\*Objeto:\*\*\n\nCadeiras escolares, sem marca\./);
   assert.match(doc.texto, /\*\*Justificativa da necessidade:\*\*\n\nAs cadeiras atuais estão quebradas, conforme laudo anexo\./);
   assert.match(doc.texto, /\*\*Secretarias Contempladas:\*\*\n\nSecretaria Municipal de Educação\./);
   assert.match(doc.texto, /\*\*Estimativa de Valor:\*\*\n\nO valor estimado da contratação é de R\$\s9\.000,00 \(nove mil reais\), conforme estimativa preliminar/);
@@ -804,9 +804,9 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   assert.ok(cods.includes("substituto") && cods.includes("minuta") && !cods.includes("dotacao"), cods.join());
   // ETP, pesquisa de preços e Termo de Referência montados com os campos, no modelo completo.
   for (const [etapa, inicio, trecho] of [
-    ["etp", "# ESTUDO TÉCNICO PRELIMINAR — ETP", /## 14\. Posicionamento conclusivo \(art\. 18, § 1º, XIII\)\n\nTexto de teste/],
-    ["precos", "# RELATÓRIO DE PESQUISA DE PREÇOS E MEMÓRIA DE CÁLCULO", /## 3\. Parâmetros utilizados \(art\. 23, § 1º\)\n\n- I — Painel de preços/],
-    ["tr", "# TERMO DE REFERÊNCIA", /## 1\. Definição do objeto \(art\. 6º, XXIII, alínea "a"\)[\s\S]*## 11\. Análise de riscos \(art\. 18, X\)[\s\S]*Aprovo o presente Termo de Referência\./],
+    ["etp", "# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS\n\n# ESTUDO TÉCNICO PRELIMINAR", /## 14\. POSICIONAMENTO CONCLUSIVO\n\nTexto de teste/],
+    ["precos", "# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS\n\n# RELATÓRIO DE FORMAÇÃO DE PREÇOS", /## 3\. PARÂMETROS UTILIZADOS \(art\. 23, § 1º\)\n\n- I — Painel de preços/],
+    ["tr", "# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS\n\n# TERMO DE REFERÊNCIA", /## 1\. DEFINIÇÃO DO OBJETO[\s\S]*## 12\. OBRIGAÇÕES DA CONTRATADA\n\na\) Executar[\s\S]*## 19\. SANÇÕES ADMINISTRATIVAS[\s\S]*## 20\. ANÁLISE DE RISCOS[\s\S]*Aprovo o presente Termo de Referência\./],
   ] as const) {
     assert.equal((await adm.post(`/api/processos/${id}/minutas/${etapa}/dos-campos`)).status, 200, etapa);
     const doc = (await adm.get(`/api/processos/${id}/minutas/${etapa}`)).dados.vigente.texto as string;
@@ -2015,7 +2015,7 @@ test("preços descartados persistem riscados, ficam fora dos cálculos e são re
   const { documentoPrecos } = await import("../modelos-fase-interna.js");
   const p = (await lic.get(processo)).dados;
   const relatorio = await documentoPrecos(p, { precos: { valor_total: "999999,00", analise_critica: "Nenhum preço foi descartado por inexequibilidade ou por ser excessivamente elevado." } }, { nome: "Pesquisador", cargo: "Compras" });
-  assert.match(relatorio, /## 8\. Análise crítica dos preços/); assert.match(relatorio, /Não cobre o custo/); assert.match(relatorio, /R\$\s220,00/);
+  assert.match(relatorio, /## 8\. ANÁLISE CRÍTICA DOS PREÇOS/); assert.match(relatorio, /Não cobre o custo/); assert.match(relatorio, /R\$\s220,00/);
   assert.doesNotMatch(relatorio, /Nenhum preço foi descartado|999\.999,00/);
   assert.equal((await lic.get(processo)).dados.sugestoes_campos.precos.analise_critica, undefined);
   const alterar = (itens: unknown) => lic.put(url, { anterior: s.descricao, descricao: s.descricao, itens_anteriores: s.itens, itens });
