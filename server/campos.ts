@@ -1,5 +1,6 @@
 // Campos de preenchimento das etapas: gravação, sugestões com o que o processo já tem e documento montado sem IA.
 import { q, q1 } from "./db.js";
+import { memoriaBaseDoMetodo } from "../shared/memoria-precos.js";
 import { secretariosDoProcesso } from "./portarias.js";
 import { documentoDfd } from "./modelo-dfd.js";
 import { documentoEtp, documentoPrecos, documentoTr } from "./modelos-fase-interna.js";
@@ -85,6 +86,7 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
       ...padroesEtp(p.tipo),
     },
     precos: {
+      memoria: memoriaBaseDoMetodo(v("precos", "metodo")),
       parametros: (nOrcamentos?.n ?? 0) > 0 && p.tipo !== "obra" ? ["fornecedores"] : [],
       valor_total: total != null ? moeda(total) : "",
     },

@@ -2523,3 +2523,31 @@ test("conferência completa lê a pasta sem alterar dados, identifica a etapa de
   const consulta=await new Cliente().entrar("consulta-conferencia@a.gov.br");
   const antesConsulta=await snapshot();assert.equal((await consulta.get(url)).status,200);assert.deepEqual(await snapshot(),antesConsulta);
 });
+
+test("memória de cálculo sugere o texto do método, preserva personalização e integra o relatório", async () => {
+  const { memoriaBaseDoMetodo } = await import("../../shared/memoria-precos.js");
+  const adm = await new Cliente().entrar("admin@a.gov.br");
+  const { dados: { id } } = await adm.post("/api/processos", { objeto: "Pesquisa com memória por método", tipo: "bens", via: "licitacao", ano: 2048 });
+  const rota = `/api/processos/${id}`;
+  // Libera somente no banco isolado as etapas anteriores, como nos demais testes de formulário.
+  const uid = (await q1("select id from usuarios where email='admin@a.gov.br'"))!.id;
+  for (const e of ETAPAS.slice(0, ETAPAS.findIndex((e) => e.id === "precos"))) for (const item of itensDe(e, { tipo: "bens", via: "licitacao" })) await pool.query("insert into checagens (processo_id,item,usuario_id) values ($1,$2,$3) on conflict do nothing", [id, item.id, uid]);
+  for (const metodo of ["media", "mediana", "menor", "outro"]) {
+    const base = memoriaBaseDoMetodo(metodo);
+    assert.ok(base.length > 0);
+    const dados = { metodo, memoria: "", parametros: ["pncp", "fornecedores"], data_base: "Novembro/2026", valor_total: "100,00" };
+    assert.equal((await adm.put(`${rota}/campos/precos`, { valores: dados })).status, 200);
+    let detalhe = (await adm.get(rota)).dados;
+    assert.equal(detalhe.sugestoes_campos.precos.memoria, base);
+    const personalizado = base + "\n\nFontes e datas: complemento conferido pelo secretário.";
+    assert.equal((await adm.put(`${rota}/campos/precos`, { valores: { ...dados, memoria: personalizado } })).status, 200);
+    detalhe = (await adm.get(rota)).dados;
+    assert.equal(detalhe.campos.precos.memoria, personalizado);
+    assert.equal(detalhe.sugestoes_campos.precos?.memoria, undefined, "não sobrepõe texto salvo");
+    const gerar = await adm.post(`${rota}/minutas/precos/dos-campos`, {});
+    assert.equal(gerar.status, 200, JSON.stringify(gerar.dados));
+    const minuta = (await adm.get(`${rota}/minutas/precos`)).dados.vigente.texto;
+    assert.ok(minuta.includes(personalizado));
+    if (metodo === "outro") assert.match(minuta, /\[\[INFORMAR O MÉTODO ADOTADO\]\]/);
+  }
+});

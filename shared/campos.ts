@@ -93,7 +93,7 @@ export const CAMPOS: Record<string, Campo[]> = {
     { id: "fonte_unica_obra", rotulo: "Justificativa da fonte única", tipo: "area", se: { campo: "parametros_obra", menosDe: 2 }, cond: "obra",
       ajuda: "Fonte única só é aceita com justificativa expressa da impossibilidade de diversificar." },
     { id: "metodo", rotulo: "Método de cálculo", tipo: "opcao", opcoes: [["media", "Média"], ["mediana", "Mediana"], ["menor", "Menor preço"], ["outro", "Outro (explicar na memória de cálculo)"]] },
-    { id: "memoria", rotulo: "Memória de cálculo", tipo: "area", ajuda: "Fontes consultadas, datas e horas de acesso, o cálculo adotado e a razão da escolha." },
+    { id: "memoria", rotulo: "Memória de cálculo", tipo: "area", ajuda: "O método escolhido preenche um texto base editável. Confira o cálculo e a razão da escolha e complemente com as fontes consultadas e suas datas de referência e de acesso." },
     { id: "analise_critica", rotulo: "Análise complementar dos preços (opcional)", tipo: "area", opcional: true,
       ajuda: "Classifique os preços no quadro de tratamento desta etapa. O relatório registra automaticamente os valores usados, somente de referência e descartados. Use este campo para complementar a análise (Dec. 2.533/2024, art. 11, §§ 2º e 3º)." },
     { id: "bdi", rotulo: "BDI e encargos sociais", tipo: "texto", cond: "obra", ajuda: "Percentuais adotados e onde está a composição." },

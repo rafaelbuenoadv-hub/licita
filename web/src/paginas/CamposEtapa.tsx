@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { api } from "../api";
+import { memoriaBaseDoMetodo } from "../../../shared/memoria-precos";
 import { consultarPca, type ItemConsultaPca } from "../../../shared/consulta-pca";
 import { ETAPAS, camposFaltando, camposVisiveis, feita, temValor, type Campo, type Checks, type Etapa, type Valores } from "../../../shared/etapas";
 
@@ -12,7 +13,27 @@ export function CamposEtapa({ e, p, valores, editavel, sujo, gravando, sugeridos
 }) {
   const visiveis = camposVisiveis(e, p, valores);
   const faltam = new Set(camposFaltando(e, p, valores).map((c) => c.id));
-  const set = (id: string, v: string | string[]) => mudar({ ...valores, [id]: v });
+  const [textosAnteriores, setTextosAnteriores] = useState<{ metodo: string; memoria: string }[]>([]);
+  const baseMemoria = e.id === "precos" ? memoriaBaseDoMetodo(valores.metodo) : "";
+  const aplicarMemoria = (metodo: string) => {
+    const memoria = memoriaBaseDoMetodo(metodo);
+    if (!memoria || (valores.metodo === metodo && valores.memoria === memoria)) return;
+    setTextosAnteriores((historico) => [...historico, {
+      metodo: typeof valores.metodo === "string" ? valores.metodo : "",
+      memoria: typeof valores.memoria === "string" ? valores.memoria : "",
+    }]);
+    mudar({ ...valores, metodo, memoria });
+  };
+  const restaurarMemoria = () => {
+    const anterior = textosAnteriores.at(-1);
+    if (!anterior) return;
+    mudar({ ...valores, ...anterior });
+    setTextosAnteriores((historico) => historico.slice(0, -1));
+  };
+  const set = (id: string, v: string | string[]) => {
+    if (e.id === "precos" && id === "metodo" && typeof v === "string") aplicarMemoria(v);
+    else mudar({ ...valores, [id]: v });
+  };
   return (
     <div className="sec campos-etapa">
       <div className="row"><span className="lbl">Preencha os campos da etapa</span>
@@ -21,7 +42,16 @@ export function CamposEtapa({ e, p, valores, editavel, sujo, gravando, sugeridos
       {e.id === "etp" && <p className="small muted">★ Conteúdo mínimo obrigatório (art. 18, § 2º). Os demais incisos devem constar ou ter a ausência justificada no próprio campo.</p>}
       <fieldset disabled={!editavel || gravando} className="campos-grade">
         {visiveis.map((c) => (
-          <CampoEtapa key={c.id} c={c} valor={valores[c.id]} falta={faltam.has(c.id)} sugerido={sugeridos.includes(c.id)} mudar={(v) => set(c.id, v)} />
+          <Fragment key={c.id}>
+            <CampoEtapa c={c} valor={valores[c.id]} falta={faltam.has(c.id)} sugerido={sugeridos.includes(c.id)} mudar={(v) => set(c.id, v)} />
+            {e.id === "precos" && c.id === "memoria" && editavel && <div className="stack" style={{ gridColumn: "1 / -1" }}>
+              <p className="small muted" role="status">{textosAnteriores.length ? "Texto base aplicado. Você pode ajustar as particularidades da pesquisa ou restaurar o texto e o método anteriores." : "Ao escolher o método, a memória recebe um texto base editável. Confira as fontes e as particularidades da pesquisa."}{valores.metodo === "outro" ? " Complete no texto o método específico, a fórmula e a justificativa." : ""}</p>
+              <div className="tools">
+                {baseMemoria && <button type="button" className="btn sm" disabled={gravando || gerando || valores.memoria === baseMemoria} onClick={() => aplicarMemoria(String(valores.metodo))}>Usar texto base do método</button>}
+                {textosAnteriores.length > 0 && <button type="button" className="btn sm" disabled={gravando || gerando} onClick={restaurarMemoria}>Restaurar texto e método anteriores</button>}
+              </div>
+            </div>}
+          </Fragment>
         ))}
       </fieldset>
       {editavel && <div className="tools">
