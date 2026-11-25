@@ -53,9 +53,9 @@ async function contexto(p: Proc, campos: Record<string, Valores>, autor: Autor) 
 }
 type Ctx = Awaited<ReturnType<typeof contexto>>;
 
-/** Cabeçalho no mesmo padrão da Formalização de Demanda: departamento, título, protocolo e preâmbulo. */
+/** Cabeçalho no mesmo padrão da Formalização de Demanda: título, protocolo e preâmbulo. */
 function cabecalho(titulo: string, p: Proc, _c: Ctx, preambulo: string) {
-  return ["# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS", `# ${titulo}`, `Protocolo ${p.protocolo} · Exercício ${p.ano}`, preambulo];
+  return [`# ${titulo}`, `Protocolo ${p.protocolo} · Exercício ${p.ano}`, preambulo];
 }
 /** Lista em alíneas (a, b, c…), uma por linha; a última termina em ponto. */
 const alineas = (itens: string[]) => itens.map((x, i) => {

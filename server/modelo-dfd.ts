@@ -77,7 +77,6 @@ export async function documentoDfd(p: Proc, campos: Record<string, Valores>, aut
   const decretos = ibaiti ? ", bem como dos Decretos Municipais nº 2.532/2024, nº 2.533/2024, nº 2.548/2024 e nº 2.549/2024" : ", bem como da legislação municipal aplicável";
 
   const l: string[] = [
-    "# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS",
     "# FORMALIZAÇÃO DE DEMANDA",
     `Protocolo ${p.protocolo} · Exercício ${p.ano}`,
     `Em análise do objeto a ser contratado, averiguando também a metodologia aplicada nas últimas aquisições, atendendo ainda de maneira ampla à aplicação da Constituição Federal, da Lei Federal nº 14.133/2021, da Lei Complementar nº 123/2006, alterada pela Lei Complementar nº 147/2014${decretos}, a presente formalização de demanda tem por finalidade assegurar a seleção da proposta mais vantajosa para a Administração Pública, inclusive no que se refere ao ciclo de vida do objeto, nos termos do art. 11, inciso I, da Lei nº 14.133/2021.`,

@@ -754,7 +754,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   const doc = (await admin.get(`/api/processos/${id}/minutas/dfd`)).dados.vigente;
   assert.equal(doc.origem, "campos");
   // Padrão do Departamento de Licitações e Contratos de Ibaiti.
-  assert.ok(doc.texto.startsWith("# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS\n\n# FORMALIZAÇÃO DE DEMANDA\n\n"));
+  assert.ok(doc.texto.startsWith("# FORMALIZAÇÃO DE DEMANDA\n\n"));
   assert.ok(doc.texto.includes(`Protocolo ${protocolo} · Exercício 2028`));
   assert.match(doc.texto, /Decretos Municipais nº 2\.532\/2024, nº 2\.533\/2024, nº 2\.548\/2024 e nº 2\.549\/2024, a presente formalização de demanda/);
   assert.match(doc.texto, /## INFORMAÇÕES GERAIS\n\n\*\*Objeto:\*\*\n\nCadeiras escolares, sem marca\./);
@@ -804,9 +804,9 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   assert.ok(cods.includes("substituto") && cods.includes("minuta") && !cods.includes("dotacao"), cods.join());
   // ETP, pesquisa de preços e Termo de Referência montados com os campos, no modelo completo.
   for (const [etapa, inicio, trecho] of [
-    ["etp", "# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS\n\n# ESTUDO TÉCNICO PRELIMINAR", /## 14\. POSICIONAMENTO CONCLUSIVO\n\nTexto de teste/],
-    ["precos", "# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS\n\n# RELATÓRIO DE FORMAÇÃO DE PREÇOS", /## 3\. PARÂMETROS UTILIZADOS \(art\. 23, § 1º\)\n\n- I — Painel de preços/],
-    ["tr", "# DEPARTAMENTO DE LICITAÇÕES E CONTRATOS\n\n# TERMO DE REFERÊNCIA", /## 1\. DEFINIÇÃO DO OBJETO[\s\S]*## 12\. OBRIGAÇÕES DA CONTRATADA\n\na\) Executar[\s\S]*## 19\. SANÇÕES ADMINISTRATIVAS[\s\S]*## 20\. ANÁLISE DE RISCOS[\s\S]*Aprovo o presente Termo de Referência\./],
+    ["etp", "# ESTUDO TÉCNICO PRELIMINAR", /## 14\. POSICIONAMENTO CONCLUSIVO\n\nTexto de teste/],
+    ["precos", "# RELATÓRIO DE FORMAÇÃO DE PREÇOS", /## 3\. PARÂMETROS UTILIZADOS \(art\. 23, § 1º\)\n\n- I — Painel de preços/],
+    ["tr", "# TERMO DE REFERÊNCIA", /## 1\. DEFINIÇÃO DO OBJETO[\s\S]*## 12\. OBRIGAÇÕES DA CONTRATADA\n\na\) Executar[\s\S]*## 19\. SANÇÕES ADMINISTRATIVAS[\s\S]*## 20\. ANÁLISE DE RISCOS[\s\S]*Aprovo o presente Termo de Referência\./],
   ] as const) {
     assert.equal((await adm.post(`/api/processos/${id}/minutas/${etapa}/dos-campos`)).status, 200, etapa);
     const doc = (await adm.get(`/api/processos/${id}/minutas/${etapa}`)).dados.vigente.texto as string;
