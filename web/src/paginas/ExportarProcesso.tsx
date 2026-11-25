@@ -24,12 +24,13 @@ export function ExportarProcesso({ processo, salvarPendentes }: {
   };
   return <section className="sec stack" aria-busy={!!gerando}>
     <div><h3>Gerar processo completo</h3>
-      <p className="small muted">Reúne as últimas versões salvas, solicitações, orçamentos, comprovantes, documentos de apoio e demais anexos, com capa e índice.</p></div>
+      <p className="small muted">Reúne as últimas versões salvas, orçamentos, comprovantes, documentos de apoio e demais anexos, com capa e índice.</p></div>
     {(processo.timbrados?.length ?? 0) > 0 && <label className="campo" style={{ maxWidth: 360 }}>Timbrado do processo completo
       <select value={timbrado} disabled={!!gerando} onChange={(e) => setTimbrado(e.target.value)}>
         <option value="">Sem timbrado</option>
         {processo.timbrados!.map((t) => <option key={t.codigo} value={t.codigo}>{t.nome}</option>)}
       </select></label>}
+    <p className="small muted">Ordem: Encaminhamento → DFD → ETP → Pesquisa de preços → Termo de Referência → Dotação → Fiscal do contrato. Anexos ao final.</p>
     <div className="tools">
       <button type="button" className="btn pri" disabled={!!gerando} onClick={() => gerar("pdf")}>Gerar processo completo em PDF</button>
       <button type="button" className="btn" disabled={!!gerando} onClick={() => gerar("docx")}>Gerar processo completo em Word</button>

@@ -99,7 +99,8 @@ export function secaoDaMinuta(texto: string, timbrado?: Timbrado): ISectionOptio
   const fechaTabela = () => {
     if (tab.length) { filhos.push(tabela(tab, larguraUtil, alinhamentos)); filhos.push(new Paragraph({ children: [] })); tab = []; alinhamentos = []; }
   };
-  for (const bruta of texto.split("\n")) {
+  const linhas = texto.split("\n");
+  for (const [indice, bruta] of linhas.entries()) {
     const s = bruta.trim();
     if (s.startsWith("|")) {
       const c = s.replace(/^\||\|$/g, "").split("|").map((x) => x.trim());
@@ -110,11 +111,11 @@ export function secaoDaMinuta(texto: string, timbrado?: Timbrado): ISectionOptio
     fechaTabela();
     if (!s) { assinatura = false; continue; }
     if (s.startsWith("# ")) {
-      filhos.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: runs(s.slice(2), { bold: true }) }));
+      filhos.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, spacing: { after: 200 }, children: runs(s.slice(2), { bold: true }) }));
     } else if (s.startsWith("## ")) {
-      filhos.push(new Paragraph({ spacing: { before: 240, after: 80 }, children: runs(s.slice(3), { bold: true }) }));
+      filhos.push(new Paragraph({ keepNext: true, spacing: { before: 240, after: 80 }, children: runs(s.slice(3), { bold: true }) }));
     } else if (s.startsWith("@ ")) {
-      filhos.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: assinatura ? 0 : 480 }, children: runs(s.slice(2)) }));
+      filhos.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: linhas[indice + 1]?.trim().startsWith("@ ") ?? false, spacing: { before: assinatura ? 0 : 480 }, children: runs(s.slice(2)) }));
       assinatura = true;
       continue;
     } else if (s.startsWith("Preço de referência: ")) {

@@ -17,7 +17,7 @@ export function CamposEtapa({ e, p, valores, editavel, sujo, gravando, sugeridos
     <div className="sec campos-etapa">
       <div className="row"><span className="lbl">Preencha os campos da etapa</span>
         <span className={"pill " + (faltam.size ? "" : "ok")}>{faltam.size ? `${faltam.size} ${faltam.size === 1 ? "campo obrigatório em branco" : "campos obrigatórios em branco"}` : "Campos obrigatórios preenchidos"}</span></div>
-      {sugeridos.length > 0 && editavel && <p className="note small">Alguns campos já vieram preenchidos com o que o processo registra (PAC, cadastro de secretários, solicitações, itens e etapas anteriores). Confira, ajuste e salve.</p>}
+      {sugeridos.length > 0 && editavel && <p className="note small">Alguns campos já vieram preenchidos com o que o processo registra (PAC, cadastro de secretários, instrução do processo, itens e etapas anteriores). Confira, ajuste e salve.</p>}
       {e.id === "etp" && <p className="small muted">★ Conteúdo mínimo obrigatório (art. 18, § 2º). Os demais incisos devem constar ou ter a ausência justificada no próprio campo.</p>}
       <fieldset disabled={!editavel || gravando} className="campos-grade">
         {visiveis.map((c) => (
@@ -158,7 +158,7 @@ export function ProtocoloChecklist({ p, checks, irPara }: { p: any; checks: Chec
   const fiscalCompleto = ok("fiscal");
   const linhas: [string, boolean, string][] = [
     ["Objeto consta do PAC (ou inclusão extraordinária justificada)", ok("pac"), "pac"],
-    ["Solicitação das secretarias registrada, com itens e orçamentos", ok("solicitacao"), "solicitacao"],
+    ["Instrução do processo registrada, com itens e orçamentos", ok("solicitacao"), "solicitacao"],
     ["DFD assinado pelo responsável da Secretaria", ok("dfd"), "dfd"],
     ["ETP com os elementos mínimos obrigatórios e memória de cálculo de quantidades", ok("etp"), "etp"],
     ["Pesquisa de preços com parâmetros do art. 23 (ao menos 2, ou justificativa de fonte única) e memória de cálculo", ok("precos"), "precos"],

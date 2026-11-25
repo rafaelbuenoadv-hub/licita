@@ -78,9 +78,9 @@ Identificação do processo; Secretaria demandante; objeto
 Local e data; assinatura do responsável pela Secretaria`,
   },
   {
-    id: "solicitacao", nome: "Solicitação", doc: null,
+    id: "solicitacao", nome: "Instrução do processo", doc: null,
     fase: "interna", campos: [],
-    oque: "Registre o pedido de cada Secretaria: objeto, justificativa, itens com quantidade e valor, e os orçamentos. Esses dados preenchem os campos do DFD, do ETP e da pesquisa de preços.",
+    oque: "Cadastre os dados de cada Secretaria: objeto, justificativa, informações de apoio, itens, quantidades, orçamentos e anexos. A etapa não gera documento próprio: as informações alimentam o DFD, o ETP e a pesquisa de preços.",
     base: [{ rotulo: "Art. 18, I", url: U.a18 }, { rotulo: "Art. 23" }],
     papeis: ["requisitante", "contratacao"],
     // Etapa sem conferência obrigatória: registrar a solicitação é recomendado, mas não trava o andamento.
@@ -104,7 +104,7 @@ Local e data; assinatura do responsável pela Secretaria`,
       it("d8", "Estudos feitos antes do pedido formal foram ratificados pela área requisitante, se houver"),
     ],
     atencao: [
-      "Número do processo igual em todas as peças (solicitação, sistema de compras, capa).",
+      "Número do processo igual em todas as peças (instrução do processo, sistema de compras, capa).",
       "Afirmações como \"o Município já fez contratações similares\" sem documento nos autos são apontadas pelo jurídico.",
       "Valores citados (taxas, tarifas) conferidos com o ato normativo que os fixa.",
     ],
@@ -311,7 +311,7 @@ Local e data; assinatura do responsável pela Secretaria`,
     papeis: ["requisitante", "contratacao"],
     itens: [
       campos("protocolo"),
-      it("f2", "Documentos das etapas anteriores reunidos em ordem nos autos (verificação no PAC, solicitação, DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação, indicação do fiscal)"),
+      it("f2", "Documentos das etapas anteriores reunidos em ordem nos autos (verificação no PAC, instrução do processo, DFD, ETP, pesquisa de preços, TR/PB, indicação de dotação, indicação do fiscal)"),
     ],
     atencao: [
       "Processo protocolado incompleto, faltando algum documento das etapas anteriores, volta em diligência.",
@@ -319,7 +319,7 @@ Local e data; assinatura do responsável pela Secretaria`,
     ],
     modelo: `ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES E CONTRATOS
 Identificação do processo; Secretaria demandante; objeto
-1. Documentos da fase interna encaminhados (verificação no PAC, solicitação das secretarias, DFD, ETP, pesquisa de preços, TR/PB com análise de riscos, indicação de dotação, indicação do fiscal)
+1. Documentos da fase interna encaminhados (verificação no PAC, instrução do processo, DFD, ETP, pesquisa de preços, TR/PB com análise de riscos, indicação de dotação, indicação do fiscal)
 2. Observações ao Departamento
 3. Encaminhamento do processo completo para análise e providências do Departamento
 Local e data; assinatura do responsável pela Secretaria`,

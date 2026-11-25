@@ -59,12 +59,12 @@ export function ItensOrcamentos(props: Props) {
   }
   const cotacoesTabela = [...colunas.values()];
   const excluirColuna = (col: { chave: string; nome: string; arquivo?: OrcamentoLido }) => {
-    if (!confirm(`Excluir a proposta “${col.nome}” e os preços dela desta solicitação?`)) return;
+    if (!confirm(`Excluir a proposta “${col.nome}” e os preços dela desta instrução?`)) return;
     if (col.arquivo) props.excluirProposta(col.arquivo.id);
     else {
       setLinhas((lista) => lista.map((l) => ({ ...l, cotacoes: l.cotacoes.filter((c) => chaveCotacao(c) !== col.chave) })));
       setFontesManuais((fontes) => fontes.filter((nome) => `n${normalizarCotacao(nome)}` !== col.chave));
-      props.setAviso("Proposta excluída da tabela. Salve a solicitação para gravar.");
+      props.setAviso("Proposta excluída da tabela. Salve os dados da instrução para gravar.");
     }
   };
   const adicionarFonte = () => {
@@ -75,7 +75,7 @@ export function ItensOrcamentos(props: Props) {
     }
     setFontesManuais((atuais) => [...atuais, nome]);
     setNovaFonte("");
-    props.setAviso("Coluna criada. Digite os preços na tabela e salve a solicitação.");
+    props.setAviso("Coluna criada. Digite os preços na tabela e salve os dados da instrução.");
   };
   const alterarPreco = (k: number, chave: string, nome: string, fonte: FonteCotacao, arquivo: OrcamentoLido | undefined, valor: string) => {
     const linha = linhas[k];
@@ -174,13 +174,13 @@ export function ItensOrcamentos(props: Props) {
             </tr>;
           })}</tbody>
         </table></div>}
-      {cotacoesTabela.length > 0 && <p className="small muted">Digite ou corrija os preços diretamente nas células. Média, mediana ou menor valor e o total são recalculados na hora. Depois, salve a solicitação.</p>}
+      {cotacoesTabela.length > 0 && <p className="small muted">Digite ou corrija os preços diretamente nas células. Média, mediana ou menor valor e o total são recalculados na hora. Depois, salve os dados da instrução.</p>}
       <p className="small muted">Defina os valores usados no cálculo, somente de referência e descartados na etapa Pesquisa de preços.</p>
       <div className="valor-preliminar"><span>Valor preliminar</span><b>{lidas.itens.length && total ? brl(Math.round(total * 100) / 100) + (algumSemValor ? " (parcial)" : "") : "A pesquisar"}</b></div>
       {lidas.erro && <p className="small aviso-anexo" role="status">{lidas.erro}</p>}
       <div className="tools fim">
         <button type="submit" name="acao" value="mesclar" className="btn pri" disabled={props.ocupado || !!props.anexando}>
-          {props.ocupado ? "Salvando…" : "Salvar orçamentos e atualizar solicitação"}
+          {props.ocupado ? "Salvando…" : "Salvar dados e orçamentos"}
         </button>
       </div>
 

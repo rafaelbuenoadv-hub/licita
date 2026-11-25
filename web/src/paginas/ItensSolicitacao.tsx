@@ -450,7 +450,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, or
     </div>}
 
     {orcamentosOcultos.length > 0 && <details className="orcamento-existente">
-      <summary>Propostas excluídas desta solicitação ({orcamentosOcultos.length})</summary>
+      <summary>Propostas excluídas desta instrução ({orcamentosOcultos.length})</summary>
       <ul>{orcamentos.filter((o) => orcamentosOcultos.includes(o.id)).map((o) => <li key={o.id}>{o.nome}{" "}
         <button type="button" className="lnk" disabled={ocupado || !!anexando} onClick={() => {
           setOrcamentosOcultos((ids) => ids.filter((id) => id !== o.id));

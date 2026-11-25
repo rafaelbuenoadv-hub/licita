@@ -710,7 +710,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   await admin.post(`/api/processos/${id}/checagens`, { item: "pc1", marcado: true });
   r = await admin.post(pac);
   assert.equal(r.dados.concluida, true);
-  assert.deepEqual(r.dados.proxima, { id: "solicitacao", nome: "Solicitação" });
+  assert.deepEqual(r.dados.proxima, { id: "solicitacao", nome: "Instrução do processo" });
   // Etapa 2: a solicitação não é obrigatória para avançar.
   const sol = await admin.post(`/api/processos/${id}/etapas/solicitacao/concluir`);
   assert.deepEqual([sol.dados.concluida, sol.dados.pendencias], [true, []]);
@@ -822,7 +822,7 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   assert.equal((await adm.post(`/api/processos/${id}/minutas/protocolo/dos-campos`)).status, 200);
   const texto = (await adm.get(`/api/processos/${id}/minutas/protocolo`)).dados.vigente.texto as string;
   assert.match(texto, /^# ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES E CONTRATOS/);
-  assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo.*solicitação das secretarias, DFD/);
+  assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo.*instrução do processo, DFD/);
   assert.equal((await adm.put(`/api/processos/${id}/campos/dot`, { valores: { ...det.campos.dot, dotacao: "02.001 3.3.90.39" } })).status, 200);
   for (const i of itensDe(ETAPAS[fiscal + 1], pb).filter((x) => !x.auto)) await adm.post(`/api/processos/${id}/checagens`, { item: i.id, marcado: true });
   r = await adm.post(`/api/processos/${id}/etapas/protocolo/concluir`);
@@ -2039,7 +2039,7 @@ test("processo completo reúne últimas versões e todos os anexos em PDF e Word
   dados.append("apoios", new Blob([original]), "mesmo-original.pdf");
   assert.equal((await lic.post(`${rota}/solicitacoes`, dados)).status, 201);
   assert.equal((await lic.put(`${rota}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "PAC_DENTRO_DA_SOLICITACAO" } })).status, 200);
-  for (const [etapa, versao, texto] of [["pac", 1, "# Registro PAC\nPAC_MINUTA_SALVA_DENTRO_DA_SOLICITACAO"], ["dfd", 1, "# DFD\nVERSAO_ANTIGA_NAO_INCLUIR"], ["dfd", 2, "# DFD\nDFD_ATUAL_EDITAVEL"], ["etp", 1, "# ETP\nETP_ATUAL_EDITAVEL"]] as const) await pool.query("insert into minutas (processo_id,etapa,versao,texto,origem,usuario_id) values ($1,$2,$3,$4,'manual',$5)", [id, etapa, versao, texto, usuarioId]);
+  for (const [etapa, versao, texto] of [["protocolo", 1, "# ENCAMINHAMENTO\nENCAMINHAMENTO_PRIMEIRO"], ["tr", 1, "# TERMO DE REFERÊNCIA\nTR_ATUAL_EDITAVEL"], ["dot", 1, "# DOTAÇÃO\nDOTACAO_ATUAL"], ["fiscal", 1, "# FISCAL\nFISCAL_ATUAL"], ["pac", 1, "# Registro PAC\nPAC_MINUTA_SALVA_DENTRO_DA_SOLICITACAO"], ["dfd", 1, "# DFD\nVERSAO_ANTIGA_NAO_INCLUIR"], ["dfd", 2, "# DFD\nDFD_ATUAL_EDITAVEL"], ["etp", 1, "# ETP\nETP_ATUAL_EDITAVEL"]] as const) await pool.query("insert into minutas (processo_id,etapa,versao,texto,origem,usuario_id) values ($1,$2,$3,$4,'manual',$5)", [id, etapa, versao, texto, usuarioId]);
   await pool.query("insert into campos_etapa (processo_id,etapa,valores) values ($1,'precos',$2::jsonb)", [id, JSON.stringify({ metodo: "media", memoria: "MEMORIA_DE_CALCULO_SALVA" })]);
   const outroProcesso = await lic.post("/api/processos", { objeto: "Dados de outro processo", tipo: "bens", via: "licitacao", ano: 2040 });
   await pool.query("insert into anexos (processo_id,nome,texto,usuario_id) values ($1,'isolado.txt','NAO_VAZAR_OUTRO_PROCESSO',$2)", [outroProcesso.dados.id, usuarioId]);
@@ -2058,10 +2058,12 @@ test("processo completo reúne últimas versões e todos os anexos em PDF e Word
   const antes = await q1("select (select count(*) from minutas where processo_id=$1)::int as minutas,(select count(*) from checagens where processo_id=$1)::int as checks,situacao from processos where id=$1", [id]);
   const pdf = await lic.get(`${rota}/completo.pdf`); assert.equal(pdf.status, 200, JSON.stringify(pdf.dados));
   const textoPdf = (await extrairTexto("processo.pdf", pdf.dados)).replace(/\s+/g, " ");
-  for (const marca of ["CORPO_DA_SOLICITACAO", "PAC_MINUTA_SALVA_DENTRO_DA_SOLICITACAO", "TOPICO_ADICIONAL_PRESENTE", "PAC_DENTRO_DA_SOLICITACAO", "DFD_ATUAL_EDITAVEL", "ETP_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "APOIO_WORD_INTEGRAL", "ORIGINAL_PRIMEIRA_PAGINA", "ORIGINAL_SEGUNDA_PAGINA", "ANEXO_ANTIGO_EM_TEXTO", "ANEXO_NOVO_ORIGINAL_PRESERVADO", "ORCAMENTO_SEM_VINCULO_TAMBEM_INCLUIDO", "PARECER_DA_REVISAO"]) assert.ok(textoPdf.includes(marca), marca);
+  for (const marca of ["ENCAMINHAMENTO_PRIMEIRO", "TR_ATUAL_EDITAVEL", "DOTACAO_ATUAL", "FISCAL_ATUAL", "PAC_MINUTA_SALVA_DENTRO_DA_SOLICITACAO", "TOPICO_ADICIONAL_PRESENTE", "PAC_DENTRO_DA_SOLICITACAO", "DFD_ATUAL_EDITAVEL", "ETP_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "APOIO_WORD_INTEGRAL", "ORIGINAL_PRIMEIRA_PAGINA", "ORIGINAL_SEGUNDA_PAGINA", "ANEXO_ANTIGO_EM_TEXTO", "ANEXO_NOVO_ORIGINAL_PRESERVADO", "ORCAMENTO_SEM_VINCULO_TAMBEM_INCLUIDO", "PARECER_DA_REVISAO"]) assert.ok(textoPdf.includes(marca), marca);
   assert.doesNotMatch(textoPdf, /VERSAO_ANTIGA_NAO_INCLUIR|NAO_VAZAR_OUTRO_PROCESSO/);
   assert.equal(textoPdf.match(/ORIGINAL_PRIMEIRA_PAGINA/g)?.length, 1);
-  assert.ok(textoPdf.indexOf("CORPO_DA_SOLICITACAO") < textoPdf.indexOf("DFD_ATUAL_EDITAVEL"));
+  assert.doesNotMatch(textoPdf, /CORPO_DA_SOLICITACAO/);
+  const ordem = ["ENCAMINHAMENTO_PRIMEIRO", "DFD_ATUAL_EDITAVEL", "ETP_ATUAL_EDITAVEL", "MEMORIA_DE_CALCULO_SALVA", "TR_ATUAL_EDITAVEL", "DOTACAO_ATUAL", "FISCAL_ATUAL", "ORIGINAL_PRIMEIRA_PAGINA"];
+  for (let i = 1; i < ordem.length; i++) assert.ok(textoPdf.indexOf(ordem[i-1]) < textoPdf.indexOf(ordem[i]), `ordem: ${ordem[i-1]} antes de ${ordem[i]}`);
   assert.ok(textoPdf.indexOf("DFD_ATUAL_EDITAVEL") < textoPdf.indexOf("ETP_ATUAL_EDITAVEL"));
   const unido = await PDFDocument.load(pdf.dados);
   const names = unido.catalog.lookup(PDFName.of("Names"), PDFDict).lookup(PDFName.of("EmbeddedFiles"), PDFDict).lookup(PDFName.of("Names"), PDFArray);
@@ -2075,6 +2077,7 @@ test("processo completo reúne últimas versões e todos os anexos em PDF e Word
   const textoWord = await extrairTexto("processo.docx", docx.dados);
   assert.match(textoWord, /DFD_ATUAL_EDITAVEL/); assert.match(textoWord, /ETP_ATUAL_EDITAVEL/); assert.match(textoWord, /ANEXO_ANTIGO_EM_TEXTO/);
   assert.doesNotMatch(textoWord, /VERSAO_ANTIGA_NAO_INCLUIR|NAO_VAZAR_OUTRO_PROCESSO/);
+  for (let i = 1; i < ordem.length - 1; i++) assert.ok(textoWord.indexOf(ordem[i-1]) < textoWord.indexOf(ordem[i]), `ordem Word: ${ordem[i-1]} antes de ${ordem[i]}`);
   const { unzipSync } = await import("fflate"); const zip = unzipSync(docx.dados);
   assert.equal(Object.keys(zip).filter((n) => n.startsWith("word/media/") && n.endsWith(".jpg")).length, 5, "todas as cinco páginas dos anexos devem aparecer no Word");
   assert.equal((await outro.get(`${rota}/completo.pdf`)).status, 404);
@@ -2205,5 +2208,72 @@ test("pesquisa de preços salva cálculo, referência e descarte com concorrênc
   if (process.env.LICITA_QA_DIR) {
     const { writeFileSync } = await import("node:fs");
     writeFileSync(`${process.env.LICITA_QA_DIR}/pesquisa-precos-qa.json`, JSON.stringify((await lic.get(rota)).dados));
+  }
+});
+
+test("instrução cadastra dados sem montar documento e alimenta DFD e ETP sem apagar ajustes manuais", async () => {
+  const lic = await new Cliente().entrar("lic@a.gov.br");
+  const { dados: { id } } = await lic.post("/api/processos", { objeto: "Aquisição de mesas escolares", tipo: "bens", via: "licitacao", ano: 2043, requisitante: "Educação" });
+  const rota = `/api/processos/${id}`, caminho = `${rota}/solicitacoes`;
+  assert.equal((await lic.put(`${rota}/campos/pac`, { valores: { consta: "nao", justificativa_inclusao: "Ampliação da unidade escolar." } })).status, 200);
+  const base = { chave_envio: randomUUID(), cadastro: true, secretaria: "Educação", objeto_solicitacao: "Mesas para a Escola Central", justificativa: "Atender à nova sala de aula.", informacoes: "Entrega na Escola Central em horário de expediente.", topicos_adicionais: [{ titulo: "Condições especiais", conteudo: "Montagem assistida no local." }], itens: [{ descricao: "Mesa escolar", unidade: "UN", quantidade: 2, valor_unitario: 100 }] };
+  const criada = await lic.post(caminho, base); assert.equal(criada.status, 201, JSON.stringify(criada.dados));
+  const ler = async () => (await lic.get(rota)).dados;
+  let p = await ler(), s = p.solicitacoes[0];
+  assert.equal(p.trilha.etapas[1].nome, "Instrução do processo");
+  assert.equal(s.descricao, ""); assert.equal(s.informacoes, base.informacoes); assert.equal(p.minutas.length, 0);
+  assert.equal((await lic.get(`${caminho}/${s.id}/pdf`)).status, 404, "o cadastro novo não cria uma solicitação exportável");
+  assert.equal(p.sugestoes_campos.dfd.objeto, base.objeto_solicitacao);
+  assert.equal(p.sugestoes_campos.dfd.justificativa, base.justificativa);
+  assert.equal(p.sugestoes_campos.etp.i, base.justificativa);
+  const uid = (await q1("select id from usuarios where email='lic@a.gov.br'"))!.id;
+  const { resumoDaInstrucao } = await import("../../shared/instrucao.js");
+  const anterior = resumoDaInstrucao(p.solicitacoes);
+  await pool.query("insert into campos_etapa (processo_id,etapa,valores,usuario_id) values ($1,'dfd',$2::jsonb,$3)", [id, JSON.stringify({ objeto: base.objeto_solicitacao, justificativa: base.justificativa, quantidade: anterior.quantidades, solucoes: "Texto técnico próprio preservado." }), uid]);
+  await pool.query("insert into campos_etapa (processo_id,etapa,valores,usuario_id) values ($1,'etp',$2::jsonb,$3)", [id, JSON.stringify({ i: base.justificativa, iv: anterior.quantidades, vi: anterior.valorTexto, iii: "Requisito técnico escrito manualmente." }), uid]);
+  const editar = (registro: any, extra: any = {}) => lic.put(`${caminho}/${registro.id}`, { cadastro: true, anterior: registro.descricao, descricao: registro.descricao,
+    objeto_solicitacao: "Mesas e conjuntos para a Escola Central", justificativa: "Atender às três novas salas de aula.", informacoes: "Entrega e instalação na Escola Central.",
+    dados_anteriores: { objeto: registro.objeto, justificativa: registro.justificativa, informacoes: registro.informacoes },
+    itens_anteriores: registro.itens, itens: registro.itens.map((i: any) => ({ ...i, quantidade: 3 })), topicos_adicionais: registro.topicos_adicionais, ...extra });
+  assert.equal((await editar(s)).status, 200); const desatualizada = s;
+  p = await ler(); s = p.solicitacoes[0];
+  assert.equal(s.descricao, ""); assert.equal(p.minutas.length, 0);
+  assert.equal(p.campos.dfd.objeto, "Mesas e conjuntos para a Escola Central");
+  assert.equal(p.campos.dfd.justificativa, "Atender às três novas salas de aula.");
+  assert.equal(p.campos.etp.i, "Atender às três novas salas de aula.");
+  assert.match(p.campos.etp.iv, /3 UN/);
+  assert.equal(p.campos.etp.iii, "Requisito técnico escrito manualmente.");
+  assert.equal(p.campos.dfd.solucoes, "Texto técnico próprio preservado.");
+  assert.equal((await editar(desatualizada)).status, 409);
+  await pool.query("update campos_etapa set valores=jsonb_set(valores,'{justificativa}','\"Justificativa própria revisada no DFD.\"') where processo_id=$1 and etapa='dfd'", [id]);
+  assert.equal((await editar(s, { justificativa: "Base atualizada para a contratação." })).status, 200);
+  p = await ler(); assert.equal(p.campos.dfd.justificativa, "Justificativa própria revisada no DFD.");
+  assert.equal(p.campos.etp.i, "Base atualizada para a contratação.");
+  const { documentoDfd } = await import("../modelo-dfd.js");
+  const { documentoEtp } = await import("../modelos-fase-interna.js");
+  const autor = { nome: "Responsável", cargo: "Planejamento" };
+  const dfd = await documentoDfd(p, p.campos, autor), etp = await documentoEtp(p, p.campos, autor);
+  for (const texto of [dfd, etp]) {
+    assert.match(texto, /Mesas e conjuntos para a Escola Central/);
+    assert.match(texto, /Entrega e instalação na Escola Central/);
+    assert.match(texto, /Montagem assistida no local/);
+    assert.match(texto, /Mesa escolar/); assert.match(texto, /300,00/);
+  }
+  assert.match(dfd, /Ampliação da unidade escolar/);
+  assert.match(dfd, /Justificativa própria revisada no DFD/);
+  assert.match(etp, /Requisito técnico escrito manualmente/);
+  // Um texto de solicitação antigo não é refeito nem apagado ao editar a nova área de dados.
+  const legado = await lic.post(caminho, { chave_envio: randomUUID(), secretaria: "Administração", descricao: "REGISTRO_ANTIGO_PRESERVADO", objeto_solicitacao: "Material de apoio", itens: [] });
+  const antigo = (await ler()).solicitacoes.find((r: any) => r.id === legado.dados.id);
+  assert.equal((await editar(antigo, { itens: [], itens_anteriores: [] })).status, 200);
+  assert.equal((await ler()).solicitacoes.find((r: any) => r.id === antigo.id).descricao, antigo.descricao);
+  if (process.env.LICITA_QA_DIR) {
+    const { writeFileSync } = await import("node:fs");
+    const { minutaParaDocx } = await import("../docx.js");
+    const { minutaParaPdf } = await import("../pdf.js");
+    for (const [nome, texto] of [["dfd-instrucao", dfd], ["etp-instrucao", etp]]) {
+      writeFileSync(`${process.env.LICITA_QA_DIR}/${nome}.docx`, await minutaParaDocx(texto, nome));
+      writeFileSync(`${process.env.LICITA_QA_DIR}/${nome}.pdf`, await minutaParaPdf(texto, nome));
+    }
   }
 });

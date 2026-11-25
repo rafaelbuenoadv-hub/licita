@@ -1,5 +1,6 @@
 // Documentos completos da fase interna, montados sem IA com os campos das etapas, os itens da Solicitação,
 // o PAC e o cadastro de secretários: ETP, relatório de pesquisa de preços e Termo de Referência / Projeto Básico.
+import { resumoDaInstrucao, complementosDaInstrucao, type DadosInstrucao } from "../shared/instrucao.js";
 import { q, q1 } from "./db.js";
 import { secretariosDoProcesso } from "./portarias.js";
 import { ehMunicipioIbaiti } from "./municipio-ibaiti.js";
@@ -29,7 +30,7 @@ async function contexto(p: Proc, campos: Record<string, Valores>, autor: Autor) 
   const [orgao, cad, solicitacoes] = await Promise.all([
     q1<{ nome: string; cnpj: string | null; municipio: string | null; uf: string | null }>("select nome, cnpj, municipio, uf from orgaos where id=$1", [p.orgao_id]),
     secretariosDoProcesso(p),
-    q<{ secretaria: string; itens: ItemSolicitacao[] }>("select secretaria, itens from solicitacoes_processo where processo_id=$1 order by id", [p.id]),
+    q<DadosInstrucao>("select secretaria, referencia, nome_arquivo, objeto, justificativa, informacoes, itens, topicos_adicionais from solicitacoes_processo where processo_id=$1 order by id", [p.id]),
   ]);
   const itens = solicitacoes.flatMap((s) => s.itens ?? []).filter((i) => i.descricao?.trim());
   const areas = [...new Set([p.requisitante, ...p.areas_adicionais, ...solicitacoes.map((s) => s.secretaria)].map((a) => a.trim()).filter(Boolean))];
@@ -44,7 +45,7 @@ async function contexto(p: Proc, campos: Record<string, Valores>, autor: Autor) 
   const hoje = new Date();
   const local = `${orgao?.municipio ?? ""}${orgao?.uf ? `/${orgao.uf}` : ""}`;
   return {
-    orgao, ibaiti: !!orgao && ehMunicipioIbaiti(orgao), itens, areas, requisitante, autor,
+    instrucao: resumoDaInstrucao(solicitacoes), complementos: complementosDaInstrucao(solicitacoes), orgao, ibaiti: !!orgao && ehMunicipioIbaiti(orgao), itens, areas, requisitante, autor,
     total: itens.length ? totalDosItens(itens) : p.valor_estimado,
     data: `${local}${local ? ", " : ""}${hoje.getDate()} de ${MESES[hoje.getMonth()]} de ${hoje.getFullYear()}.`,
   };
@@ -80,7 +81,7 @@ export async function documentoEtp(p: Proc, campos: Record<string, Valores>, aut
     `Lei nº 14.133/2021, art. 18, §§ 1º a 3º${c.ibaiti ? "; Decreto Municipal nº 2.533/2024, arts. 7º e 8º" : ""}`);
   l.push("## 1. Informações básicas", [
     "| Informação | Dados |", "|---|---|",
-    `| Objeto | ${celula(campo(campos, "dfd", "objeto") || p.objeto)} |`,
+    `| Objeto | ${celula(campo(campos, "dfd", "objeto") || c.instrucao.objeto || p.objeto)} |`,
     `| Natureza do objeto | ${TIPOS[p.tipo]} |`,
     `| Forma de contratação prevista | ${VIAS[p.via]} |`,
     `| Área requisitante | ${celula(c.areas.join("; "))} |`,
@@ -90,12 +91,15 @@ export async function documentoEtp(p: Proc, campos: Record<string, Valores>, aut
   INCISOS_ETP.forEach(([id, titulo, inciso], n) => {
     l.push(`## ${n + 2}. ${titulo} (art. 18, § 1º, ${inciso})`);
     let texto = etp(id);
+    if (id === "i" && !texto) texto = c.instrucao.justificativa;
+    if (id === "iv" && (!texto || texto === c.instrucao.quantidades) && c.itens.length) texto = "Os quantitativos estão discriminados no quadro a seguir.";
     if (id === "ii" && !texto) texto = planejamentoDoProcesso(campos);
     l.push(texto || falta(titulo.toLowerCase()));
     if (id === "iv" && c.itens.length) l.push(["| Item | Descrição | Un. | Qtd. |", "|:---:|---|:---:|---:|",
       ...c.itens.map((i, k) => `| ${k + 1} | ${celula(i.descricao)} | ${celula(i.unidade)} | ${i.quantidade == null ? "—" : i.quantidade.toLocaleString("pt-BR")} |`)].join("\n"));
     if (id === "vi" && c.total != null) l.push(`Valor total estimado: **${valorComExtenso(c.total)}**, conforme a pesquisa de preços que integra o processo (art. 23).`);
   });
+  if (c.complementos) l.push(c.complementos);
   l.push("## 15. Responsáveis pela elaboração",
     "O estudo foi elaborado pela área requisitante, com o apoio técnico necessário. A fiscalização do futuro contrato caberá a servidor distinto dos responsáveis pela elaboração deste estudo (art. 7º, § 1º).",
     c.data, assinaturaRequisitante(c));
@@ -109,7 +113,7 @@ export async function documentoPrecos(p: Proc, campos: Record<string, Valores>, 
   const pr = (id: string) => campo(campos, "precos", id);
   const l = cabecalho("RELATÓRIO DE PESQUISA DE PREÇOS E MEMÓRIA DE CÁLCULO", p, c,
     `Lei nº 14.133/2021, art. 23, ${obra ? "§ 2º" : "§ 1º"}${c.ibaiti ? "; Decreto Municipal nº 2.533/2024, art. 11" : ""}`);
-  l.push("## 1. Objeto", campo(campos, "dfd", "objeto") || p.objeto);
+  l.push("## 1. Objeto", campo(campos, "dfd", "objeto") || c.instrucao.objeto || p.objeto);
   l.push("## 2. Finalidade",
     "Este relatório fixa o valor estimado da contratação, compatível com os valores praticados pelo mercado, considerados os preços constantes de bancos de dados públicos e as quantidades a contratar (Lei nº 14.133/2021, art. 23, caput).");
   const parametros = pr(obra ? "parametros_obra" : "parametros");

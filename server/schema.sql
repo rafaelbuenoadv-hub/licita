@@ -290,6 +290,7 @@ create table if not exists solicitacoes_processo (
 create index if not exists solicitacoes_processo_processo on solicitacoes_processo(processo_id, id);
 -- Dados estruturados da solicitação: objeto genérico, justificativa e itens com quantidade e valor.
 alter table solicitacoes_processo add column if not exists objeto text not null default '';
+alter table solicitacoes_processo add column if not exists informacoes text not null default '';
 alter table solicitacoes_processo add column if not exists justificativa text not null default '';
 alter table solicitacoes_processo add column if not exists itens jsonb not null default '[]';
 -- Propostas retiradas desta solicitação continuam disponíveis no processo e podem ser restauradas.

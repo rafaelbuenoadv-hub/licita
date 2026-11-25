@@ -1,3 +1,4 @@
+import { registrosDaInstrucao, sincronizarDadosDaInstrucao } from "../instrucao.js";
 import { montarProcessoCompleto } from "../processo-completo.js";
 import { anexosDaRequisicao, apoiosComTextoLocal, hashDoAnexo, incorporarApoios, nomeAnexoEnviado, parametrosApoios, receberAnexosSolicitacao, referenciasApoios, salvarApoios } from "../anexos-solicitacao.js";
 import { fornecedorNoTexto, limparNomeFornecedor, nomeDoArquivoSemExtensao, nomeFornecedorOrcamento, type OrcamentoLido } from "../../shared/orcamentos.js";
@@ -299,7 +300,7 @@ export function rotasProcessos() {
       `select o.id, coalesce(o.fornecedor_manual, o.fornecedor) as fornecedor, o.fornecedor_manual, o.valor, o.nome, octet_length(o.arquivo) as bytes, o.texto <> '' as lido, o.criado_em, o.dados, o.lido_em, u.nome as usuario
          from orcamentos o left join usuarios u on u.id = o.usuario_id where o.processo_id = $1 order by o.id`, [p.id]);
     const solicitacoes = await q(
-      `select s.id, s.secretaria, s.referencia, s.descricao, s.nome_arquivo, s.objeto, s.justificativa, s.itens, s.orcamentos_ocultos, s.topicos_adicionais,
+      `select s.id, s.secretaria, s.referencia, s.descricao, s.nome_arquivo, s.objeto, s.justificativa, s.informacoes, s.itens, s.orcamentos_ocultos, s.topicos_adicionais,
         coalesce((select jsonb_agg(jsonb_build_object('id',a.id,'nome',a.nome) order by a.id) from solicitacao_anexos a where a.solicitacao_id=s.id), '[]') as apoios
         from solicitacoes_processo s where s.processo_id=$1 order by s.id`, [p.id],
     );
@@ -382,6 +383,8 @@ export function rotasProcessos() {
     const { principal, apoios } = anexosDaRequisicao(req);
     const d = z.object({
       chave_envio: z.uuid(),
+      cadastro: z.preprocess((v) => v === true || v === "true", z.boolean()).default(false),
+      informacoes: textoDoFormulario.pipe(z.string().trim().max(8000)).default(""),
       topicos_adicionais: topicosOpcionais,
       orcamentos_ocultos: propostasOcultasOpcionais,
       ...referenciasApoios,
@@ -396,7 +399,7 @@ export function rotasProcessos() {
       }, itensSolicitacao),
     }).parse(req.body);
     const pendentes = parametrosApoios(d, p.id, req.usuario!.id);
-    if (!d.descricao && !principal?.size && !apoios.length && !d.apoios_ids.length) throw new ErroHttp(400, "Descreva a solicitação ou anexe o documento.");
+    if (!d.cadastro && !d.descricao && !principal?.size && !apoios.length && !d.apoios_ids.length) throw new ErroHttp(400, "Descreva a solicitação ou anexe o documento.");
     if (principal && !principal.size) throw new ErroHttp(400, "O documento anexado está vazio.");
     const nome = principal ? nomeEnviado(principal) : null;
     if (nome && !/\.(pdf|docx|txt|md|csv)$/i.test(nome)) {
@@ -408,7 +411,7 @@ export function rotasProcessos() {
       : "";
     const documentos = await apoiosComTextoLocal(apoios);
     const itens = calcularItens(d.itens);
-    const descricao = await preencherSolicitacao(await contextoSolicitacao(p), { ...d, itens });
+    const descricao = d.cadastro ? d.descricao : await preencherSolicitacao(await contextoSolicitacao(p), { ...d, itens });
     if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     const resultado = await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and orgao_id=$2 and excluido_em is null for update", [p.id, p.orgao_id]);
@@ -420,20 +423,22 @@ export function rotasProcessos() {
       if (processo.situacao !== "preparacao") {
         throw new ErroHttp(409, "A solicitação só pode ser adicionada enquanto o processo estiver em preparação.");
       }
+      const anteriores = d.cadastro ? await registrosDaInstrucao(c, p.id) : [];
       await conferirOrcamentos(c, p.id, itens);
       await conferirPropostasOcultas(c, p.id, d.orcamentos_ocultos ?? [], itens);
       const { rows: [nova] } = await c.query(
-        `insert into solicitacoes_processo (processo_id, chave_envio, secretaria, referencia, descricao, nome_arquivo, arquivo, texto_arquivo, usuario_id, objeto, justificativa, itens, orcamentos_ocultos, topicos_adicionais)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
-        [p.id, d.chave_envio, d.secretaria, d.referencia, descricao, nome, arquivo, texto, req.usuario!.id, d.objeto_solicitacao, d.justificativa, JSON.stringify(itens), JSON.stringify(d.orcamentos_ocultos ?? []), JSON.stringify(d.topicos_adicionais ?? [])],
+        `insert into solicitacoes_processo (processo_id, chave_envio, secretaria, referencia, descricao, nome_arquivo, arquivo, texto_arquivo, usuario_id, objeto, justificativa, itens, orcamentos_ocultos, topicos_adicionais, informacoes)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id`,
+        [p.id, d.chave_envio, d.secretaria, d.referencia, descricao, nome, arquivo, texto, req.usuario!.id, d.objeto_solicitacao, d.justificativa, JSON.stringify(itens), JSON.stringify(d.orcamentos_ocultos ?? []), JSON.stringify(d.topicos_adicionais ?? []), d.informacoes],
       );
+      if (d.cadastro) await sincronizarDadosDaInstrucao(c, p.id, p.objeto, anteriores, req.usuario!.id);
       await salvarApoios(c, nova.id, documentos);
       await incorporarApoios(c, nova.id, pendentes);
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.incluida", detalhe: { id: nova.id, secretaria: d.secretaria } }, c);
       return { id: nova.id, nova: true };
     });
-    if (resultado.nova) await sincronizarCampos(p, req.usuario!.id, ETAPAS.filter((x) => x.id === "solicitacao"));
+    if (resultado.nova) await sincronizarCampos(p, req.usuario!.id, ETAPAS.filter((x) => x.id === "solicitacao" || (d.cadastro && ["dfd", "etp"].includes(x.id))));
     res.status(resultado.nova ? 201 : 200).json({ id: resultado.id });
   });
 
@@ -443,6 +448,11 @@ export function rotasProcessos() {
     const { apoios } = anexosDaRequisicao(req);
     const d = z.object({
       ...referenciasApoios,
+      cadastro: z.preprocess((v) => v === true || v === "true", z.boolean()).default(false),
+      informacoes: textoDoFormulario.pipe(z.string().trim().max(8000)).optional(),
+      objeto_solicitacao: z.string().trim().max(4000).optional(),
+      justificativa: z.string().trim().max(8000).optional(),
+      dados_anteriores: z.preprocess((v) => { if (typeof v !== "string") return v; try { return JSON.parse(v); } catch { return null; } }, z.object({ objeto: z.string(), justificativa: z.string(), informacoes: z.string() }).optional()),
       anterior: textoDoFormulario.pipe(z.string().max(LIMITE_SOLICITACAO)),
       descricao: textoDoFormulario.pipe(z.string().trim().max(LIMITE_SOLICITACAO)),
       itens: itensSolicitacaoOpcionais,
@@ -452,35 +462,38 @@ export function rotasProcessos() {
       orcamentos_ocultos_anteriores: propostasOcultasOpcionais,
       topicos_anteriores: topicosOpcionais,
     }).refine((dados) => dados.itens === undefined || dados.itens_anteriores !== undefined, "Reabra a solicitação antes de editar os itens.").parse(req.body);
-    const s = await q1<{ secretaria: string; referencia: string; objeto_solicitacao: string; justificativa: string; itens: ItemSolicitacao[]; orcamentos_ocultos: number[]; topicos_adicionais: TopicoSolicitacao[] }>(
-      "select secretaria, referencia, objeto as objeto_solicitacao, justificativa, itens, orcamentos_ocultos, topicos_adicionais from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
+    const s = await q1<{ secretaria: string; referencia: string; objeto_solicitacao: string; justificativa: string; informacoes: string; descricao: string; itens: ItemSolicitacao[]; orcamentos_ocultos: number[]; topicos_adicionais: TopicoSolicitacao[] }>(
+      "select secretaria, referencia, objeto as objeto_solicitacao, justificativa, informacoes, descricao, itens, orcamentos_ocultos, topicos_adicionais from solicitacoes_processo where processo_id=$1 and id=$2", [p.id, sid],
     );
     if (!s) throw new ErroHttp(404, "Solicitação não encontrada.");
     const pendentes = parametrosApoios(d, p.id, req.usuario!.id);
     const documentos = await apoiosComTextoLocal(apoios);
     const itens = d.itens && calcularItens(d.itens);
-    const descricao = await preencherSolicitacao(await contextoSolicitacao(p), { ...s, descricao: d.descricao, itens: itens ?? s.itens });
+    const descricao = d.cadastro ? s.descricao : await preencherSolicitacao(await contextoSolicitacao(p), { ...s, descricao: d.descricao, itens: itens ?? s.itens });
     if (descricao.length > LIMITE_SOLICITACAO) throw new ErroHttp(400, "A solicitação preenchida ultrapassa 30 mil caracteres. Reduza o texto ou os itens.");
     await tx(async (c) => {
       const { rows: [processo] } = await c.query("select situacao from processos where id=$1 and excluido_em is null for update", [p.id]);
       if (processo?.situacao !== "preparacao") throw new ErroHttp(409, "O processo deve estar em preparação para editar a solicitação.");
-      const { rows: [existente] } = await c.query<{ descricao: string; tem_arquivo: boolean; itens_iguais: boolean; propostas_iguais: boolean; topicos_iguais: boolean }>(
-        `select descricao, (arquivo is not null or exists (select 1 from solicitacao_anexos a where a.solicitacao_id=solicitacoes_processo.id)) as tem_arquivo, ($3::jsonb is null or itens = $3::jsonb) as itens_iguais, ($4::jsonb is null or orcamentos_ocultos = $4::jsonb) as propostas_iguais, topicos_adicionais = $5::jsonb as topicos_iguais
+      const anteriores = d.cadastro ? await registrosDaInstrucao(c, p.id) : [];
+      const { rows: [existente] } = await c.query<{ descricao: string; tem_arquivo: boolean; itens_iguais: boolean; propostas_iguais: boolean; topicos_iguais: boolean; dados_iguais: boolean }>(
+        `select descricao, (arquivo is not null or exists (select 1 from solicitacao_anexos a where a.solicitacao_id=solicitacoes_processo.id)) as tem_arquivo, ($3::jsonb is null or itens = $3::jsonb) as itens_iguais, ($4::jsonb is null or orcamentos_ocultos = $4::jsonb) as propostas_iguais, topicos_adicionais = $5::jsonb as topicos_iguais, jsonb_build_object('objeto',objeto,'justificativa',justificativa,'informacoes',informacoes)=$6::jsonb as dados_iguais
          from solicitacoes_processo where processo_id=$1 and id=$2 for update`,
-        [p.id, sid, JSON.stringify(d.itens_anteriores ?? s.itens), JSON.stringify(d.orcamentos_ocultos_anteriores ?? s.orcamentos_ocultos), JSON.stringify(d.topicos_anteriores ?? s.topicos_adicionais)],
+        [p.id, sid, JSON.stringify(d.itens_anteriores ?? s.itens), JSON.stringify(d.orcamentos_ocultos_anteriores ?? s.orcamentos_ocultos), JSON.stringify(d.topicos_anteriores ?? s.topicos_adicionais), JSON.stringify(d.dados_anteriores ?? { objeto: s.objeto_solicitacao, justificativa: s.justificativa, informacoes: s.informacoes })],
       );
       if (!existente) throw new ErroHttp(404, "Solicitação não encontrada.");
-      if (existente.descricao !== d.anterior || !existente.itens_iguais || !existente.propostas_iguais || !existente.topicos_iguais) throw new ErroHttp(409, "A solicitação mudou. Reabra para ver a versão atualizada.");
-      if (!descricao && !existente.tem_arquivo && !documentos.length && !d.apoios_ids.length) throw new ErroHttp(400, "Preencha a descrição da solicitação.");
-      if (!itens && d.orcamentos_ocultos === undefined && d.topicos_adicionais === undefined && descricao === existente.descricao && !documentos.length && !d.apoios_ids.length) return;
+      if (existente.descricao !== d.anterior || !existente.itens_iguais || !existente.propostas_iguais || !existente.topicos_iguais || !existente.dados_iguais) throw new ErroHttp(409, "A solicitação mudou. Reabra para ver a versão atualizada.");
+      if (!d.cadastro && !descricao && !existente.tem_arquivo && !documentos.length && !d.apoios_ids.length) throw new ErroHttp(400, "Preencha a descrição da solicitação.");
+      if (!d.cadastro && !itens && d.orcamentos_ocultos === undefined && d.topicos_adicionais === undefined && descricao === existente.descricao && !documentos.length && !d.apoios_ids.length) return;
       if (itens) await conferirOrcamentos(c, p.id, itens);
       await conferirPropostasOcultas(c, p.id, d.orcamentos_ocultos ?? s.orcamentos_ocultos, itens ?? s.itens);
       await salvarApoios(c, sid, documentos);
       await incorporarApoios(c, sid, pendentes);
-      await c.query("update solicitacoes_processo set descricao=$1, itens=coalesce($2::jsonb,itens), orcamentos_ocultos=coalesce($4::jsonb,orcamentos_ocultos), topicos_adicionais=coalesce($5::jsonb,topicos_adicionais) where id=$3", [descricao, itens ? JSON.stringify(itens) : null, sid, d.orcamentos_ocultos === undefined ? null : JSON.stringify(d.orcamentos_ocultos), d.topicos_adicionais === undefined ? null : JSON.stringify(d.topicos_adicionais)]);
+      await c.query("update solicitacoes_processo set descricao=$1, itens=coalesce($2::jsonb,itens), orcamentos_ocultos=coalesce($4::jsonb,orcamentos_ocultos), topicos_adicionais=coalesce($5::jsonb,topicos_adicionais), objeto=coalesce($6,objeto), justificativa=coalesce($7,justificativa), informacoes=coalesce($8,informacoes) where id=$3", [descricao, itens ? JSON.stringify(itens) : null, sid, d.orcamentos_ocultos === undefined ? null : JSON.stringify(d.orcamentos_ocultos), d.topicos_adicionais === undefined ? null : JSON.stringify(d.topicos_adicionais), d.objeto_solicitacao ?? null, d.justificativa ?? null, d.informacoes ?? null]);
+      if (d.cadastro) await sincronizarDadosDaInstrucao(c, p.id, p.objeto, anteriores, req.usuario!.id);
       await c.query("update processos set atualizado_em=now() where id=$1", [p.id]);
       await auditar({ orgao: p.orgao_id, usuario: req.usuario!.id, processo: p.id, acao: "solicitacao.alterada", detalhe: { id: sid } }, c);
     });
+    if (d.cadastro) await sincronizarCampos(p, req.usuario!.id, ETAPAS.filter((x) => ["dfd", "etp"].includes(x.id)));
     res.json({ ok: true });
   });
 

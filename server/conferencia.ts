@@ -47,7 +47,7 @@ export async function conferirEtapa(p: Proc, e: Etapa, checks: Checks, campos: R
     if (p.valor_estimado == null) {
       const s = await q<{ itens: ItemSolicitacao[] }>("select itens from solicitacoes_processo where processo_id=$1", [p.id]);
       if (totalDosItens(s.flatMap((x) => x.itens ?? [])) == null) {
-        l.push({ codigo: "valor", texto: "Ainda não há valor estimado: lance os preços dos itens na Solicitação ou informe o valor preliminar nos dados do processo.", onde: "dados", alvo: "valor", bloqueia: false });
+        l.push({ codigo: "valor", texto: "Ainda não há valor estimado: lance os preços dos itens na Instrução do processo ou informe o valor preliminar nos dados do processo.", onde: "dados", alvo: "valor", bloqueia: false });
       }
     }
     const cad = await secretariosDoProcesso(p);
