@@ -18,8 +18,26 @@ interface Proc {
 }
 
 export async function camposDo(processoId: number): Promise<Record<string, Valores>> {
-  const rows = await q<{ etapa: string; valores: Valores }>("select etapa, valores from campos_etapa where processo_id=$1", [processoId]);
-  return Object.fromEntries(rows.filter((r) => ETAPAS.some((e) => e.id === r.etapa)).map((r) => [r.etapa, r.valores]));
+  const [rows, solicitacoes] = await Promise.all([
+    q<{ etapa: string; valores: Valores }>("select etapa, valores from campos_etapa where processo_id=$1", [processoId]),
+    q<{ itens: ItemSolicitacao[] }>("select itens from solicitacoes_processo where processo_id=$1", [processoId]),
+  ]);
+  const campos = Object.fromEntries(rows.filter((r) => ETAPAS.some((e) => e.id === r.etapa)).map((r) => [r.etapa, r.valores]));
+  return comValoresAutomaticos(campos, solicitacoes.flatMap((s) => s.itens ?? []));
+}
+
+/**
+ * Valores que o sistema calcula a partir do orçamento dos itens: valor estimado da pesquisa de preços e da dotação e,
+ * sem divisão por exercícios, a parcela do exercício. Sem itens com preço, vale o que foi digitado.
+ */
+export function comValoresAutomaticos(campos: Record<string, Valores>, itens: ItemSolicitacao[]): Record<string, Valores> {
+  const total = itens.length ? totalDosItens(itens) : null;
+  if (total == null) return campos;
+  const texto = moeda(total);
+  const dot: Valores = { ...(campos.dot ?? {}), valor_total: texto };
+  const out: Record<string, Valores> = { ...campos, precos: { ...(campos.precos ?? {}), valor_total: texto }, dot };
+  if (dot.plurianual !== "sim") dot.valor_exercicio = texto;
+  return out;
 }
 
 /** Marca (ou desmarca) o item automático "Campos da etapa preenchidos" conforme os campos gravados. */

@@ -43,7 +43,8 @@ export function CamposEtapa({ e, p, valores, editavel, sujo, gravando, sugeridos
       <fieldset disabled={!editavel || gravando} className="campos-grade">
         {visiveis.map((c) => (
           <Fragment key={c.id}>
-            <CampoEtapa c={c} valor={valores[c.id]} falta={faltam.has(c.id)} sugerido={sugeridos.includes(c.id)} mudar={(v) => set(c.id, v)} />
+            <CampoEtapa c={c} valor={valores[c.id]} falta={faltam.has(c.id)} sugerido={sugeridos.includes(c.id)} mudar={(v) => set(c.id, v)}
+              calculado={!!c.automatico && typeof valores[c.id] === "string" && !!(valores[c.id] as string).trim() && !(c.id === "valor_exercicio" && valores.plurianual === "sim")} />
             {e.id === "precos" && c.id === "memoria" && editavel && <div className="stack" style={{ gridColumn: "1 / -1" }}>
               <p className="small muted" role="status">{textosAnteriores.length ? "Texto base aplicado. Você pode ajustar as particularidades da pesquisa ou restaurar o texto e o método anteriores." : "Ao escolher o método, a memória recebe um texto base editável. Confira as fontes e as particularidades da pesquisa."}{valores.metodo === "outro" ? " Complete no texto o método específico, a fórmula e a justificativa." : ""}</p>
               <div className="tools">
@@ -64,7 +65,7 @@ export function CamposEtapa({ e, p, valores, editavel, sujo, gravando, sugeridos
   );
 }
 
-function CampoEtapa({ c, valor, falta, sugerido, mudar }: { c: Campo; valor?: string | string[]; falta: boolean; sugerido: boolean; mudar: (v: string | string[]) => void }) {
+function CampoEtapa({ c, valor, falta, sugerido, mudar, calculado }: { c: Campo; valor?: string | string[]; falta: boolean; sugerido: boolean; mudar: (v: string | string[]) => void; calculado?: boolean }) {
   const id = `campo-${c.id}`;
   const texto = typeof valor === "string" ? valor : "";
   const marcas = Array.isArray(valor) ? valor : [];
@@ -72,7 +73,7 @@ function CampoEtapa({ c, valor, falta, sugerido, mudar }: { c: Campo; valor?: st
     <span className="campo-cab">
       <span className="campo-rot">{c.minimo && <span title="Conteúdo mínimo obrigatório" aria-label="Conteúdo mínimo obrigatório">★ </span>}{c.rotulo}</span>
       {c.opcional ? <span className="small muted">opcional</span> : falta ? <span className="small falta">obrigatório</span> : null}
-      {sugerido && <span className="pill sm">sugerido</span>}
+      {calculado ? <span className="pill sm">calculado pelo sistema</span> : sugerido && <span className="pill sm">sugerido</span>}
     </span>
   );
   const ajuda = c.ajuda && <span className="small muted campo-ajuda">{c.ajuda}</span>;
@@ -95,7 +96,7 @@ function CampoEtapa({ c, valor, falta, sugerido, mudar }: { c: Campo; valor?: st
       {cabeca}{ajuda}
       {c.tipo === "area"
         ? <textarea id={id} value={texto} rows={Math.min(12, Math.max(3, texto.split("\n").length + 1))} maxLength={20000} onChange={(ev) => mudar(ev.target.value)} />
-        : <input id={id} value={texto} maxLength={c.tipo === "valor" ? 30 : 2000} inputMode={c.tipo === "valor" ? "decimal" : undefined}
+        : <input id={id} value={texto} readOnly={calculado} title={calculado ? "Atualizado automaticamente quando o orçamento dos itens muda." : undefined} maxLength={c.tipo === "valor" ? 30 : 2000} inputMode={c.tipo === "valor" ? "decimal" : undefined}
             placeholder={c.tipo === "valor" ? "ex.: 12.500,00" : undefined} onChange={(ev) => mudar(ev.target.value)} />}
     </label>
   );

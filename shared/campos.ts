@@ -25,6 +25,8 @@ export interface Campo {
   minimo?: boolean;
   /** Fica fora do documento montado com os campos (dado de controle). */
   foraDoDocumento?: boolean;
+  /** Preenchido pelo sistema (ex.: total do orçamento dos itens); o usuário não digita enquanto houver cálculo. */
+  automatico?: boolean;
 }
 
 const SIM_NAO: [string, string][] = [["sim", "Sim"], ["nao", "Não"]];
@@ -98,7 +100,7 @@ export const CAMPOS: Record<string, Campo[]> = {
       ajuda: "Classifique os preços no quadro de tratamento desta etapa. O relatório registra automaticamente os valores usados, somente de referência e descartados. Use este campo para complementar a análise (Dec. 2.533/2024, art. 11, §§ 2º e 3º)." },
     { id: "bdi", rotulo: "BDI e encargos sociais", tipo: "texto", cond: "obra", ajuda: "Percentuais adotados e onde está a composição." },
     { id: "data_base", rotulo: "Data-base do orçamento", tipo: "texto", opcional: true, ajuda: "Calculada pelo sistema com a menor e a maior data dos preços considerados. Só preencha se as cotações não tiverem data." },
-    { id: "valor_total", rotulo: "Valor estimado total (R$)", tipo: "valor" },
+    { id: "valor_total", rotulo: "Valor estimado total (R$)", tipo: "valor", automatico: true, ajuda: "Calculado pelo sistema: soma dos totais dos itens do orçamento." },
     { id: "atesto", rotulo: "Atestação do responsável pela pesquisa", tipo: "marcas", opcoes: [
       ["conferi", "Conferi as fontes, os valores e a memória de cálculo e atesto que a pesquisa observou o art. 23 da Lei nº 14.133/2021"],
     ], ajuda: "Sem esta marca o relatório não traz a declaração de conformidade: o sistema não declara por você o que não foi conferido." },
@@ -170,8 +172,8 @@ export const CAMPOS: Record<string, Campo[]> = {
       ajuda: "Quais riscos ficam com a Administração e quais com o contratado; eventos que afetem o equilíbrio econômico-financeiro (art. 6º, XXVII)." },
   ],
   dot: [
-    { id: "valor_total", rotulo: "Valor estimado total (R$)", tipo: "valor", ajuda: "Use o valor da pesquisa de preços." },
-    { id: "valor_exercicio", rotulo: "Parcela que vence neste exercício (R$)", tipo: "valor" },
+    { id: "valor_total", rotulo: "Valor estimado total (R$)", tipo: "valor", automatico: true, ajuda: "Calculado pelo sistema: o mesmo valor da pesquisa de preços (soma dos itens)." },
+    { id: "valor_exercicio", rotulo: "Parcela que vence neste exercício (R$)", tipo: "valor", automatico: true, ajuda: "Calculada pelo sistema: o valor total quando o contrato não atravessa exercícios. Se atravessar, informe a parcela deste ano." },
     { id: "plurianual", rotulo: "O contrato atravessa mais de um exercício?", tipo: "opcao", opcoes: SIM_NAO },
     { id: "divisao_anos", rotulo: "Divisão do valor por exercício", tipo: "area", se: { campo: "plurianual", em: ["sim"] } },
     { id: "origem", rotulo: "Origem do recurso", tipo: "opcao", opcoes: [["proprio", "Recurso próprio"], ["convenio", "Convênio"], ["transferencia", "Transferência"]] },

@@ -2586,3 +2586,25 @@ test("certidão consolidada do TCU é emitida e juntada ao processo; consulta de
     falso.close();
   }
 });
+
+test("valor estimado da pesquisa de preços e da dotação é calculado pelo orçamento dos itens", async () => {
+  const adm = await new Cliente().entrar("admin@a.gov.br");
+  const { dados: { id } } = await adm.post("/api/processos", { objeto: "Aquisição de cadeiras", tipo: "bens", via: "licitacao", ano: 2046, requisitante: "Educação" });
+  const rota = `/api/processos/${id}`;
+  // Digitado antes do orçamento: vale enquanto não há preço nos itens.
+  // (gravado direto: a etapa ainda não está liberada para edição pela tela)
+  await pool.query("insert into campos_etapa (processo_id,etapa,valores) values ($1,'precos',$2::jsonb)", [id, JSON.stringify({ valor_total: "1,00" })]);
+  assert.equal((await adm.get(rota)).dados.campos.precos.valor_total, "1,00");
+  const s = await adm.post(`${rota}/solicitacoes`, { chave_envio: randomUUID(), cadastro: true, secretaria: "Educação", objeto_solicitacao: "Cadeiras",
+    itens: [{ descricao: "Cadeira", unidade: "UN", quantidade: 30, valor_unitario: 150 }, { descricao: "Mesa", unidade: "UN", quantidade: 2, valor_unitario: 400.5 }] });
+  assert.equal(s.status, 201, JSON.stringify(s.dados));
+  let campos = (await adm.get(rota)).dados.campos;
+  assert.equal(campos.precos.valor_total, "5.301,00");
+  assert.equal(campos.dot.valor_total, "5.301,00");
+  assert.equal(campos.dot.valor_exercicio, "5.301,00", "sem divisão por exercícios, a parcela do ano é o total");
+  // Contrato que atravessa exercícios: a parcela do ano é informada pelo usuário.
+  await pool.query("insert into campos_etapa (processo_id,etapa,valores) values ($1,'dot',$2::jsonb)", [id, JSON.stringify({ plurianual: "sim", valor_exercicio: "2.000,00", valor_total: "9,99" })]);
+  campos = (await adm.get(rota)).dados.campos;
+  assert.equal(campos.dot.valor_exercicio, "2.000,00");
+  assert.equal(campos.dot.valor_total, "5.301,00", "o total digitado é substituído pelo do orçamento");
+});
