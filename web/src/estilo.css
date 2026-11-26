@@ -396,3 +396,8 @@ dialog.janela::backdrop{background:#10182788}
 .descarte-preco .fora-calculo{display:block;margin-top:5px;color:var(--muted);font-weight:600}
 
 .tabela-pesquisa-precos th{min-width:140px;white-space:normal}.tabela-pesquisa-precos td{vertical-align:top}.tabela-pesquisa-precos .tratamento-cotacao{min-width:190px}.tabela-pesquisa-precos label{display:flex;flex-direction:column;gap:5px;font-size:12px;margin-top:8px}.tabela-pesquisa-precos select,.tabela-pesquisa-precos textarea{width:100%;min-width:0}.tratamento-cotacao>span{display:block;margin-top:6px}
+/* Consulta de CNPJ: situação regular em verde, irregular em vermelho */
+.consulta-cnpj .ok, td .ok{color:var(--good, #15803d)}
+.consulta-cnpj .perigo, td .perigo{color:var(--bad)}
+.consulta-cnpj input{max-width:220px}
+.consulta-cnpj ul{margin:.25rem 0 .25rem 1.2rem}

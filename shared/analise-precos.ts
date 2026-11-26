@@ -75,6 +75,10 @@ export function alertasDosPrecos(itens: ItemSolicitacao[], hoje: string): Alerta
       if (c.produto?.trim() && produtoDiverge(c.produto, item.descricao))
         a(`o produto cotado (“${c.produto.trim().slice(0, 120)}”) pode não corresponder ao item`);
       const inciso = incisoDaCotacao(c);
+      if (c.verificacao) {
+        if (c.verificacao.situacao && !/^ativa$/i.test(c.verificacao.situacao)) a(`CNPJ com situação cadastral “${c.verificacao.situacao}” na Receita (consulta de ${dataBr(c.verificacao.consultado_em)})`);
+        if (c.verificacao.sancoes.length) a(`consta registro em ${c.verificacao.sancoes.join(", ")} (certidão consolidada do TCU de ${dataBr(c.verificacao.consultado_em)})`);
+      }
       if (inciso === "IV") {
         if (c.frete === "nao_informado") a("frete não informado na proposta");
         else if (c.frete === "nao_incluso") a("frete não incluso no preço");
@@ -127,7 +131,9 @@ export function quadroDasFontes(itens: ItemSolicitacao[]) {
     const inciso = incisoDaCotacao(c);
     if (inciso) incisos.add(inciso);
     const uso = c.descarte ? " (descartado)" : c.apenas_referencia ? " (só referência)" : "";
-    const ref = [c.cnpj && `CNPJ ${c.cnpj}`, c.obs, c.link].filter(Boolean).join(" · ");
+    const v = c.verificacao;
+    const verif = v && `Receita: ${v.situacao || "—"}${v.sancoes_consultadas ? `; TCU: ${v.sancoes.length ? `consta em ${v.sancoes.join(", ")}` : "nada consta"}` : ""} (${dataBr(v.consultado_em)})`;
+    const ref = [c.cnpj && `CNPJ ${c.cnpj}`, verif, c.obs, c.link].filter(Boolean).join(" · ");
     return `| ${k + 1} | ${celula(`${c.fornecedor}${uso}${ref ? ` — ${ref}` : ""}`)} | ${inciso ?? "—"} | ${dataBr(c.data_preco)} | ${dataBr(c.consultado_em)} | ${real(c.valor_unitario!)} | ${c.orcamento_id != null ? "Anexado" : c.link ? "Link" : "—"} |`;
   }));
   if (!linhas.length) return "";

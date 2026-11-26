@@ -7,6 +7,7 @@ import { CRITERIOS_PRECO, FONTES_COTACAO, valorDasCotacoes, normalizarCotacao, t
 import type { ResultadoPncp } from "../../../shared/pncp";
 import { BuscaPncpItem } from "./BuscaPncpItem";
 import { alertasDosPrecos } from "../../../shared/analise-precos";
+import { ConsultaCnpj } from "./ConsultaCnpj";
 import { cotacaoPreenchida, dataConsulta, linhaVazia, lerLinhas, type LinhaCotacao, type LinhaItem } from "./ItensSolicitacao";
 
 const UNIDADES = ["UN", "CX", "PCT", "KG", "G", "L", "ML", "M", "M²", "M³", "T", "PAR", "JG", "RL", "FD", "GL", "SERV", "MÊS", "HORA", "DIÁRIA", "KIT", "CJ"];
@@ -289,6 +290,8 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
   const comprovadas = lido?.cotacoes ?? [];
   const criterio = linha.criterio ?? "media";
   const alertas = lido ? alertasDosPrecos([lido], dataConsulta()) : [];
+  const [cnpjDe, setCnpjDe] = useState<number | null>(null);
+  const processoId = Number(/\/processos\/(\d+)\//.exec(caminho)?.[1]);
 
   const incluir = () => {
     const v = numBR(f.valor);
@@ -352,14 +355,16 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
                 : cotacoes.map(({ c, i }) => <tr key={i}>
                   <td className="small">{FONTES_COTACAO[c.fonte ?? "fornecedor"]}</td>
                   <td className="small" title={c.dataPreco ? `Data do preço; consulta em ${brData(c.consultadoEm)}` : "Data da consulta"}>{brData(c.dataPreco ?? c.consultadoEm)}</td>
-                  <td>{c.fornecedor || "—"}{c.obs && <div className="small muted">{c.obs}</div>}{c.link && <div className="small">{/^https?:\/\//.test(c.link) ? <a href={c.link} target="_blank" rel="noopener noreferrer">link</a> : c.link}</div>}</td>
+                  <td>{c.fornecedor || "—"}{c.verificacao && <div className={`small ${c.verificacao.sancoes.length || !/^ativa$/i.test(c.verificacao.situacao) ? "perigo" : "ok"}`}>
+                    Receita: {c.verificacao.situacao || "—"}{c.verificacao.sancoes_consultadas && ` · TCU: ${c.verificacao.sancoes.length ? `consta em ${c.verificacao.sancoes.join(", ")}` : "nada consta"}`}</div>}{c.obs && <div className="small muted">{c.obs}</div>}{c.link && <div className="small">{/^https?:\/\//.test(c.link) ? <a href={c.link} target="_blank" rel="noopener noreferrer">link</a> : c.link}</div>}</td>
                   <td className="r num">{valorValido(c) ? <span className={c.descarte ? "valor-descartado" : undefined}>{brl(numBR(c.valor)!)}</span> : <input aria-label="Valor unitário" className="valor-inline" inputMode="decimal" placeholder="informar" defaultValue={c.valor}
                     onBlur={(e) => alterarLinha({ cotacoes: linha.cotacoes.map((x, n) => (n === i ? { ...x, valor: e.target.value.trim() } : x)) })} />}
                     {(c.descarte || c.apenas_referencia) && <div className="small muted">{c.descarte ? "Descartado" : "Somente referência"} · Pesquisa de preços</div>}
                   </td>
                   <td className="small">{c.orcamentoId != null ? <a className="anexo-ok" href={`/api${caminho}/${c.orcamentoId}/arquivo`}>✓ {nomeArquivo(c.orcamentoId)}</a>
                     : <button type="button" className="lnk" onClick={() => { setAnexarEm(i); arquivo.current?.click(); }}>Anexar (opcional)</button>}</td>
-                  <td className="r"><button type="button" className="lnk perigo" aria-label="Remover valor" onClick={() => remover(i)}>🗑</button></td>
+                  <td className="r"><button type="button" className="lnk" title="Consultar CNPJ e sanções do fornecedor" onClick={() => setCnpjDe(cnpjDe === i ? null : i)}>CNPJ</button>{" "}
+                    <button type="button" className="lnk perigo" aria-label="Remover valor" onClick={() => remover(i)}>🗑</button></td>
                 </tr>)}</tbody>
             </table></div>
           </section>
@@ -368,6 +373,9 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
             <ul className="small">{alertas.map((a, n) => <li key={n}>{a.fornecedor ? `${a.fornecedor}: ` : ""}{a.texto}</li>)}</ul>
             <span className="small">Descarte o preço, marque-o como somente referência ou justifique a manutenção na análise complementar da pesquisa de preços.</span>
           </section>}
+          {cnpjDe != null && linha.cotacoes[cnpjDe] && <ConsultaCnpj key={cnpjDe} processoId={processoId} cnpjInicial={linha.cotacoes[cnpjDe].cnpj} fornecedor={linha.cotacoes[cnpjDe].fornecedor}
+            aoJuntar={() => void recarregar()}
+            registrar={(verificacao, cnpj) => alterarLinha({ cotacoes: linha.cotacoes.map((x, n) => (n === cnpjDe ? { ...x, cnpj, verificacao } : x)) })} />}
 
           <section className="orc-bloco">
             <div className="row"><div><h3 className="orc-tit">Anexos dos orçamentos</h3><p className="small muted">Opcional: anexe a proposta, cotação ou documento que comprova o preço deste item.</p></div></div>

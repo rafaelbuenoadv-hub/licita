@@ -1,4 +1,5 @@
 import { useRef, useState, type Dispatch, type SetStateAction } from "react";
+import type { VerificacaoFornecedor } from "../../../shared/cnpj";
 import { api, brl, numBR } from "../api";
 import { limparNomeFornecedor, nomeFornecedorOrcamento, type DadosOrcamento, type OrcamentoLido } from "../../../shared/orcamentos";
 import { CRITERIOS_PRECO, FONTES_COTACAO, valorDasCotacoes, normalizarCotacao, totalDoItem, totalDosItens, type DescartePreco, type CriterioPreco, type FonteCotacao, type CotacaoItem, type ItemSolicitacao } from "../../../shared/solicitacao";
@@ -14,6 +15,7 @@ export interface LinhaCotacao {
   orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string; obs?: string; descarte?: DescartePreco; apenas_referencia?: boolean;
   /** Dados estruturados da fonte, lidos do documento: data do preço, produto cotado, frete, validade e CNPJ. */
   dataPreco?: string; produto?: string; frete?: "incluso" | "nao_incluso" | "nao_informado"; validade?: string; cnpj?: string;
+  verificacao?: VerificacaoFornecedor;
 }
 // escolhas: destino definido à mão na conferência (índice do item, ou null para lançar como item novo).
 type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[]; escolhas: Record<number, number | null> };
@@ -37,7 +39,7 @@ export function linhasDosItens(itens: ItemSolicitacao[], orcamentos: OrcamentoLi
       fornecedor: limparNomeFornecedor(c.fornecedor) || nomeFornecedorOrcamento(orcamentos.find((o) => o.id === c.orcamento_id)),
       valor: c.valor_unitario == null ? "" : String(c.valor_unitario).replace(".", ","),
       fonte: c.fonte, link: c.link, consultadoEm: c.consultado_em, obs: c.obs, descarte: c.descarte, apenas_referencia: c.apenas_referencia,
-      dataPreco: c.data_preco, produto: c.produto, frete: c.frete, validade: c.validade, cnpj: c.cnpj,
+      dataPreco: c.data_preco, produto: c.produto, frete: c.frete, validade: c.validade, cnpj: c.cnpj, verificacao: c.verificacao,
     }));
     if (!cotacoes.length) cotacoes.push(cotacaoVazia());
     return {
@@ -77,7 +79,7 @@ export function lerLinhas(linhas: LinhaItem[]): { itens: ItemSolicitacao[]; erro
         ...(c.consultadoEm ? { consultado_em: c.consultadoEm } : {}),
         ...(c.obs?.trim() ? { obs: c.obs.trim().slice(0, 1000) } : {}),
         ...(c.dataPreco ? { data_preco: c.dataPreco } : {}), ...(c.produto?.trim() ? { produto: c.produto.trim().slice(0, 300) } : {}),
-        ...(c.frete ? { frete: c.frete } : {}), ...(c.validade ? { validade: c.validade } : {}), ...(c.cnpj ? { cnpj: c.cnpj.slice(0, 20) } : {}),
+        ...(c.frete ? { frete: c.frete } : {}), ...(c.validade ? { validade: c.validade } : {}), ...(c.cnpj ? { cnpj: c.cnpj.slice(0, 20) } : {}), ...(c.verificacao ? { verificacao: c.verificacao } : {}),
       });
     }
     const dados = { descricao: l.descricao.trim(), unidade: l.unidade.trim(), quantidade };

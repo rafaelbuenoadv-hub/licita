@@ -72,6 +72,8 @@ export interface CotacaoItem {
   /** Validade da proposta, AAAA-MM-DD. */
   validade?: string;
   cnpj?: string;
+  /** Consulta do CNPJ (Receita e certidão consolidada do TCU) registrada na cotação. */
+  verificacao?: { consultado_em: string; situacao: string; porte: string; sancoes: string[]; sancoes_consultadas: boolean };
   descarte?: DescartePreco;
   apenas_referencia?: boolean;
 }

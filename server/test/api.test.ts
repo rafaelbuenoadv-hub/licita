@@ -2555,3 +2555,34 @@ test("memória de cálculo sugere o texto do método, preserva personalização 
     if (metodo === "outro") assert.match(minuta, /\[\[INFORMAR O MÉTODO ADOTADO\]\]/);
   }
 });
+
+test("certidão consolidada do TCU é emitida e juntada ao processo; consulta de CNPJ exige login", async () => {
+  const { createServer } = await import("node:http");
+  const pdf = Buffer.from("%PDF-1.4 certidao de teste");
+  const falso = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ codigoControle: "XYZ", certidoes: [{ emissor: "TCU", tipo: "Licitantes Inidôneos", situacao: "NADA_CONSTA" }, { emissor: "CGU", tipo: "CEIS", situacao: "CONSTA" }],
+      ...(req.url?.includes("seEmitirPDF=true") ? { certidaoPDF: pdf.toString("base64") } : {}) }));
+  });
+  await new Promise<void>((ok) => falso.listen(0, "127.0.0.1", ok));
+  const anterior = process.env.TCU_CERTIDOES_URL;
+  process.env.TCU_CERTIDOES_URL = `http://127.0.0.1:${(falso.address() as AddressInfo).port}/certidoes/`;
+  try {
+    assert.equal((await new Cliente().get("/api/cnpj/76169879000161")).status, 401);
+    const adm = await new Cliente().entrar("admin@a.gov.br");
+    const { dados: { id } } = await adm.post("/api/processos", { objeto: "Aquisição com certidão", tipo: "bens", via: "licitacao", ano: 2045, requisitante: "Obras" });
+    assert.equal((await adm.post(`/api/processos/${id}/certidao-tcu`, { cnpj: "11.111.111/1111-11" })).status, 400);
+    const r = await adm.post(`/api/processos/${id}/certidao-tcu`, { cnpj: "76.169.879/0001-61", fornecedor: "Pedreira Exemplo" });
+    assert.equal(r.status, 201, JSON.stringify(r.dados));
+    assert.match(r.dados.nome, /^Certidão consolidada TCU — Pedreira Exemplo — 76\.169\.879-0001-61\.pdf$/);
+    const anexo = await q1<{ arquivo: Buffer; texto: string; etapa: string }>("select arquivo, texto, etapa from anexos where id=$1", [r.dados.id]);
+    assert.ok(anexo!.arquivo.equals(pdf));
+    assert.equal(anexo!.etapa, "precos");
+    assert.match(anexo!.texto, /CGU — CEIS: CONSTA/);
+    const outro = await new Cliente().entrar("admin@b.gov.br");
+    assert.equal((await outro.post(`/api/processos/${id}/certidao-tcu`, { cnpj: "76.169.879/0001-61" })).status, 404, "outro órgão não junta no processo");
+  } finally {
+    if (anterior === undefined) delete process.env.TCU_CERTIDOES_URL; else process.env.TCU_CERTIDOES_URL = anterior;
+    falso.close();
+  }
+});

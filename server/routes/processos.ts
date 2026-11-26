@@ -166,6 +166,7 @@ const itensSolicitacao = z.array(z.object({
     frete: z.enum(["incluso", "nao_incluso", "nao_informado"]).optional(),
     validade: z.iso.date().optional(),
     cnpj: z.string().trim().max(20).optional(),
+    verificacao: z.object({ consultado_em: z.iso.date(), situacao: z.string().max(60), porte: z.string().max(80), sancoes: z.array(z.string().max(200)).max(10), sancoes_consultadas: z.boolean() }).optional(),
     apenas_referencia: z.boolean().optional(),
     descarte: z.object({ motivo: z.enum(["inexequivel", "elevado"]), justificativa: z.string().trim().min(1, "Justifique o descarte do preço.").max(2000) }).optional(),
   }).refine((c) => !(c.descarte && c.apenas_referencia), "Um preço descartado não pode ser marcado também como somente referência.")).max(20).optional(),
