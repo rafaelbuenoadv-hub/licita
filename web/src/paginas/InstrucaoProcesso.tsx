@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, brl, dataHora } from "../api";
 import { ItensSolicitacao, lerLinhas, linhasDosItens, linhaVazia, type LinhaItem } from "./ItensSolicitacao";
-import { TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDosItens, type ItemSolicitacao, type TopicoSolicitacao } from "../../../shared/solicitacao";
+import { TAMANHO_ANEXO_SOLICITACAO, TIPOS_ANEXOS_SOLICITACAO, totalDoItem, totalDosItens, type ItemSolicitacao, type TopicoSolicitacao } from "../../../shared/solicitacao";
 import type { OrcamentoLido } from "../../../shared/orcamentos";
 
 interface Registro {
@@ -75,6 +75,26 @@ export function InstrucaoProcesso({ processo, recarregar }: Props) {
     } catch (e) { setAviso({ texto: e instanceof Error ? e.message : "Não foi possível salvar os dados.", erro: true }); }
     finally { setOcupado(false); setProgresso(""); }
   };
+  /** Exclui um item direto do cadastro salvo (com a mesma conferência de versão da edição completa). */
+  const excluirItem = async (s: Registro, k: number) => {
+    const item = s.itens[k];
+    if (!item || !confirm(`Excluir o item ${k + 1} (${item.descricao}) e os orçamentos lançados nele?`)) return;
+    setOcupado(true); setAviso(undefined);
+    try {
+      const dados = new FormData();
+      dados.set("cadastro", "true"); dados.set("secretaria", s.secretaria); dados.set("referencia", s.referencia);
+      dados.set("objeto_solicitacao", s.objeto || processo.objeto); dados.set("justificativa", s.justificativa); dados.set("informacoes", s.informacoes ?? "");
+      dados.set("descricao", s.descricao); dados.set("itens", JSON.stringify(s.itens.filter((_, i) => i !== k)));
+      dados.set("topicos_adicionais", JSON.stringify(s.topicos_adicionais ?? [])); dados.set("orcamentos_ocultos", JSON.stringify(s.orcamentos_ocultos ?? []));
+      dados.set("anterior", s.descricao); dados.set("itens_anteriores", JSON.stringify(s.itens));
+      dados.set("topicos_anteriores", JSON.stringify(s.topicos_adicionais ?? [])); dados.set("orcamentos_ocultos_anteriores", JSON.stringify(s.orcamentos_ocultos ?? []));
+      dados.set("dados_anteriores", JSON.stringify({ objeto: s.objeto, justificativa: s.justificativa, informacoes: s.informacoes ?? "" }));
+      await api.put(`${caminho}/${s.id}`, dados);
+      await recarregar();
+      setAviso({ texto: `Item ${k + 1} excluído.` });
+    } catch (e) { setAviso({ texto: e instanceof Error ? e.message : "Não foi possível excluir o item.", erro: true }); }
+    finally { setOcupado(false); }
+  };
   return <section className="sec stack" id="instrucao-processo">
     <div><h3>Instrução do processo</h3><p className="small muted">Cadastre as informações da contratação. Os dados serão usados no DFD e no ETP; esta etapa não gera documento próprio.</p></div>
     {pode && !aberto && <div><button type="button" className="btn pri" onClick={() => abrir()}>Adicionar informações de uma secretaria</button></div>}
@@ -119,7 +139,23 @@ export function InstrucaoProcesso({ processo, recarregar }: Props) {
       <p><strong>Objeto:</strong> {s.objeto || processo.objeto}</p>
       {s.justificativa && <p style={{ whiteSpace: "pre-wrap" }}><strong>Justificativa:</strong> {s.justificativa}</p>}
       {s.informacoes && <p style={{ whiteSpace: "pre-wrap" }}><strong>Informações complementares:</strong> {s.informacoes}</p>}
-      <p className="small muted">{s.itens.length} itens{totalDosItens(s.itens) != null ? ` · Estimativa: ${brl(totalDosItens(s.itens))}` : ""} · Dados de apoio ao DFD e ao ETP.</p>
+      {s.itens.length > 0 && <div className="tw"><table className="t itens-salvos">
+        <thead><tr><th>Item</th><th>Descrição</th><th>Un.</th><th className="r">Qtd.</th><th className="r">Orçamentos</th><th className="r">Valor de referência</th><th className="r">Total</th>{pode && !aberto && <th className="r">Ações</th>}</tr></thead>
+        <tbody>{s.itens.map((i, k) => {
+          const valores = (i.cotacoes ?? []).filter((c) => c.fornecedor.trim() && c.valor_unitario != null);
+          const total = totalDoItem(i);
+          return <tr key={k}>
+            <td className="mono">{String(k + 1).padStart(2, "0")}</td><td>{i.descricao}</td><td>{i.unidade || "—"}</td>
+            <td className="r num">{i.quantidade == null ? "—" : i.quantidade.toLocaleString("pt-BR")}</td>
+            <td className="r">{valores.length || "—"}</td>
+            <td className="r num">{i.valor_unitario != null ? brl(i.valor_unitario) : <span className="muted">A pesquisar</span>}</td>
+            <td className="r num">{total != null ? brl(total) : "—"}</td>
+            {pode && !aberto && <td className="r"><button type="button" className="lnk" title="Editar itens e orçamentos" onClick={() => abrir(s)}>✎</button>{" "}
+              <button type="button" className="lnk perigo" title="Excluir item" aria-label={`Excluir item ${k + 1}`} disabled={ocupado} onClick={() => void excluirItem(s, k)}>🗑 Excluir</button></td>}
+          </tr>;
+        })}</tbody>
+      </table></div>}
+      <p className="small muted">{s.itens.length} {s.itens.length === 1 ? "item" : "itens"}{totalDosItens(s.itens) != null ? ` · Estimativa: ${brl(totalDosItens(s.itens))}` : ""} · Dados de apoio ao DFD e ao ETP.</p>
       {(s.topicos_adicionais ?? []).map((t, i) => <p key={i} style={{ whiteSpace: "pre-wrap" }}><strong>{t.titulo}</strong>{t.conteudo && `\n${t.conteudo}`}</p>)}
       {s.nome_arquivo && <a href={`/api${caminho}/${s.id}/arquivo`}>{s.nome_arquivo}</a>}
       {s.apoios.map((a) => <a key={a.id} href={`/api${caminho}/${s.id}/apoios/${a.id}`}>{a.nome}{a.criado_em ? ` · Juntado em ${dataHora(a.criado_em)}` : ""}</a>)}

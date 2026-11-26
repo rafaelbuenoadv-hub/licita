@@ -401,3 +401,6 @@ dialog.janela::backdrop{background:#10182788}
 .consulta-cnpj .perigo, td .perigo{color:var(--bad)}
 .consulta-cnpj input{max-width:220px}
 .consulta-cnpj ul{margin:.25rem 0 .25rem 1.2rem}
+/* Tabela de itens: a coluna de ações (editar/excluir) fica sempre visível à direita, mesmo com muitas cotações. */
+.tabela-itens-orc th:last-child, .tabela-itens-orc td:last-child{position:sticky;right:0;background:var(--surface);box-shadow:-6px 0 6px -6px rgba(0,0,0,.25);z-index:1}
+.tabela-itens-orc thead th:last-child{z-index:2}
