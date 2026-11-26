@@ -5,6 +5,7 @@ import { secretariosDoProcesso } from "./portarias.js";
 import { documentoDfd } from "./modelo-dfd.js";
 import { documentoEtp, documentoPrecos, documentoTr, assinaturaDoUsuario } from "./modelos-fase-interna.js";
 import { totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
+import { instrumentoSugerido, riscosSugeridos } from "../shared/coerencia-pecas.js";
 import { MARCA_DO_INCISO, dataBaseDosPrecos, incisosUsados } from "../shared/analise-precos.js";
 import {
   ETAPAS, TIPOS, VIAS, camposFaltando, camposVisiveis, itemDosCampos, itensDe, textoDoCampo, temValor,
@@ -93,13 +94,14 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
       data_base: dataBaseDosPrecos(itens),
       valor_total: total != null ? moeda(total) : "",
     },
-    tr: p.tipo === "obra" ? (({ e: _e, f: _f, g: _g, h: _h, ...parametros }) => parametros)(padroesTr(p.tipo, p.via, v("dfd", "modalidade"))) : {
+    tr: p.tipo === "obra" ? { ...(({ e: _e, f: _f, g: _g, h: _h, ...parametros }) => parametros)(padroesTr(p.tipo, p.via, v("dfd", "modalidade"))), ...decisoesTr(campos, p.tipo, p.via) } : {
       a: [primeiro(v("dfd", "objeto"), p.objeto), v("etp", "iv")].filter(Boolean).join("\n"),
       b: v("etp", "i") ? `Conforme o Estudo Técnico Preliminar: ${v("etp", "i")}` : "",
       c: v("etp", "vii"),
       d: v("etp", "iii"),
       i: [v("precos", "valor_total") && `Valor estimado: R$ ${v("precos", "valor_total")}.`, v("precos", "memoria")].filter(Boolean).join("\n"),
       ...padroesTr(p.tipo, p.via, v("dfd", "modalidade")),
+      ...decisoesTr(campos, p.tipo, p.via),
     },
     dot: {
       valor_total: primeiro(v("precos", "valor_total"), total != null ? moeda(total) : ""),
@@ -149,6 +151,18 @@ function padroesTr(tipo: string, via: string, modalidade: string) {
     prazo_pagamento: "até 30 (trinta) dias, contados do atesto da nota fiscal",
     reajuste: "IPCA/IBGE",
     subcontratacao: "nao",
+  };
+}
+
+/** Decisões do TR sugeridas pelo sistema (nível B): o usuário confirma ou troca. */
+function decisoesTr(campos: Record<string, Valores>, tipo: string, via: string) {
+  const perfil = typeof campos.tr?.perfil === "string" && campos.tr.perfil ? campos.tr.perfil : "comum";
+  return {
+    instrumento: instrumentoSugerido(campos, tipo, via),
+    ...(tipo === "bens" ? { perfil: "comum" } : {}),
+    riscos_catalogo: riscosSugeridos(tipo, perfil as string, via),
+    ...(via === "licitacao" ? { me_epp: "aplicar" } : {}),
+    divulgacao_valor: "publico",
   };
 }
 

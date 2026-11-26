@@ -99,3 +99,19 @@ test("orçamento antigo e contratação com mais de um ano geram alerta", () => 
   assert.ok(alertas.includes("orçamento de 10/01/2026, com mais de 6 meses"), alertas.join("\n"));
   assert.ok(alertas.includes("contratação de 01/09/2025, com mais de 1 ano"));
 });
+
+test("conferência cruzada: SRP no DFD/ETP × contrato no TR, valores e modalidade", async () => {
+  const { divergenciasEntrePecas, instrumentoSugerido, riscosSugeridos, tabelaDeRiscos } = await import("../../shared/coerencia-pecas.js");
+  const itens: ItemSolicitacao[] = [{ descricao: "Grama", unidade: "M²", quantidade: 4000, valor_unitario: 10, cotacoes: [{ orcamento_id: null, fornecedor: "A", valor_unitario: 10 }] }];
+  const campos = { dfd: { solucoes: "Pregão eletrônico pelo Sistema de Registro de Preços.", modalidade: "Pregão Eletrônico" }, etp: { vii: "Registro de preços com entregas parceladas." }, tr: { instrumento: "contrato" }, precos: { valor_total: "40.000,00" }, dot: { valor_total: "39.120,00" } };
+  const d = divergenciasEntrePecas(campos, itens, "licitacao");
+  assert.ok(d.some((x) => /DFD e o ETP tratam de Sistema de Registro de Preços, mas o Termo de Referência adota contrato/.test(x)), d.join("\n"));
+  assert.ok(d.some((x) => /valor estimado difere.*R\$\s39\.120,00/.test(x)));
+  assert.equal(instrumentoSugerido(campos, "bens", "licitacao"), "ata");
+  assert.equal(instrumentoSugerido({}, "bens", "dispensa"), "empenho");
+  assert.deepEqual(divergenciasEntrePecas({ ...campos, tr: { instrumento: "ata" }, dot: {} }, itens, "licitacao"), []);
+  assert.ok(divergenciasEntrePecas({ dfd: { modalidade: "Dispensa de Licitação" } }, [], "licitacao")[0].includes("contratação direta"));
+  const riscos = riscosSugeridos("bens", "perecivel", "licitacao");
+  assert.ok(riscos.includes("perecimento") && riscos.includes("deserta"));
+  assert.match(tabelaDeRiscos(riscos), /\| Perecimento ou perda de qualidade.*\| Alta \| Alto \|/);
+});

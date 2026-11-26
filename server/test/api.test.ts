@@ -825,7 +825,7 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   for (const [etapa, inicio, trecho] of [
     ["etp", "# ESTUDO TÉCNICO PRELIMINAR", /## 14\. POSICIONAMENTO CONCLUSIVO\n\nTexto de teste/],
     ["precos", "# RELATÓRIO DE FORMAÇÃO DE PREÇOS", /## 3\. PARÂMETROS UTILIZADOS \(art\. 23, § 1º\)\n\n- I — Painel de preços/],
-    ["tr", "# TERMO DE REFERÊNCIA", /## 1\. DEFINIÇÃO DO OBJETO[\s\S]*## 12\. OBRIGAÇÕES DA CONTRATADA\n\na\) Executar[\s\S]*## 19\. SANÇÕES ADMINISTRATIVAS[\s\S]*## 20\. ANÁLISE DE RISCOS[\s\S]*Aprovo o presente Termo de Referência\./],
+    ["tr", "# TERMO DE REFERÊNCIA", /## 1\. DEFINIÇÃO DO OBJETO[\s\S]*## 12\. REGISTRO DE PREÇOS\n\na\) O Município[\s\S]*## 13\. OBRIGAÇÕES DA CONTRATADA\n\na\) Executar[\s\S]*## 17\. VALIDADE DA ATA E REAJUSTE[\s\S]*## 20\. SANÇÕES ADMINISTRATIVAS[\s\S]*## 21\. ANÁLISE DE RISCOS\n\n\| Risco \| Probabilidade[\s\S]*Licitação deserta ou fracassada[\s\S]*Aprovo o presente Termo de Referência\./],
   ] as const) {
     assert.equal((await adm.post(`/api/processos/${id}/minutas/${etapa}/dos-campos`)).status, 200, etapa);
     const doc = (await adm.get(`/api/processos/${id}/minutas/${etapa}`)).dados.vigente.texto as string;

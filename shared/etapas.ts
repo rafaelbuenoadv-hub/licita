@@ -4,7 +4,7 @@
 export type Tipo = "bens" | "servicos" | "obra";
 export type Via = "licitacao" | "dispensa" | "inexigibilidade";
 export type Papel = "admin" | "requisitante" | "contratacao" | "juridico" | "autoridade" | "fiscal";
-export type Condicao = "obra" | "naoobra" | "lic" | "disp" | "inex" | "direta" | "naoinex";
+export type Condicao = "obra" | "naoobra" | "bens" | "lic" | "disp" | "inex" | "direta" | "naoinex";
 
 import { CAMPOS, MARCAS_OBRIGATORIAS, type Campo, type ValorCampo, type Valores } from "./campos.js";
 export type { Campo, ValorCampo, Valores } from "./campos.js";
@@ -339,6 +339,7 @@ export function vale(p: ProcessoBase, c?: Condicao): boolean {
   switch (c) {
     case "obra": return o;
     case "naoobra": return !o;
+    case "bens": return p.tipo === "bens";
     case "lic": return v === "licitacao";
     case "disp": return v === "dispensa";
     case "inex": return v === "inexigibilidade";

@@ -4,8 +4,9 @@ import { resumoDaInstrucao, complementosDaInstrucao, type DadosInstrucao } from 
 import { q, q1 } from "./db.js";
 import { secretariosDoProcesso } from "./portarias.js";
 import { ehMunicipioIbaiti } from "./municipio-ibaiti.js";
-import { analiseCriticaDosPrecos, SEM_DESCARTES, FONTES_COTACAO, CRITERIOS_PRECO, planejamentoDoProcesso, quadroDeItens, totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
+import { analiseCriticaDosPrecos, totalDoItem, SEM_DESCARTES, FONTES_COTACAO, CRITERIOS_PRECO, planejamentoDoProcesso, quadroDeItens, totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
 import { reaisPorExtenso } from "../shared/extenso.js";
+import { divergenciasEntrePecas, tabelaDeRiscos } from "../shared/coerencia-pecas.js";
 import { INCISOS_ART23, analiseDosPrecos, dataBaseDosPrecos, incisosUsados, quadroDasFontes, quadroEstatistico } from "../shared/analise-precos.js";
 const hojeIso = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
 import { ETAPAS, TIPOS, VIAS, textoDoCampo, type Tipo, type Valores, type Via } from "../shared/etapas.js";
@@ -49,7 +50,7 @@ async function contexto(p: Proc, campos: Record<string, Valores>, autor: Autor) 
   return {
     autoridade: autoridades.length === 1 ? autoridades[0] : null,
     // Nome oficial das secretarias (cadastro), como na Formalização de Demanda.
-    secretarias: (() => { const o = [...new Set([...cad.secretarios.map((x) => `Secretaria Municipal de ${x.secretaria}`), ...cad.areasSemCadastro])]; return o.length ? o : areas; })(),
+    secretarias: (() => { const o = [...new Set([...cad.secretarios.map((x) => `Secretaria Municipal de ${x.secretaria}`), ...cad.areasSemCadastro])]; return (o.length ? o : areas).map((a) => (/^secretaria/i.test(a) ? a : `Secretaria Municipal de ${a}`)); })(),
     instrucao: resumoDaInstrucao(solicitacoes), complementos: complementosDaInstrucao(solicitacoes), orgao, ibaiti: !!orgao && ehMunicipioIbaiti(orgao), itens, areas, requisitante, autor,
     total: itens.length ? totalDosItens(itens) : p.valor_estimado,
     data: `${local}${local ? ", " : ""}${hoje.getDate()} de ${MESES[hoje.getMonth()]} de ${hoje.getFullYear()}.`,
@@ -173,6 +174,27 @@ export async function documentoPrecos(p: Proc, campos: Record<string, Valores>, 
 }
 
 /* ---------------- Termo de Referência / Projeto Básico ---------------- */
+/** Quadro só com quantidades, para o valor estimado sigiloso (art. 24). */
+function quadroDeQuantidades(itens: ItemSolicitacao[]) {
+  return ["| Item | Descrição | Un. | Qtd. |", "|:---:|---|:---:|---:|",
+    ...itens.map((i, k) => `| ${k + 1} | ${celula(i.descricao)} | ${celula(i.unidade)} | ${i.quantidade == null ? "—" : i.quantidade.toLocaleString("pt-BR")} |`)].join("\n");
+}
+/** Tratamento de ME e EPP pelo valor de cada item (LC nº 123/2006, arts. 48 e 49). */
+function textoMeEpp(campos: Record<string, Valores>, itens: ItemSolicitacao[]) {
+  if (campos.tr?.me_epp === "afastar") {
+    const j = typeof campos.tr?.me_epp_justificativa === "string" ? (campos.tr.me_epp_justificativa as string).trim() : "";
+    return `Não se aplica o tratamento diferenciado a microempresas e empresas de pequeno porte, com fundamento no art. 49 da Lei Complementar nº 123/2006: ${j || falta("hipótese do art. 49 e justificativa")}`;
+  }
+  const exclusivos = itens.flatMap((i, k) => { const t = totalDoItem(i); return t != null && t <= LIMITE_ME_EPP ? [k + 1] : []; });
+  const semValor = itens.some((i) => totalDoItem(i) == null);
+  if (!itens.length || semValor) return `Participação exclusiva de microempresas e empresas de pequeno porte nos itens de valor estimado de até R$ 80.000,00 (art. 48, I, da Lei Complementar nº 123/2006): ${falta("valores dos itens para aplicar a regra")}`;
+  const lista = exclusivos.length === itens.length ? (itens.length === 1 ? "no item" : "em todos os itens")
+    : exclusivos.length ? `nos itens ${exclusivos.join(", ")}` : "";
+  return lista
+    ? `A participação ${lista} é exclusiva para microempresas e empresas de pequeno porte, por ter${exclusivos.length > 1 ? "em" : ""} valor estimado de até R$ 80.000,00 (art. 48, I, da Lei Complementar nº 123/2006).${exclusivos.length < itens.length ? " Nos demais itens a participação é ampla, avaliada a reserva de cota de até 25% para microempresas e empresas de pequeno porte nos itens de bens divisíveis (art. 48, III)." : ""}`
+    : "Nenhum item tem valor estimado de até R$ 80.000,00: a participação é ampla, avaliada a reserva de cota de até 25% para microempresas e empresas de pequeno porte nos itens de bens divisíveis (art. 48, III, da Lei Complementar nº 123/2006).";
+}
+const LIMITE_ME_EPP = 80_000;
 const ALINEAS_TR: [string, string, string][] = [
   ["a", "Definição do objeto", "a"], ["b", "Fundamentação da contratação", "b"], ["c", "Descrição da solução como um todo", "c"],
   ["d", "Requisitos da contratação", "d"], ["e", "Modelo de execução do objeto", "e"], ["f", "Modelo de gestão do contrato", "f"],
@@ -191,14 +213,22 @@ export async function documentoTr(p: Proc, campos: Record<string, Valores>, auto
   const tr = (id: string) => campo(campos, "tr", id);
   const nome = obra ? "Projeto Básico" : "Termo de Referência";
   const modalidade = campo(campos, "dfd", "modalidade") || VIAS[p.via];
+  const instrumento = (campos.tr?.instrumento as string) || "";
+  const perecivel = bens && campos.tr?.perfil === "perecivel";
+  const sigiloso = campos.tr?.divulgacao_valor === "sigiloso";
+  const municipio = c.orgao?.municipio ? `Município de ${c.orgao.municipio}` : "Município";
   const l = cabecalho(nome.toUpperCase(), p, c,
     `O presente ${nome}, elaborado nos termos do art. 6º, inciso ${obra ? "XXV" : "XXIII"}, e do art. 18, incisos II e X, da Lei Federal nº 14.133/2021${c.ibaiti ? ", bem como do Decreto Municipal nº 2.533/2024" : ""}, reúne os elementos necessários e suficientes para caracterizar o objeto e orientar a seleção do fornecedor e a execução do contrato. Forma de contratação: ${modalidade}. Natureza do objeto: ${TIPOS[p.tipo]}.`);
   let n = 0;
   for (const [id, titulo] of obra ? ALINEAS_PB : ALINEAS_TR) {
     l.push(secao(++n, titulo), tr(id) || falta(titulo.toLowerCase()));
-    if (id === "a" && c.itens.length) l.push(quadroDeItens(c.itens));
-    if (id === "a" && c.total != null) l.push(`Valor máximo estimado: **${valorComExtenso(c.total)}**.`);
-    if (id === "i" && c.total != null && !/R\$/.test(tr("i"))) l.push(`Valor total estimado: **${valorComExtenso(c.total)}**, conforme o Relatório de Formação de Preços (art. 23).`);
+    if (id === "a" && c.itens.length) l.push(sigiloso ? quadroDeQuantidades(c.itens) : quadroDeItens(c.itens));
+    if (id === "a" && c.total != null && !sigiloso) l.push(`Valor estimado da contratação: **${valorComExtenso(c.total)}**.`);
+    if (id === "i") {
+      if (sigiloso) l.push("O valor estimado tem caráter sigiloso até o julgamento das propostas e consta dos autos, à disposição dos órgãos de controle (art. 24 da Lei nº 14.133/2021).");
+      else if (c.total != null && !/R\$/.test(tr("i"))) l.push(`Valor total estimado: **${valorComExtenso(c.total)}**, conforme o Relatório de Formação de Preços (art. 23).`);
+    }
+    if (id === "h" && p.via === "licitacao") l.push(textoMeEpp(campos, c.itens));
     if (id === "j" && typeof campos.dot?.dotacao === "string" && campos.dot.dotacao.trim()) l.push(`Dotação orçamentária: ${campos.dot.dotacao.trim()}`);
   }
 
@@ -208,7 +238,18 @@ export async function documentoTr(p: Proc, campos: Record<string, Valores>, auto
   l.push(secao(++n, `Prazo e local de ${execucao}`),
     `O prazo de ${execucao} é de ${tr("prazo_execucao") || `até 15 (quinze) dias corridos, contados do recebimento da ${ordem}`}.`,
     `Local: ${tr("local_execucao") || `o indicado pela Secretaria requisitante na ${ordem}`}${bens ? ", em dias úteis e horário de expediente, correndo por conta da contratada as despesas de transporte, frete, carga e descarga" : ""}.`,
-    `Os ${bens ? "produtos" : "serviços"} em desacordo com as especificações deverão ser ${bens ? "substituídos" : "refeitos"} no prazo de até 5 (cinco) dias úteis da notificação, sem ônus para o Município.`);
+    `Os ${bens ? "produtos" : "serviços"} em desacordo com as especificações deverão ser ${bens ? "substituídos" : "refeitos"} no prazo de ${perecivel ? "até 24 (vinte e quatro) horas" : "até 5 (cinco) dias úteis"} da notificação, sem ônus para o Município.`);
+  if (instrumento === "ata") l.push(secao(++n, "Registro de preços"), alineas([
+    `O ${municipio} é o órgão gerenciador da ata de registro de preços, por meio da ${c.secretarias[0] ?? "Secretaria requisitante"}`,
+    "A existência de preços registrados não obriga a Administração a contratar, nem a contratar a totalidade das quantidades estimadas, que servem de referência para o registro (art. 83 da Lei nº 14.133/2021)",
+    "Cada contratação decorrente da ata será formalizada por contrato ou por nota de empenho, conforme o art. 95 da Lei nº 14.133/2021, com a respectiva reserva orçamentária",
+    campos.tr?.adesao === "sim"
+      ? "Será admitida a adesão à ata por órgãos e entidades não participantes, nos limites e condições do art. 86 da Lei nº 14.133/2021"
+      : "Não será admitida a adesão à ata por órgãos e entidades não participantes",
+  ]));
+  else if (instrumento === "empenho") l.push(secao(++n, "Instrumento"),
+    "O instrumento de contrato será substituído pela nota de empenho de despesa, nos termos do art. 95 da Lei nº 14.133/2021, aplicando-se a ela, no que couber, as disposições deste Termo de Referência.");
+  else if (!instrumento) l.push(secao(++n, "Instrumento"), falta("instrumento da contratação (ata, contrato ou nota de empenho)"));
   l.push(secao(++n, "Obrigações da contratada"), alineas([
     `- Executar o objeto conforme as especificações, os prazos e as condições deste ${nome} e da proposta;`,
     `- Reparar, corrigir, remover ou substituir, às suas expensas, no todo ou em parte, o objeto em que se verificarem vícios, defeitos ou incorreções;`,
@@ -227,7 +268,9 @@ export async function documentoTr(p: Proc, campos: Record<string, Valores>, auto
     "- Aplicar as sanções cabíveis, assegurados o contraditório e a ampla defesa.",
   ]));
   l.push(secao(++n, "Recebimento do objeto"),
-    bens
+    perecivel
+      ? "No ato da entrega, o fiscal conferirá a quantidade, a qualidade e o estado de conservação do produto, recusando de imediato o que estiver impróprio, danificado ou em desacordo com as especificações. O recebimento definitivo ocorrerá em até 2 (dois) dias úteis, mediante atesto na nota fiscal (art. 140, II, da Lei nº 14.133/2021)."
+      : bens
       ? "O objeto será recebido provisoriamente, no ato da entrega, para posterior verificação da conformidade com as especificações, e definitivamente, em até 10 (dez) dias úteis, após a verificação da qualidade e da quantidade e a consequente aceitação, mediante termo ou atesto na nota fiscal (art. 140, II, da Lei nº 14.133/2021)."
       : "O objeto será recebido provisoriamente pelo fiscal do contrato, mediante termo detalhado, quando verificado o cumprimento das exigências técnicas, e definitivamente pelo gestor do contrato, mediante termo que comprove o atendimento das exigências contratuais (art. 140, I, da Lei nº 14.133/2021).",
     bens
@@ -236,9 +279,15 @@ export async function documentoTr(p: Proc, campos: Record<string, Valores>, auto
   l.push(secao(++n, "Condições de pagamento"),
     `O pagamento será efetuado em ${tr("prazo_pagamento") || "até 30 (trinta) dias, contados do atesto da nota fiscal"}, por meio de transferência bancária para conta indicada pela contratada, observada a ordem cronológica de pagamentos (art. 141 da Lei nº 14.133/2021).`,
     "A nota fiscal deverá vir acompanhada das provas de regularidade fiscal, trabalhista e com o FGTS. Havendo erro na nota fiscal ou circunstância que impeça a liquidação da despesa, o prazo de pagamento ficará suspenso até a regularização.");
-  l.push(secao(++n, "Vigência e reajuste"),
+  const reajuste = `Os preços serão fixos e irreajustáveis pelo prazo de 1 (um) ano, contado da data do orçamento estimado${tr("reajuste") ? `, após o qual poderão ser reajustados pelo índice ${tr("reajuste")}` : ""} (art. 25, § 7º, e art. 92, § 3º, da Lei nº 14.133/2021).`;
+  if (instrumento === "ata") l.push(secao(++n, "Validade da ata e reajuste"),
+    "A ata de registro de preços terá validade de 1 (um) ano, contado da sua assinatura, prorrogável por igual período, desde que comprovado que o preço é vantajoso (art. 84 da Lei nº 14.133/2021). Os contratos dela decorrentes terão a vigência neles estabelecida.",
+    reajuste);
+  else if (instrumento === "empenho") l.push(secao(++n, "Prazo e preços"),
+    `Tratando-se de ${bens ? "entrega imediata e integral" : "execução de prazo certo"}, a obrigação se encerra com ${bens ? "a entrega" : "a execução"} e o recebimento definitivo do objeto, e os preços são fixos e irreajustáveis.`);
+  else l.push(secao(++n, "Vigência e reajuste"),
     `A vigência será de ${tr("vigencia") || "12 (doze) meses, contados da assinatura do contrato"}, admitida a prorrogação nas hipóteses da Lei nº 14.133/2021.`,
-    `Os preços serão fixos e irreajustáveis pelo prazo de 1 (um) ano, contado da data do orçamento estimado${tr("reajuste") ? `, após o qual poderão ser reajustados pelo índice ${tr("reajuste")}` : ""} (art. 25, § 7º, e art. 92, § 3º, da Lei nº 14.133/2021).`);
+    reajuste);
   l.push(secao(++n, "Garantia"),
     tr("garantia_objeto")
       ? `A contratada deverá garantir o objeto pelo prazo de ${tr("garantia_objeto")}, sem prejuízo da garantia legal prevista no Código de Defesa do Consumidor.`
@@ -252,18 +301,19 @@ export async function documentoTr(p: Proc, campos: Record<string, Valores>, auto
     "A contratada que cometer as infrações previstas no art. 155 da Lei nº 14.133/2021 ficará sujeita às sanções de advertência, multa, impedimento de licitar e contratar e declaração de inidoneidade, previstas no art. 156, observados o contraditório, a ampla defesa e os critérios de dosimetria do mesmo artigo.",
     "O atraso injustificado na execução sujeitará a contratada à multa de mora de 0,5% (meio por cento) por dia sobre o valor da parcela em atraso, limitada a 10% (dez por cento), sem prejuízo das demais sanções (art. 162 da Lei nº 14.133/2021).");
 
-  l.push(secao(++n, "Análise de riscos"), tr("riscos") || falta("análise de riscos"));
+  const marcados = Array.isArray(campos.tr?.riscos_catalogo) ? (campos.tr.riscos_catalogo as string[]) : [];
+  const tabela = tabelaDeRiscos(marcados);
+  l.push(secao(++n, "Análise de riscos"), ...(tabela ? [tabela] : []), ...(tr("riscos") ? [tabela ? `Outros riscos e medidas: ${tr("riscos")}` : tr("riscos")] : []),
+    ...(!tabela && !tr("riscos") ? [falta("análise de riscos")] : []));
   if (campos.tr?.matriz === "sim") l.push(secao(++n, "Matriz de alocação de riscos"), tr("matriz_texto") || falta("matriz de alocação de riscos"));
   else if (campos.tr?.matriz === "nao") l.push("Não foi adotada matriz de alocação de riscos, facultativa para este objeto (art. 22 da Lei nº 14.133/2021).");
 
-  // Coerência: só declara quando os valores das peças realmente batem.
-  const numero = (x: unknown) => (typeof x === "string" && x.trim() ? Number(x.replace(/\./g, "").replace(",", ".")) : NaN);
-  const valores = [c.total ?? NaN, numero(campos.precos?.valor_total), numero(campos.dot?.valor_total)].filter((x) => Number.isFinite(x) && x > 0);
-  const divergente = valores.some((x) => Math.abs(x - valores[0]) > 0.01);
+  // Coerência: a conferência cruzada entre as peças decide; o que diverge vira pendência.
+  const divergencias = divergenciasEntrePecas(campos, c.itens, p.via);
   l.push(secao(++n, "Disposições finais"),
-    divergente
-      ? `[[VERIFICAR: o valor estimado difere entre as peças do processo (${[...new Set(valores.map(real))].join(" × ")}); ajuste a pesquisa de preços ou a dotação antes de concluir]]`
-      : `O objeto, as quantidades e o valor deste ${nome} correspondem aos da Formalização de Demanda, do Estudo Técnico Preliminar e do Relatório de Formação de Preços que integram o processo.`,
+    ...(divergencias.length
+      ? divergencias.map((d) => `[[VERIFICAR: ${d}]]`)
+      : [`O objeto, as quantidades e o valor deste ${nome} correspondem aos da Formalização de Demanda, do Estudo Técnico Preliminar e do Relatório de Formação de Preços que integram o processo.`]),
     "Os casos omissos serão resolvidos pela Administração, com base na Lei nº 14.133/2021 e na legislação municipal aplicável.");
   l.push(c.data, assinaturaRequisitante(c), `Aprovo o presente ${nome}.`, assinaturaAutoridade(c));
   return l.join("\n\n");
