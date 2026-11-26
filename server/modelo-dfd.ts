@@ -31,7 +31,7 @@ export function assinatura(responsavel: string, padrao: { nome: string; cargo: s
 /**
  * Formalização de Demanda no padrão do Departamento de Licitações e Contratos de Ibaiti:
  * preâmbulo com a legislação aplicável, informações gerais (objeto, justificativa, secretarias contempladas,
- * estimativa de valor, necessidade do ETP e da matriz de riscos, soluções sugeridas, modalidade) e disposições finais.
+ * estimativa de valor, soluções sugeridas, modalidade), verificação no PAC e assinatura do titular.
  */
 export async function documentoDfd(p: Proc, campos: Record<string, Valores>, autor: { nome: string; cargo: string }) {
   const dfd = campos.dfd ?? {};
@@ -64,22 +64,19 @@ export async function documentoDfd(p: Proc, campos: Record<string, Valores>, aut
 
   const etp = txt(dfd, "etp") === "dispensado"
     ? "Por se tratar de obra ou serviço comum de engenharia, sem prejuízo técnico, a especificação do objeto constará do Termo de Referência ou do Projeto Básico, dispensada a elaboração de Estudo Técnico Preliminar (Lei nº 14.133/2021, art. 18, § 3º" + (ibaiti ? "; Decreto Municipal nº 2.533/2024, art. 8º" : "") + "), sem prejuízo da análise dos riscos inerentes à contratação."
-    : "A fase preparatória do presente procedimento identificou considerações técnicas, operacionais e mercadológicas relevantes, as quais exigiram a elaboração de Estudo Técnico Preliminar, nos termos do § 1º do art. 18 da Lei nº 14.133/2021, bem como a análise dos riscos inerentes à contratação.";
+    : "";
 
   const objeto = txt(dfd, "objeto") || instrucao.objeto || p.objeto;
-  // Nas disposições finais vai o objeto resumido do processo (o do DFD costuma ser longo).
-  const resumo = p.objeto.length && p.objeto.length < objeto.length ? p.objeto : objeto;
   const responsavel = txt(dfd, "responsavel");
   const [nomeResp, restoResp] = responsavel.includes(" — ") ? responsavel.split(" — ", 2) : [responsavel, ""];
-  const cargoResp = restoResp.replace(/\s*\(Portaria.*$/, "") || (titular ? `Secretário(a) Municipal de ${titular.secretaria}` : "");
+  const cargoResp = restoResp.replace(/\s*\(Portaria.*$/, "") || (titular ? `Titular da Secretaria Municipal de ${titular.secretaria}` : "");
   const portaria = /\(Portaria nº ([^)]+)\)/.exec(restoResp)?.[1] ?? titular?.portaria ?? "";
   const hoje = new Date();
-  const decretos = ibaiti ? ", bem como dos Decretos Municipais nº 2.532/2024, nº 2.533/2024, nº 2.548/2024 e nº 2.549/2024" : ", bem como da legislação municipal aplicável";
 
   const l: string[] = [
     "# FORMALIZAÇÃO DE DEMANDA",
     `Protocolo ${p.protocolo} · Exercício ${p.ano}`,
-    `Em análise do objeto a ser contratado, averiguando também a metodologia aplicada nas últimas aquisições, atendendo ainda de maneira ampla à aplicação da Constituição Federal, da Lei Federal nº 14.133/2021, da Lei Complementar nº 123/2006, alterada pela Lei Complementar nº 147/2014${decretos}, a presente formalização de demanda tem por finalidade assegurar a seleção da proposta mais vantajosa para a Administração Pública, inclusive no que se refere ao ciclo de vida do objeto, nos termos do art. 11, inciso I, da Lei nº 14.133/2021.`,
+    `A presente Formalização de Demanda registra a necessidade de contratação apresentada ${lista ? `pela ${lista}` : "pela área requisitante"}, para instrução da fase preparatória, nos termos do art. 12, inciso VII, e do art. 18 da Lei Federal nº 14.133/2021${ibaiti ? " e do Decreto Municipal nº 2.533/2024" : ""}.`,
     "## INFORMAÇÕES GERAIS",
     "**Objeto:**", objeto,
     "**Justificativa da necessidade:**", txt(dfd, "justificativa") || instrucao.justificativa || falta("justificativa da necessidade"),
@@ -90,12 +87,9 @@ export async function documentoDfd(p: Proc, campos: Record<string, Valores>, aut
   l.push(
     "**Secretarias Contempladas:**", lista ? `${lista}.` : falta("secretarias contempladas"),
     "**Estimativa de Valor:**", textoValor,
-    "**Necessidade do Estudo Técnico Preliminar e Matriz de riscos:**", etp,
+    ...(txt(dfd, "etp") === "dispensado" ? ["**Estudo Técnico Preliminar:**", etp] : []),
     "**Soluções sugeridas para contratação:**", txt(dfd, "solucoes") || falta("soluções sugeridas para a contratação"),
     "**Modalidade de Contratação:**", txt(dfd, "modalidade") || falta("modalidade de contratação"),
-    "**Disposições finais:**",
-    `Com a ${/^(aquisi|contrata|presta|loca|execu|ades)/i.test(resumo) ? "" : "contratação de "}${resumo.charAt(0).toLowerCase()}${resumo.slice(1).replace(/[.;]\s*$/, "")}${txt(dfd, "modalidade") ? `, por meio de ${txt(dfd, "modalidade").charAt(0).toLowerCase()}${txt(dfd, "modalidade").slice(1)}` : ""}, a Administração Pública Municipal busca atender de forma eficiente e tempestiva às demandas das secretarias contempladas, assegurando a continuidade dos serviços públicos.`,
-    "A presente contratação demonstra o comprometimento do Município com o planejamento, a economicidade, a transparência e a boa gestão dos recursos públicos, promovendo a utilização racional dos instrumentos legais disponíveis e a observância dos princípios que regem a Administração Pública.",
     `${municipio ? `${municipio}, ` : ""}${hoje.getDate()} de ${MESES[hoje.getMonth()]} de ${hoje.getFullYear()}.`,
     [`@ ${nomeResp || titular?.nome || autor.nome}`, `@ ${cargoResp || autor.cargo}`, portaria && `@ Portaria de nomeação nº ${portaria}`].filter((x) => x && x !== "@ ").join("\n"),
   );

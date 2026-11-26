@@ -6,7 +6,7 @@ const dataLocal = (local?: string) => { const d = new Date(); return `${local ? 
 
 export const ASSINATURA_SOLICITACAO = [
   "@ [[Nome do secretário]]",
-  "@ Secretário(a) Municipal de [[Secretaria]]",
+  "@ Titular da Secretaria Municipal de [[Secretaria]]",
   "@ Portaria de nomeação nº [[Portaria de nomeação]]",
 ].join("\n");
 

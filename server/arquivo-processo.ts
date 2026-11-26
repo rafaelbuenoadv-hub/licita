@@ -84,3 +84,23 @@ export async function pdfEmRetrato(arquivo: Buffer): Promise<Buffer> {
   }
   return Buffer.from(await pdf.save());
 }
+
+/** Remove as páginas totalmente em branco de um anexo (nenhum pixel escuro na página). Nunca remove todas. */
+export async function semPaginasEmBranco(arquivo: Buffer): Promise<Buffer> {
+  const pasta = await mkdtemp(join(tmpdir(), "licita-branco-"));
+  try {
+    const entrada = join(pasta, "anexo.pdf"); await writeFile(entrada, arquivo);
+    await executar("pdftoppm", ["-gray", "-r", "40", entrada, join(pasta, "p")], opcoes);
+    const nomes = (await readdir(pasta)).filter((n) => /^p-\d+\.pgm$/.test(n)).sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+    const brancas: number[] = [];
+    for (const [i, nome] of nomes.entries()) {
+      const { channels } = await sharp(await readFile(join(pasta, nome))).stats();
+      if (channels[0].min >= 235) brancas.push(i);
+    }
+    if (!brancas.length || brancas.length === nomes.length) return arquivo;
+    const pdf = await PDFDocument.load(arquivo);
+    for (const i of [...brancas].reverse()) pdf.removePage(i);
+    return Buffer.from(await pdf.save());
+  } catch { return arquivo; }
+  finally { await rm(pasta, { recursive: true, force: true }); }
+}

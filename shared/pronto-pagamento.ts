@@ -46,7 +46,7 @@ export function limitePP(ano: number) {
 
 /** Titular da Secretaria, do cadastro de secretários, no texto do campo "responsável". */
 export const titularPP = (t: { nome: string; secretaria: string; portaria: string | null }) =>
-  `${t.nome} — Secretário(a) Municipal de ${t.secretaria}${t.portaria ? ` (Portaria nº ${t.portaria})` : ""}`;
+  `${t.nome} — Titular da Secretaria Municipal de ${t.secretaria}${t.portaria ? ` (Portaria nº ${t.portaria})` : ""}`;
 /** Linhas de assinatura a partir do responsável: nome, cargo e portaria de nomeação, quando houver. */
 export function assinaturaPP(responsavel: string, secretaria: string) {
   const [nome, resto] = responsavel.includes(" — ") ? responsavel.split(" — ", 2) : [responsavel || "Responsável pelo pedido", secretaria];

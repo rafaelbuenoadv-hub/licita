@@ -3,7 +3,7 @@ import { q, q1 } from "./db.js";
 import { memoriaBaseDoMetodo } from "../shared/memoria-precos.js";
 import { secretariosDoProcesso } from "./portarias.js";
 import { documentoDfd } from "./modelo-dfd.js";
-import { documentoEtp, documentoPrecos, documentoTr } from "./modelos-fase-interna.js";
+import { documentoEtp, documentoPrecos, documentoTr, assinaturaDoUsuario } from "./modelos-fase-interna.js";
 import { totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
 import {
   ETAPAS, TIPOS, VIAS, camposFaltando, camposVisiveis, itemDosCampos, itensDe, textoDoCampo, temValor,
@@ -61,7 +61,7 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
   const quantidades = itens.length
     ? itens.map((i) => `- ${i.descricao}: ${i.quantidade ?? "?"} ${i.unidade || ""}`.trimEnd()).join("\n")
     : "";
-  const valorTexto = total != null ? `Valor estimado: R$ ${moeda(total)}${itens.length ? `, conforme os preços unitários dos ${itens.length} itens da instrução do processo` : ""}.` : "";
+  const valorTexto = total != null ? `Valor estimado: R$ ${moeda(total)}${itens.length ? `, conforme ${itens.length === 1 ? "o preço unitário do item" : `os preços unitários dos ${itens.length} itens`} da instrução do processo` : ""}.` : "";
   const sug: Record<string, Valores> = {
     pac: {
       consta: p.pca_item_id ? "sim" : "",
@@ -69,7 +69,7 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
       mes_planejado: itemPca?.periodo_oficial ?? "",
     },
     dfd: {
-      responsavel: titular ? `${titular.nome} — Secretário(a) Municipal de ${titular.secretaria}${titular.portaria ? ` (Portaria nº ${titular.portaria})` : ""}` : "",
+      responsavel: titular ? `${titular.nome} — Titular da Secretaria Municipal de ${titular.secretaria}${titular.portaria ? ` (Portaria nº ${titular.portaria})` : ""}` : "",
       contato: [contato?.telefone, contato?.email].filter(Boolean).join(" · "),
       objeto: primeiro(...solicitacoes.map((s) => s.objeto), p.objeto),
       justificativa: primeiro(solicitacoes.map((s) => s.justificativa).filter((x) => x?.trim()).join("\n\n"), v("pac", "justificativa_inclusao")),
@@ -117,12 +117,12 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
 function padroesEtp(tipo: string) {
   const bens = tipo === "bens";
   return {
-    ix: `Atender à necessidade descrita neste estudo com economicidade, assegurando a continuidade ${bens ? "do abastecimento" : "dos serviços"} e o melhor aproveitamento dos recursos humanos, materiais e financeiros do Município.`,
-    x: "Não há providências prévias à celebração do contrato além da designação formal do gestor e do fiscal, que já possuem conhecimento para acompanhar a execução do objeto.",
+    ix: "Atender à necessidade descrita neste estudo com economicidade e com o melhor aproveitamento dos recursos humanos, materiais e financeiros do Município.",
+    x: "Designação formal do gestor e do fiscal do contrato, com a capacitação necessária para acompanhar a execução do objeto, se for o caso.",
     xi: "Não foram identificadas contratações correlatas ou interdependentes que interfiram na presente contratação.",
     xii: bens
-      ? "Não são esperados impactos ambientais significativos. A contratada deverá observar a legislação ambiental, inclusive quanto ao descarte adequado de embalagens e resíduos e à logística reversa, quando aplicável."
-      : "Não são esperados impactos ambientais significativos. A contratada deverá observar a legislação ambiental e dar destinação adequada aos resíduos gerados na execução.",
+      ? "A área requisitante não identificou impactos ambientais significativos decorrentes da contratação. A contratada deverá observar a legislação ambiental aplicável ao objeto."
+      : "A área requisitante não identificou impactos ambientais significativos decorrentes da contratação. A contratada deverá observar a legislação ambiental e dar destinação adequada aos resíduos gerados na execução.",
   };
 }
 
@@ -166,17 +166,23 @@ export async function documentoDosCampos(p: Proc, e: Etapa, campos: Record<strin
     `# ${titulo}`,
     `Protocolo ${p.protocolo} · ${orgao?.nome ?? ""}`,
     `Objeto: ${p.objeto}`,
-    `Secretaria demandante: ${areas.join("; ") || "não informada"} · ${TIPOS[p.tipo]} · ${VIAS[p.via]}`,
+    `Secretaria demandante: ${areas.join("; ") || "não informada"} · ${TIPOS[p.tipo]} · ${(typeof campos.dfd?.modalidade === "string" && campos.dfd.modalidade.trim()) || VIAS[p.via]}`,
   ];
   let n = 0;
   for (const c of camposVisiveis(e, p, valores)) {
     const texto = textoDoCampo(c, valores[c.id]);
     if (!texto || c.foraDoDocumento) continue;
+    // Declarações sobre o fiscal só depois de o fiscal ser indicado.
+    if (e.id === "fiscal" && c.id === "declaracoes" && !(typeof valores.fiscal_nome === "string" && valores.fiscal_nome.trim())) continue;
     l.push(`## ${++n}. ${c.rotulo.replace(/^[a-z]\)\s*|^[IVX]+\s*—\s*/, "")}`, texto);
   }
   if (e.id === "protocolo") {
+    const feitas = new Set((await q<{ etapa: string }>("select distinct etapa from minutas where processo_id=$1", [p.id])).map((m) => m.etapa));
+    const pecas = ETAPAS.filter((x) => x.id !== "protocolo" && feitas.has(x.id)).map((x) => (x.doc ?? x.nome).replace(/\s*\(.*\)$/, ""));
     l.push(`## ${++n}. Encaminhamento`,
-      "Encaminha-se o processo, com os documentos da preparação pela secretaria (verificação no PAC, instrução do processo, DFD, pesquisa de preços e memória de cálculo, ETP, Termo de Referência ou Projeto Básico com análise de riscos, indicação de dotação orçamentária e indicação do fiscal do contrato), ao Departamento de Licitações e Contratos, para análise e providências de sua competência.");
+      pecas.length
+        ? `Encaminha-se o processo ao Departamento de Licitações e Contratos, para análise e providências de sua competência, com as seguintes peças da fase preparatória: ${pecas.join("; ")}.`
+        : "Encaminha-se o processo ao Departamento de Licitações e Contratos, para análise e providências de sua competência.");
   }
   if (e.id === "dot") {
     l.push(`## ${++n}. Pedido`, "Solicita-se à Contabilidade a reserva e a indicação da dotação orçamentária compatível com o objeto, para as parcelas que vencem no exercício (Lei nº 14.133/2021, art. 150).");
@@ -185,7 +191,8 @@ export async function documentoDosCampos(p: Proc, e: Etapa, campos: Record<strin
   const assinante = e.id === "dfd" || e.id === "pac" ? primeiro(resp("dfd"), autor.nome) : e.id === "protocolo" ? primeiro(resp("protocolo"), resp("dfd"), autor.nome) : autor.nome;
   const [nome, cargo] = assinante.includes(" — ") ? assinante.split(" — ") : [assinante, autor.cargo];
   l.push(`${orgao?.municipio ?? ""}${orgao?.uf ? `/${orgao.uf}` : ""}, ${dataExtenso()}.`.replace(/^, /, ""));
-  l.push([`@ ${nome}`, cargo && `@ ${cargo}`].filter(Boolean).join("\n"));
+  // Assinatura pelo operador do sistema exige nome completo e cargo do cadastro (o login sozinho não identifica o responsável).
+  l.push(assinante === autor.nome ? assinaturaDoUsuario(autor) : [`@ ${nome}`, cargo && `@ ${cargo}`].filter(Boolean).join("\n"));
   return l.join("\n\n");
 }
 

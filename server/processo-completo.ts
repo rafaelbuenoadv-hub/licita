@@ -9,7 +9,7 @@ import { inserirVerificacaoPac, documentoDaPesquisaDePrecos, type ItemSolicitaca
 import { documentoDosCampos, camposDo } from "./campos.js";
 import { secaoDaMinuta, type Timbrado } from "./docx.js";
 import { minutaParaPdf } from "./pdf.js";
-import { arquivoDoProcessoParaPdf, paginasDoPdfParaWord } from "./arquivo-processo.js";
+import { arquivoDoProcessoParaPdf, paginasDoPdfParaWord, semPaginasEmBranco } from "./arquivo-processo.js";
 import type { Processo } from "./routes/processos.js";
 
 export const ORDEM_DOCUMENTOS_PROCESSO = ["protocolo", "dfd", "precos", "etp", "tr", "dot", "fiscal"] as const;
@@ -43,7 +43,7 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
   const arquivosVistos = new Map<string, Peca>();
   const incluirArquivo = (nome: string, arquivo: Buffer, referencia: string, etapa: string) => {
     const hash = createHash("sha256").update(arquivo).digest("hex");
-    const chave = `${destinoDosAnexos(etapa)}:${hash}`;
+    const chave = hash;
     const visto = arquivosVistos.get(chave);
     if (visto) { visto.referencias!.push(`${referencia}: ${nome}`); return; }
     const peca = { titulo: `${referencia} — ${nomeLinha(nome)}`, nome, arquivo, referencias: [] };
@@ -63,7 +63,7 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
     if (!texto && temCampos(campos[id])) texto = await documentoDosCampos(p, e, campos, autores.find((a) => a.etapa === id) ?? { nome: "[[Responsável pela etapa]]", cargo: "" });
     if (!texto) { ausentes.push(e.nome); continue; }
     if (id === "precos") texto = documentoDaPesquisaDePrecos(texto, solicitacoes.flatMap((s) => s.itens));
-    if (id === "dfd" || id === "etp") texto = inserirComplementosDaInstrucao(texto, solicitacoes);
+    if (id === "dfd") texto = inserirComplementosDaInstrucao(texto, solicitacoes);
     if (id === "dfd") {
       texto = inserirVerificacaoPac(texto, campos);
 
@@ -77,8 +77,8 @@ export async function pecasDoProcesso(p: Processo, usuario: number) {
   }
   for (const a of anexos) {
     const referencia = a.etapa ? ETAPAS.find((e) => e.id === a.etapa)?.nome ?? a.etapa : "Processo";
-    grupo(a.etapa).push({ titulo: `Registro de juntada — ${nomeLinha(a.nome)}`, texto: `# REGISTRO DE JUNTADA\n\nArquivo: ${nomeLinha(a.nome)}\n\nPeça de referência: ${referencia}\n\nJuntado em: ${new Date(a.criado_em).toLocaleString("pt-BR", {timeZone:"America/Sao_Paulo"})}` });
-    if (a.arquivo) incluirArquivo(a.nome, a.arquivo, `Anexo — ${referencia}`, a.etapa);
+    const juntado = new Date(a.criado_em).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
+    if (a.arquivo) incluirArquivo(a.nome, a.arquivo, `Anexo — ${referencia} (juntado em ${juntado})`, a.etapa);
     else grupo(a.etapa).push({ titulo: `Anexo do processo — ${nomeLinha(a.nome)} (registro em texto)`, texto: `# ${nomeLinha(a.nome)}\n\n${a.texto}` });
   }
   for (const r of revisoes) {
@@ -105,7 +105,7 @@ export async function montarProcessoCompleto(p: Processo, formato: "pdf" | "docx
   const { capa, pecas } = await pecasDoProcesso(p, usuario);
   const partes = [];
   for (const peca of pecas) {
-    const arquivo = peca.arquivo ? await arquivoDoProcessoParaPdf(peca.nome!, peca.arquivo) : await minutaParaPdf(peca.texto!, peca.titulo, timbrado);
+    const arquivo = peca.arquivo ? await semPaginasEmBranco(await arquivoDoProcessoParaPdf(peca.nome!, peca.arquivo)) : await minutaParaPdf(peca.texto!, peca.titulo, timbrado);
     const pdf = await PDFDocument.load(arquivo);
     partes.push({ ...peca, pdf, arquivoPdf: arquivo, paginas: pdf.getPageCount() });
   }
@@ -115,7 +115,7 @@ export async function montarProcessoCompleto(p: Processo, formato: "pdf" | "docx
     let tamanhoIndice = 1, indicePdf = capaPdf;
     for (let tentativa = 0; tentativa < 5; tentativa++) {
       let pagina = capaPdf.getPageCount() + tamanhoIndice + 1;
-      const linhas = partes.map((x, i) => { const inicio = pagina; pagina += x.paginas; return `${i + 1}. ${x.titulo} — páginas ${inicio} a ${pagina - 1}${x.referencias?.length ? `\nMesmo arquivo também referido em: ${x.referencias.join("; ")}` : ""}`; });
+      const linhas = partes.map((x, i) => { const inicio = pagina; pagina += x.paginas; return `${i + 1}. ${x.titulo} — páginas ${inicio} a ${pagina - 1}`; });
       indicePdf = await PDFDocument.load(await minutaParaPdf(`# ÍNDICE DO PROCESSO\n\n${linhas.join("\n\n") || "Nenhum documento ou anexo disponível."}`, "Índice do processo"));
       if (tamanhoIndice === indicePdf.getPageCount()) break;
       tamanhoIndice = indicePdf.getPageCount();
@@ -131,7 +131,7 @@ export async function montarProcessoCompleto(p: Processo, formato: "pdf" | "docx
     }
     return Buffer.from(await pdf.save());
   }
-  const indice = `# ÍNDICE DO PROCESSO\n\n${partes.map((x, i) => `${i + 1}. ${x.titulo}${x.referencias?.length ? `\nMesmo arquivo também referido em: ${x.referencias.join("; ")}` : ""}`).join("\n\n") || "Nenhum documento ou anexo disponível."}`;
+  const indice = `# ÍNDICE DO PROCESSO\n\n${partes.map((x, i) => `${i + 1}. ${x.titulo}`).join("\n\n") || "Nenhum documento ou anexo disponível."}`;
   const sections = [secaoDaMinuta(capa, timbrado), secaoDaMinuta(indice)];
   for (const [i, x] of partes.entries()) {
     if (!x.arquivo) { sections.push(secaoDaMinuta(x.texto!, timbrado)); continue; }

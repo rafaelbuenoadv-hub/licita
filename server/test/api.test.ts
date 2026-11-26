@@ -755,7 +755,7 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
 
   // O responsável vem do cadastro de secretários; o objeto, do processo.
   det = (await admin.get(`/api/processos/${id}`)).dados;
-  assert.match(det.sugestoes_campos.dfd.responsavel, /^Denise da Silva Lima — Secretário\(a\) Municipal de Educação \(Portaria nº 008\/2025\)$/);
+  assert.match(det.sugestoes_campos.dfd.responsavel, /^Denise da Silva Lima — Titular da Secretaria Municipal de Educação \(Portaria nº 008\/2025\)$/);
   assert.equal(det.sugestoes_campos.dfd.objeto, "Aquisição de 30 cadeiras escolares");
   assert.equal((await admin.post(`/api/processos/${id}/minutas/dfd/dos-campos`)).status, 400);
   const dfd = {
@@ -772,15 +772,15 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
   // Padrão do Departamento de Licitações e Contratos de Ibaiti.
   assert.ok(doc.texto.startsWith("# FORMALIZAÇÃO DE DEMANDA\n\n"));
   assert.ok(doc.texto.includes(`Protocolo ${protocolo} · Exercício 2028`));
-  assert.match(doc.texto, /Decretos Municipais nº 2\.532\/2024, nº 2\.533\/2024, nº 2\.548\/2024 e nº 2\.549\/2024, a presente formalização de demanda/);
+  assert.match(doc.texto, /A presente Formalização de Demanda registra a necessidade de contratação apresentada pela Secretaria Municipal de Educação/);
+  assert.doesNotMatch(doc.texto, /metodologia aplicada nas últimas aquisições|2\.549\/2024/);
   assert.match(doc.texto, /## INFORMAÇÕES GERAIS\n\n\*\*Objeto:\*\*\n\nCadeiras escolares, sem marca\./);
   assert.match(doc.texto, /\*\*Justificativa da necessidade:\*\*\n\nAs cadeiras atuais estão quebradas, conforme laudo anexo\./);
   assert.match(doc.texto, /\*\*Secretarias Contempladas:\*\*\n\nSecretaria Municipal de Educação\./);
   assert.match(doc.texto, /\*\*Estimativa de Valor:\*\*\n\nO valor estimado da contratação é de R\$\s9\.000,00 \(nove mil reais\), conforme estimativa preliminar/);
-  assert.match(doc.texto, /\*\*Necessidade do Estudo Técnico Preliminar e Matriz de riscos:\*\*\n\nA fase preparatória/);
+  assert.doesNotMatch(doc.texto, /Necessidade do Estudo Técnico Preliminar|Disposições finais/, "seções retóricas cortadas a pedido da Procuradoria");
   assert.match(doc.texto, /\*\*Modalidade de Contratação:\*\*\n\nPregão Eletrônico/);
-  assert.match(doc.texto, /\*\*Disposições finais:\*\*\n\nCom a contratação de cadeiras escolares, sem marca, por meio de pregão Eletrônico, a Administração/);
-  assert.match(doc.texto, /@ Denise da Silva Lima\n@ Secretário\(a\) Municipal de Educação\n@ Portaria de nomeação nº 008\/2025$/);
+  assert.match(doc.texto, /@ Denise da Silva Lima\n@ Titular da Secretaria Municipal de Educação\n@ Portaria de nomeação nº 008\/2025$/);
   // O ETP já recebe a justificativa e as quantidades do DFD.
   det = (await admin.get(`/api/processos/${id}`)).dados;
   assert.equal(det.sugestoes_campos.etp.i, dfd.justificativa);
@@ -801,6 +801,9 @@ test("concluir e avançar: PAC e DFD cobram os campos, sugerem dados do processo
 });
 
 test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indicada", async () => {
+  // A Indicação do Fiscal é assinada por quem operou o sistema: só com nome completo e cargo no cadastro.
+  await pool.query("update usuarios set nome='Administrador de Teste', cargo='Agente de contratação' where email='admin@a.gov.br'");
+  after(() => pool.query("update usuarios set nome='admin', cargo='' where email='admin@a.gov.br'"));
   const lic = await new Cliente().entrar("lic@a.gov.br");
   const adm = await new Cliente().entrar("admin@a.gov.br");
   const pb = { tipo: "servicos", via: "dispensa" } as const;
@@ -845,7 +848,7 @@ test("fiscal e protocolo: substituto diferente; protocolo exige a dotação indi
   assert.equal((await adm.post(`/api/processos/${id}/minutas/protocolo/dos-campos`)).status, 200);
   const texto = (await adm.get(`/api/processos/${id}/minutas/protocolo`)).dados.vigente.texto as string;
   assert.match(texto, /^# ENCAMINHAMENTO AO DEPARTAMENTO DE LICITAÇÕES E CONTRATOS/);
-  assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo.*instrução do processo, DFD/);
+  assert.match(texto, /## \d+\. Encaminhamento\n\nEncaminha-se o processo .*com as seguintes peças da fase preparatória: .*Estudo Técnico Preliminar/, "a lista de peças sai das minutas que existem no processo");
   assert.equal((await adm.put(`/api/processos/${id}/campos/dot`, { valores: { ...det.campos.dot, dotacao: "02.001 3.3.90.39" } })).status, 200);
   await adm.post(`/api/processos/${id}/minutas/protocolo/dos-campos`);
   const aposDotacao=(await adm.get(`/api/processos/${id}`)).dados;
@@ -1645,18 +1648,18 @@ test("pronto pagamento: documento de autorização traz itens em quadro, limite 
 test("pronto pagamento: o responsável e a assinatura vêm do cadastro de secretários", async () => {
   const admin = await new Cliente().entrar("admin@ibaiti.gov.br");
   const t = (await admin.get(`/api/pronto/titular?secretaria=${encodeURIComponent("SEDUC")}`)).dados.titular;
-  assert.deepEqual(t, { nome: "Denise da Silva Lima", secretaria: "Educação", portaria: "008/2025", texto: "Denise da Silva Lima — Secretário(a) Municipal de Educação (Portaria nº 008/2025)" });
+  assert.deepEqual(t, { nome: "Denise da Silva Lima", secretaria: "Educação", portaria: "008/2025", texto: "Denise da Silva Lima — Titular da Secretaria Municipal de Educação (Portaria nº 008/2025)" });
   assert.equal((await admin.get("/api/pronto/titular?secretaria=Inexistente")).dados.titular, null);
   const novo = (await admin.post("/api/pronto", { ano: 2026, secretaria: "SEDUC" })).dados;
   const rota = `/api/pronto/${novo.id}`;
   assert.equal((await admin.get(rota)).dados.dados.responsavel, t.texto);
   // Responsável apagado e Secretaria trocada: o sistema põe o titular da nova Secretaria.
   assert.equal((await admin.put(rota, { dados: { secretaria: "Obras", responsavel: "" } })).status, 200);
-  assert.match((await admin.get(rota)).dados.dados.responsavel, /^Amanda Carvalho Vanzeli — Secretário\(a\) Municipal de Obras/);
+  assert.match((await admin.get(rota)).dados.dados.responsavel, /^Amanda Carvalho Vanzeli — Titular da Secretaria Municipal de Obras/);
   assert.equal((await admin.put(rota, { dados: { secretaria: "SEDUC", responsavel: t.texto } })).status, 200);
   const { documentoPP, VAZIO_PP } = await import("../../shared/pronto-pagamento.js");
   const texto = documentoPP({ protocolo: "PP 2026/0009", ano: 2026, situacao: "pedido", orgao: "Município", municipio: "", autorizado_por: null, autorizado_em: null, dados: { ...VAZIO_PP, secretaria: "SEDUC", responsavel: t.texto } }, "autorizacao");
-  assert.match(texto, /@ Denise da Silva Lima\n@ Secretário\(a\) Municipal de Educação\n@ Portaria de nomeação nº 008\/2025/);
+  assert.match(texto, /@ Denise da Silva Lima\n@ Titular da Secretaria Municipal de Educação\n@ Portaria de nomeação nº 008\/2025/);
 });
 
 test("o que já foi informado no PAC e na Solicitação preenche os campos que pedem a mesma informação", async () => {
@@ -2288,10 +2291,10 @@ test("instrução cadastra dados sem montar documento e alimenta DFD e ETP sem a
   const { documentoEtp } = await import("../modelos-fase-interna.js");
   const autor = { nome: "Responsável", cargo: "Planejamento" };
   const dfd = await documentoDfd(p, p.campos, autor), etp = await documentoEtp(p, p.campos, autor);
+  assert.match(dfd, /Entrega e instalação na Escola Central/); assert.match(dfd, /Montagem assistida no local/);
+  assert.doesNotMatch(etp, /Montagem assistida no local/, "as informações complementares ficam só no DFD");
   for (const texto of [dfd, etp]) {
     assert.match(texto, /Mesas e conjuntos para a Escola Central/);
-    assert.match(texto, /Entrega e instalação na Escola Central/);
-    assert.match(texto, /Montagem assistida no local/);
     assert.match(texto, /Mesa escolar/); assert.match(texto, /300,00/);
   }
   assert.match(dfd, /Ampliação da unidade escolar/);
@@ -2355,9 +2358,10 @@ test("planejamento inicia o mesmo ETP antes dos preços; revisões preservam ver
   assert.equal((await adm.post(`${rota}/revisoes-documentos/dfd/confirmar`,{versao:doc.versao,em:rev.em})).status,409);
   assert.equal((await adm.post(`${rota}/minutas/etp/dos-campos`)).status,200);
   const atual=(await adm.get(`${rota}/minutas/etp`)).dados;
-  assert.equal(atual.vigente.versao,v1.versao+1);assert.match(atual.vigente.texto,/Entrega com montagem/);
-  assert.equal(atual.versoes.length,2);
-  assert.ok(!(await adm.get(rota)).dados.revisoes_documentos.some((r:any)=>r.etapa==="etp"));
+  // As informações complementares da instrução ficam só no DFD: o ETP regerado não muda e não ganha versão nova.
+  assert.equal(atual.vigente.versao,v1.versao);assert.doesNotMatch(atual.vigente.texto,/Entrega com montagem/);
+  assert.equal(atual.versoes.length,1);
+  assert.ok((await adm.get(rota)).dados.revisoes_documentos.some((r:any)=>r.etapa==="etp"),"sem mudança no texto, a revisão do ETP continua aguardando confirmação");
   const anexo=new FormData();anexo.set("arquivo",new Blob(["Comprovante do planejamento"]),"planejamento.txt");anexo.set("etapa","etp");
   const enviado=await adm.post(`${rota}/anexos`,anexo);assert.equal(enviado.status,201);
   p=(await adm.get(rota)).dados;const salvo=p.anexos.find((a:any)=>a.id===enviado.dados.id);
@@ -2407,7 +2411,7 @@ test("anexos de todas as etapas acompanham suas peças em PDF e Word, inclusive 
     assert.ok(posicao>inicio,`${etapa.id} após ${destino}`);
     if(proximo) assert.ok(posicao<pecas.findIndex((x)=>x.texto?.includes(`CORPO_PRINCIPAL_${proximo.toUpperCase()}`)),`${etapa.id} antes da próxima peça`);
   }
-  assert.equal(pecas.filter((x)=>x.arquivo?.equals(comum)).length,2,"o mesmo arquivo acompanha cada etapa e não duplica dentro dela");
+  assert.equal(pecas.filter((x)=>x.arquivo?.equals(comum)).length,1,"o mesmo arquivo entra uma única vez no processo");
   const pdf=await adm.get(`${rota}/completo.pdf`);assert.equal(pdf.status,200,JSON.stringify(pdf.dados));
   const textoPdf=(await extrairTexto("processo.pdf",pdf.dados)).replace(/\s+/g," ");
   for(const etapa of ETAPAS){
@@ -2415,7 +2419,7 @@ test("anexos de todas as etapas acompanham suas peças em PDF e Word, inclusive 
     assert.ok(textoPdf.indexOf(`COMPROVANTE_CORPO_${etapa.id.toUpperCase()}`)>textoPdf.indexOf(`CORPO_PRINCIPAL_${destino.toUpperCase()}`),etapa.id);
     if(proximo) assert.ok(textoPdf.indexOf(`COMPROVANTE_CORPO_${etapa.id.toUpperCase()}`)<textoPdf.indexOf(`CORPO_PRINCIPAL_${proximo.toUpperCase()}`),etapa.id);
   }
-  assert.equal(textoPdf.match(/ARQUIVO_COMPARTILHADO_CORPO/g)?.length,2);
+  assert.equal(textoPdf.match(/ARQUIVO_COMPARTILHADO_CORPO/g)?.length,1,"arquivo repetido entra uma única vez");
   assert.ok(textoPdf.indexOf("ANEXO_GERAL_CORPO")>textoPdf.indexOf("CORPO_PRINCIPAL_FISCAL"));
   const word=await adm.get(`${rota}/completo.docx`);assert.equal(word.status,200);
   const textoWord=await extrairTexto("processo.docx",word.dados);

@@ -18,7 +18,7 @@ export function resumoDaInstrucao(registros: DadosInstrucao[]) {
     objeto: unicos(registros.map((s) => s.objeto ?? "")).join("; "),
     justificativa: unicos(registros.map((s) => s.justificativa ?? "")).join("\n\n"),
     quantidades: itens.map((i) => `- ${i.descricao}: ${i.quantidade ?? "?"} ${i.unidade || ""}`.trimEnd()).join("\n"),
-    valorTexto: total == null ? "" : `Valor estimado: R$ ${total.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, conforme os preços unitários dos ${itens.length} itens da instrução do processo.`,
+    valorTexto: total == null ? "" : `Valor estimado: R$ ${total.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, conforme ${itens.length === 1 ? "o preço unitário do item" : `os preços unitários dos ${itens.length} itens`} da instrução do processo.`,
     itens, total,
   };
 }

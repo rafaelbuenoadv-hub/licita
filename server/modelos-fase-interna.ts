@@ -39,19 +39,27 @@ async function contexto(p: Proc, campos: Record<string, Valores>, autor: Autor) 
   const [nomeResp, restoResp] = responsavel.includes(" — ") ? responsavel.split(" — ", 2) : [responsavel, ""];
   const requisitante = {
     nome: nomeResp || titular?.nome || "",
-    cargo: restoResp.replace(/\s*\(Portaria.*$/, "") || (titular ? `Secretário(a) Municipal de ${titular.secretaria}` : ""),
+    cargo: restoResp.replace(/\s*\(Portaria.*$/, "") || (titular ? `Titular da Secretaria Municipal de ${titular.secretaria}` : ""),
     portaria: /\(Portaria nº ([^)]+)\)/.exec(restoResp)?.[1] ?? titular?.portaria ?? "",
   };
   const hoje = new Date();
   const local = `${orgao?.municipio ?? ""}${orgao?.uf ? `/${orgao.uf}` : ""}`;
   return {
     autoridade: autoridades.length === 1 ? autoridades[0] : null,
+    // Nome oficial das secretarias (cadastro), como na Formalização de Demanda.
+    secretarias: (() => { const o = [...new Set([...cad.secretarios.map((x) => `Secretaria Municipal de ${x.secretaria}`), ...cad.areasSemCadastro])]; return o.length ? o : areas; })(),
     instrucao: resumoDaInstrucao(solicitacoes), complementos: complementosDaInstrucao(solicitacoes), orgao, ibaiti: !!orgao && ehMunicipioIbaiti(orgao), itens, areas, requisitante, autor,
     total: itens.length ? totalDosItens(itens) : p.valor_estimado,
     data: `${local}${local ? ", " : ""}${hoje.getDate()} de ${MESES[hoje.getMonth()]} de ${hoje.getFullYear()}.`,
   };
 }
 type Ctx = Awaited<ReturnType<typeof contexto>>;
+
+export const nomeCompleto = (nome: string) => nome.trim().split(/\s+/).length >= 2;
+export function assinaturaDoUsuario(u: { nome: string; cargo: string }) {
+  if (!nomeCompleto(u.nome) || !u.cargo.trim()) return `@ ${falta("nome completo e cargo do responsável — complete o cadastro do usuário em Usuários")}`;
+  return [`@ ${u.nome.trim()}`, `@ ${u.cargo.trim()}`].join("\n");
+}
 
 /** Cabeçalho no mesmo padrão da Formalização de Demanda: título, protocolo e preâmbulo. */
 function cabecalho(titulo: string, p: Proc, _c: Ctx, preambulo: string) {
@@ -66,8 +74,11 @@ const secao = (n: number | string, titulo: string) => `## ${n}. ${titulo.toLocal
 const listaDeSecretarias = (areas: string[]) => (areas.length > 1 ? `${areas.slice(0, -1).join("; ")}; e ${areas.at(-1)}` : areas[0] ?? "");
 const assinaturaRequisitante = (c: Ctx) =>
   [`@ ${c.requisitante.nome || c.autor.nome}`, `@ ${c.requisitante.cargo || c.autor.cargo}`, c.requisitante.portaria && `@ Portaria de nomeação nº ${c.requisitante.portaria}`].filter(Boolean).join("\n");
-const assinaturaAutoridade = (c: Ctx) => (c.autoridade ? [`@ ${c.autoridade.nome}`, `@ ${c.autoridade.cargo || "Autoridade competente"}`].join("\n") : "@ Autoridade competente");
-const assinaturaAutor = (c: Ctx, papel: string) => [`@ ${c.autor.nome}`, `@ ${c.autor.cargo || papel}`].filter((x) => x !== "@ ").join("\n");
+const assinaturaAutoridade = (c: Ctx) => (c.autoridade && nomeCompleto(c.autoridade.nome)
+  ? [`@ ${c.autoridade.nome}`, `@ ${c.autoridade.cargo || "Autoridade competente"}`].join("\n")
+  : `@ ${falta("nome completo e cargo da autoridade competente — cadastre-a em Usuários com o papel de autoridade")}`);
+/** Quem operou o sistema só assina com nome completo e cargo do cadastro; o login sozinho não identifica o responsável. */
+const assinaturaAutor = (c: Ctx) => assinaturaDoUsuario(c.autor);
 const valorComExtenso = (v: number) => `${real(v)} (${reaisPorExtenso(v)})`;
 
 /* ---------------- ETP ---------------- */
@@ -83,12 +94,12 @@ export async function documentoEtp(p: Proc, campos: Record<string, Valores>, aut
   const c = await contexto(p, campos, autor);
   const etp = (id: string) => campo(campos, "etp", id);
   const l = cabecalho("ESTUDO TÉCNICO PRELIMINAR", p, c,
-    `O presente Estudo Técnico Preliminar, elaborado ${c.areas.length ? `pela ${listaDeSecretarias(c.areas)}` : "pela área requisitante"} nos termos do art. 18, § 1º, da Lei Federal nº 14.133/2021${c.ibaiti ? " e dos arts. 7º e 8º do Decreto Municipal nº 2.533/2024" : ""}, constitui a primeira etapa do planejamento da contratação. Tem por finalidade evidenciar o problema a ser resolvido e a melhor solução para atendê-lo, de modo a permitir a avaliação da viabilidade técnica e econômica da contratação e servir de base ao Termo de Referência.`);
+    `O presente Estudo Técnico Preliminar, elaborado ${c.secretarias.length ? `pela ${listaDeSecretarias(c.secretarias)}` : "pela área requisitante"} nos termos do art. 18, § 1º, da Lei Federal nº 14.133/2021${c.ibaiti ? " e dos arts. 7º e 8º do Decreto Municipal nº 2.533/2024" : ""}, constitui a primeira etapa do planejamento da contratação. Tem por finalidade evidenciar o problema a ser resolvido e a melhor solução para atendê-lo, de modo a permitir a avaliação da viabilidade técnica e econômica da contratação e servir de base ao Termo de Referência.`);
   l.push(secao(1, "Informações gerais"),
     `**Objeto:** ${campo(campos, "dfd", "objeto") || c.instrucao.objeto || p.objeto}`,
     `**Natureza do objeto:** ${TIPOS[p.tipo]}.`,
     `**Forma de contratação prevista:** ${campo(campos, "dfd", "modalidade") || VIAS[p.via]}.`,
-    `**Secretarias contempladas:** ${listaDeSecretarias(c.areas) || "—"}.`,
+    `**Secretarias contempladas:** ${listaDeSecretarias(c.secretarias) || "—"}.`,
     `**Documento de origem:** Formalização de Demanda do protocolo ${p.protocolo}.`);
   INCISOS_ETP.forEach(([id, titulo, inciso], n) => {
     void inciso;
@@ -102,9 +113,8 @@ export async function documentoEtp(p: Proc, campos: Record<string, Valores>, aut
       ...c.itens.map((i, k) => `| ${k + 1} | ${celula(i.descricao)} | ${celula(i.unidade)} | ${i.quantidade == null ? "—" : i.quantidade.toLocaleString("pt-BR")} |`)].join("\n"));
     if (id === "vi" && c.total != null) l.push(`Valor total estimado: **${valorComExtenso(c.total)}**, conforme a pesquisa de preços que integra o processo (art. 23).`);
   });
-  if (c.complementos) l.push(c.complementos);
   l.push(secao(15, "Responsáveis pela elaboração"),
-    "O estudo foi elaborado pela área requisitante, com o apoio técnico necessário. A fiscalização do futuro contrato caberá a servidor distinto dos responsáveis pela elaboração deste estudo (art. 7º, § 1º, da Lei nº 14.133/2021).",
+    "O estudo foi elaborado pela área requisitante. Na designação do fiscal do futuro contrato deverá ser observado o princípio da segregação de funções (art. 7º, § 1º, da Lei nº 14.133/2021).",
     c.data, assinaturaRequisitante(c));
   return l.join("\n\n");
 }
@@ -117,7 +127,7 @@ export async function documentoPrecos(p: Proc, campos: Record<string, Valores>, 
   const l = cabecalho("RELATÓRIO DE FORMAÇÃO DE PREÇOS", p, c,
     `O presente relatório, elaborado nos termos do art. 23, ${obra ? "§ 2º" : "§ 1º"}, da Lei Federal nº 14.133/2021${c.ibaiti ? " e do art. 11 do Decreto Municipal nº 2.533/2024" : ""}, tem por finalidade fixar o valor estimado da contratação, compatível com os valores praticados pelo mercado, considerados os preços constantes de bancos de dados públicos e as quantidades a contratar, e registrar a memória de cálculo adotada.`);
   l.push(secao(1, "Objeto"), campo(campos, "dfd", "objeto") || c.instrucao.objeto || p.objeto);
-  l.push(secao(2, "Secretarias contempladas"), `${listaDeSecretarias(c.areas) || "—"}.`);
+  l.push(secao(2, "Secretarias contempladas"), `${listaDeSecretarias(c.secretarias) || "—"}.`);
   const parametros = pr(obra ? "parametros_obra" : "parametros");
   l.push(secao(3, `Parâmetros utilizados (art. 23, ${obra ? "§ 2º" : "§ 1º"})`), parametros || falta("parâmetros utilizados"));
   const unica = pr(obra ? "fonte_unica_obra" : "fonte_unica");
@@ -148,8 +158,10 @@ export async function documentoPrecos(p: Proc, campos: Record<string, Valores>, 
   const valor = c.itens.length ? c.total : Number.isFinite(valorCampo) && valorCampo > 0 ? valorCampo : c.total;
   l.push(secao(obra ? 10 : 9, "Valor estimado da contratação"),
     valor != null ? `O valor estimado da contratação é de **${valorComExtenso(valor)}**.` : falta("valor estimado"),
-    "Declara-se que a pesquisa observou os parâmetros do art. 23 da Lei nº 14.133/2021 e que os documentos de suporte e a memória de cálculo integram os autos.");
-  l.push(c.data, assinaturaAutor(c, "Responsável pela pesquisa de preços"));
+    ...(Array.isArray(campos.precos?.atesto) && campos.precos.atesto.includes("conferi")
+      ? [`O responsável pela pesquisa atesta que conferiu as fontes, os valores e a memória de cálculo, e que a pesquisa observou os parâmetros do art. 23 da Lei nº 14.133/2021, com os documentos de suporte juntados aos autos.`]
+      : []));
+  l.push(c.data, assinaturaAutor(c));
   return l.join("\n\n");
 }
 
@@ -211,7 +223,9 @@ export async function documentoTr(p: Proc, campos: Record<string, Valores>, auto
     bens
       ? "O objeto será recebido provisoriamente, no ato da entrega, para posterior verificação da conformidade com as especificações, e definitivamente, em até 10 (dez) dias úteis, após a verificação da qualidade e da quantidade e a consequente aceitação, mediante termo ou atesto na nota fiscal (art. 140, II, da Lei nº 14.133/2021)."
       : "O objeto será recebido provisoriamente pelo fiscal do contrato, mediante termo detalhado, quando verificado o cumprimento das exigências técnicas, e definitivamente pelo gestor do contrato, mediante termo que comprove o atendimento das exigências contratuais (art. 140, I, da Lei nº 14.133/2021).",
-    "O recebimento provisório ou definitivo não exclui a responsabilidade civil pela solidez e segurança da obra ou serviço nem a responsabilidade ético-profissional pela perfeita execução do contrato.");
+    bens
+      ? "O recebimento provisório ou definitivo não exclui a responsabilidade da contratada por vícios ou defeitos do objeto, nem pela sua conformidade com as especificações."
+      : "O recebimento provisório ou definitivo não exclui a responsabilidade civil pela solidez e segurança da obra ou do serviço nem a responsabilidade ético-profissional pela perfeita execução do contrato.");
   l.push(secao(++n, "Condições de pagamento"),
     `O pagamento será efetuado em ${tr("prazo_pagamento") || "até 30 (trinta) dias, contados do atesto da nota fiscal"}, por meio de transferência bancária para conta indicada pela contratada, observada a ordem cronológica de pagamentos (art. 141 da Lei nº 14.133/2021).`,
     "A nota fiscal deverá vir acompanhada das provas de regularidade fiscal, trabalhista e com o FGTS. Havendo erro na nota fiscal ou circunstância que impeça a liquidação da despesa, o prazo de pagamento ficará suspenso até a regularização.");

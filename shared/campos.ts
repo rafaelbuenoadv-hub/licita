@@ -67,7 +67,7 @@ export const CAMPOS: Record<string, Campo[]> = {
     { id: "v", rotulo: "V — Levantamento de mercado", tipo: "area", ajuda: "Alternativas possíveis e justificativa técnica e econômica da solução escolhida. " + OUTROS_ETP },
     { id: "vi", rotulo: "VI — Estimativa do valor", tipo: "area", minimo: true, ajuda: "Preços unitários referenciais, memória de cálculo e documentos de suporte." },
     { id: "vii", rotulo: "VII — Descrição da solução como um todo", tipo: "area", ajuda: "Inclua manutenção e assistência técnica, quando for o caso. " + OUTROS_ETP },
-    { id: "viii", rotulo: "VIII — Parcelamento ou não da contratação", tipo: "area", minimo: true, ajuda: "Por que o objeto será dividido em itens ou lotes, ou contratado em lote único." },
+    { id: "viii", rotulo: "VIII — Parcelamento ou não da contratação", tipo: "area", minimo: true, ajuda: "Parcelamento é a divisão do objeto em itens ou lotes para ampliar a competição; não confundir com entrega parcelada (que é regime de entrega, tratado no TR). Diga se o objeto será dividido e por quê, ou por que será contratado em item ou lote único." },
     { id: "ix", rotulo: "IX — Resultados pretendidos", tipo: "area", ajuda: "Economicidade e melhor aproveitamento dos recursos humanos, materiais e financeiros. " + OUTROS_ETP },
     { id: "x", rotulo: "X — Providências prévias ao contrato", tipo: "area", ajuda: "O que a Administração precisa fazer antes de contratar, inclusive capacitar servidores para fiscalização e gestão. " + OUTROS_ETP },
     { id: "xi", rotulo: "XI — Contratações correlatas ou interdependentes", tipo: "area", ajuda: "Outras contratações que dependem desta ou que a influenciam. " + OUTROS_ETP },
@@ -99,6 +99,9 @@ export const CAMPOS: Record<string, Campo[]> = {
     { id: "bdi", rotulo: "BDI e encargos sociais", tipo: "texto", cond: "obra", ajuda: "Percentuais adotados e onde está a composição." },
     { id: "data_base", rotulo: "Data-base do orçamento", tipo: "texto", ajuda: "Mês e ano de referência dos preços, igual em todas as peças." },
     { id: "valor_total", rotulo: "Valor estimado total (R$)", tipo: "valor" },
+    { id: "atesto", rotulo: "Atestação do responsável pela pesquisa", tipo: "marcas", opcoes: [
+      ["conferi", "Conferi as fontes, os valores e a memória de cálculo e atesto que a pesquisa observou o art. 23 da Lei nº 14.133/2021"],
+    ], ajuda: "Sem esta marca o relatório não traz a declaração de conformidade: o sistema não declara por você o que não foi conferido." },
   ],
   tr: [
     { id: "a", rotulo: "a) Definição do objeto", tipo: "area", cond: "naoobra", ajuda: "Natureza, quantitativos, prazo do contrato e possibilidade de prorrogação." },
