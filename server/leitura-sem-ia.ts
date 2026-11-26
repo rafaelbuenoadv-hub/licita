@@ -1,5 +1,5 @@
 import { normalizarCotacao } from "../shared/solicitacao.js";
-import type { DadosOrcamento, ItemOrcamento } from "../shared/orcamentos.js";
+import type { DadosOrcamento, ItemOrcamento, PrecoPesquisado } from "../shared/orcamentos.js";
 
 /**
  * Leitura de orçamento sem IA, para quando a IA está indisponível ou sem créditos.
@@ -119,6 +119,45 @@ function unidadeNoDetalhe(linhas: string[], numero: string) {
   return "";
 }
 
+const dataIso = (d: string) => { const [dd, mm, aa] = d.split("/"); return `${aa}-${mm}-${dd}`; };
+
+/**
+ * Linhas de preço do relatório: "1   76.105.600/0001-86 - Prefeitura ... - PR   48608_962026   09/10/2026   R$ 92,00".
+ * O nome do órgão pode continuar na linha seguinte; o tipo vem do cabeçalho do bloco
+ * (Compras Governamentais, Preço Público ou tabela de referência — PMS/SINAPI).
+ */
+export function precosDoItem(linhas: string[]): PrecoPesquisado[] {
+  const out: PrecoPesquisado[] = [];
+  let tipo: PrecoPesquisado["tipo"] = "compras";
+  for (let i = 0; i < linhas.length; i++) {
+    const linha = linhas[i];
+    if (/^\s*Governamentais\b/.test(linha) || /Pre[çc]o\s+Compras/.test(linha)) tipo = "compras";
+    else if (/^\s*P[úu]blico\b/.test(linha)) tipo = "publico";
+    else if (/^\s*PMS\b/.test(linha) || /Descri[çc][ãa]o Produto/.test(linha)) tipo = "tabela";
+    const m = /^\s*(\d{1,3})\s{2,}(\S.*?)\s{2,}(\S.*?)\s{2,}(\d{2}\/\d{2}\/\d{4})\s+R\$\s*([\d.]+,\d{2})\s*$/.exec(linha);
+    if (!m) continue;
+    let orgao = m[2].trim(), identificacao = m[3].trim();
+    // Continuação na linha de baixo (nome do órgão e resto da identificação), antes da próxima linha numerada.
+    const seguinte = linhas[i + 1] ?? "";
+    if (seguinte.trim() && !/^\s*\d{1,3}\s{2,}/.test(seguinte) && !/Valor Unit|Mediana|Relat[óo]rio gerado/i.test(seguinte)) {
+      const partes = seguinte.trim().split(/\s{2,}/);
+      // Uma só parte com cara de código ("1-000248/2026") é continuação da identificação, não do nome.
+      if (tipo !== "tabela" && partes.length === 1 && /^\S*\d\S*$/.test(partes[0]) && /[-/:]/.test(partes[0])) identificacao += partes[0];
+      else if (tipo !== "tabela") { orgao += ` ${partes[0]}`; if (partes[1]) identificacao += partes[1]; }
+      else orgao += ` ${partes.join(" ")}`;
+    }
+    const cnpj = /(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/.exec(orgao)?.[1] ?? null;
+    const nome = tipo === "tabela"
+      ? `Tabela de referência (${identificacao.split(/\s{2,}|\s/)[0]}) — ${orgao.replace(/\s+/g, " ").slice(0, 120)}`
+      : orgao.replace(/^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\s*-\s*/, "").replace(/\s+/g, " ").trim();
+    const valor = valorDe(m[5]);
+    if (valor == null || valor <= 0) continue;
+    out.push({ orgao: nome.slice(0, 200), cnpj, data: dataIso(m[4]), valor, identificacao: tipo === "tabela" ? null : identificacao.slice(0, 120), tipo,
+      ...(tipo === "tabela" ? { produto: orgao.replace(/\s+/g, " ").trim().slice(0, 300) } : {}) });
+  }
+  return out;
+}
+
 export function lerRelatorioCotacao(texto: string): DadosOrcamento | null {
   if (!/Relat[óo]rio de Cota[çc][ãa]o/i.test(texto) || !/PRE[ÇC]O\s+EST/i.test(texto)) return null;
   const linhas = texto.replace(/\r/g, "").split("\n");
@@ -141,7 +180,12 @@ export function lerRelatorioCotacao(texto: string): DadosOrcamento | null {
     const descricao = bruta.replace(/\s+[\d.]+(?:,\d+)?\s*(?:M³|M3|M²|M2|UN|UND|KG|T|TON|L|LT|M)\.?\s*$/i, "").trim() || bruta;
     const unidadeDetalhe = unidadeNoDetalhe(linhas, linhas[i].trim().split(/\s+/)[1]);
     const unidadeTexto = unidadeDetalhe || (/\s(M³|M3)\s*$/i.test(bruta) ? "M³" : /\s(M²|M2)\s*$/i.test(bruta) ? "M²" : /\s(KG)\s*$/i.test(bruta) ? "KG" : /\s(T|TON)\s*$/i.test(bruta) ? "T" : "");
+    // Preços individuais do item, até o próximo "Item N".
+    let fimItem = k + 1;
+    while (fimItem < linhas.length && !/^\s*Item\s+\d+\s*$/.test(linhas[fimItem])) fimItem++;
+    const precos = precosDoItem(linhas.slice(k + 1, fimItem));
     itens.push({
+      ...(precos.length ? { precos } : {}),
       descricao: descricao.slice(0, 500),
       unidade: unidadeTexto || (m[3].trim().toLowerCase() === "un" ? "UN" : m[3].trim().toUpperCase()),
       quantidade, valor_unitario: unitario,
@@ -157,7 +201,9 @@ export function lerRelatorioCotacao(texto: string): DadosOrcamento | null {
   return {
     fornecedor: /bancodeprecos/i.test(texto) ? "Banco de Preços — Relatório de Cotação" : "Relatório de Cotação",
     fonte: "banco_precos",
-    cnpj: null, data: null, validade: null, itens,
+    cnpj: null, validade: null, itens,
+    // Data em que o relatório foi gerado = data da consulta às fontes.
+    data: ((d) => (d ? dataIso(d[1]) : null))(/Relat[óo]rio gerado no dia (\d{2}\/\d{2}\/\d{4})/i.exec(texto)),
     valor_total: global ? valorDe(global[1]) : null,
     frete: "nao_informado", instalacao: "nao_informado", prazo_entrega: null,
     observacoes: [titulo && `Pesquisa: ${titulo}`, metodo && `Método: ${metodo}`, periodo && `Período: ${periodo}`].filter(Boolean).join(" · ") || null,

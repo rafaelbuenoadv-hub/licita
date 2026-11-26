@@ -5,6 +5,7 @@ import { secretariosDoProcesso } from "./portarias.js";
 import { documentoDfd } from "./modelo-dfd.js";
 import { documentoEtp, documentoPrecos, documentoTr, assinaturaDoUsuario } from "./modelos-fase-interna.js";
 import { totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
+import { MARCA_DO_INCISO, dataBaseDosPrecos, incisosUsados } from "../shared/analise-precos.js";
 import {
   ETAPAS, TIPOS, VIAS, camposFaltando, camposVisiveis, itemDosCampos, itensDe, textoDoCampo, temValor,
   type Etapa, type Tipo, type Valores, type Via,
@@ -87,7 +88,9 @@ export async function sugestoesDosCampos(p: Proc, campos: Record<string, Valores
     },
     precos: {
       memoria: memoriaBaseDoMetodo(v("precos", "metodo")),
-      parametros: (nOrcamentos?.n ?? 0) > 0 && p.tipo !== "obra" ? ["fornecedores"] : [],
+      // Parâmetros e data-base derivados das cotações (tipo de fonte → inciso; datas dos preços).
+      parametros: p.tipo === "obra" ? [] : incisosUsados(itens).length ? incisosUsados(itens).map(([i]) => MARCA_DO_INCISO[i]) : (nOrcamentos?.n ?? 0) > 0 ? ["fornecedores"] : [],
+      data_base: dataBaseDosPrecos(itens),
       valor_total: total != null ? moeda(total) : "",
     },
     tr: p.tipo === "obra" ? (({ e: _e, f: _f, g: _g, h: _h, ...parametros }) => parametros)(padroesTr(p.tipo, p.via, v("dfd", "modalidade"))) : {

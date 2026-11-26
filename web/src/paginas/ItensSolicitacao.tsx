@@ -10,7 +10,11 @@ import { BuscaPncpItem } from "./BuscaPncpItem";
 import { BuscaPncpLote } from "./BuscaPncpLote";
 import { ItensOrcamentos } from "./ItensOrcamentos";
 
-export interface LinhaCotacao { orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string; obs?: string; descarte?: DescartePreco; apenas_referencia?: boolean }
+export interface LinhaCotacao {
+  orcamentoId: number | null; fornecedor: string; valor: string; fonte?: FonteCotacao; link?: string; consultadoEm?: string; obs?: string; descarte?: DescartePreco; apenas_referencia?: boolean;
+  /** Dados estruturados da fonte, lidos do documento: data do preço, produto cotado, frete, validade e CNPJ. */
+  dataPreco?: string; produto?: string; frete?: "incluso" | "nao_incluso" | "nao_informado"; validade?: string; cnpj?: string;
+}
 // escolhas: destino definido à mão na conferência (índice do item, ou null para lançar como item novo).
 type LeituraOrcamento = { id: number; dados: DadosOrcamento; usar: boolean[]; escolhas: Record<number, number | null> };
 export const cotacaoPreenchida = (c: LinhaCotacao) => c.orcamentoId != null || !!c.fornecedor.trim() || !!c.valor.trim();
@@ -33,6 +37,7 @@ export function linhasDosItens(itens: ItemSolicitacao[], orcamentos: OrcamentoLi
       fornecedor: limparNomeFornecedor(c.fornecedor) || nomeFornecedorOrcamento(orcamentos.find((o) => o.id === c.orcamento_id)),
       valor: c.valor_unitario == null ? "" : String(c.valor_unitario).replace(".", ","),
       fonte: c.fonte, link: c.link, consultadoEm: c.consultado_em, obs: c.obs, descarte: c.descarte, apenas_referencia: c.apenas_referencia,
+      dataPreco: c.data_preco, produto: c.produto, frete: c.frete, validade: c.validade, cnpj: c.cnpj,
     }));
     if (!cotacoes.length) cotacoes.push(cotacaoVazia());
     return {
@@ -71,6 +76,8 @@ export function lerLinhas(linhas: LinhaItem[]): { itens: ItemSolicitacao[]; erro
         ...(c.fonte ? { fonte: c.fonte } : {}), ...(c.link ? { link: c.link.trim() } : {}),
         ...(c.consultadoEm ? { consultado_em: c.consultadoEm } : {}),
         ...(c.obs?.trim() ? { obs: c.obs.trim().slice(0, 1000) } : {}),
+        ...(c.dataPreco ? { data_preco: c.dataPreco } : {}), ...(c.produto?.trim() ? { produto: c.produto.trim().slice(0, 300) } : {}),
+        ...(c.frete ? { frete: c.frete } : {}), ...(c.validade ? { validade: c.validade } : {}), ...(c.cnpj ? { cnpj: c.cnpj.slice(0, 20) } : {}),
       });
     }
     const dados = { descricao: l.descricao.trim(), unidade: l.unidade.trim(), quantidade };
@@ -85,14 +92,14 @@ const formatos = ".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.txt,.csv";
 const legivel = (nome: string) => /\.(pdf|jpe?g|png|docx|xlsx|txt|csv)$/i.test(nome);
 export const dataConsulta = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
 
-function localizarCotacao(linha: LinhaItem, orcamento: number | null, fornecedor: string) {
+function localizarCotacao(linha: LinhaItem, orcamento: number | null, fornecedor: string, porOrgao = false) {
   const nome = normalizarCotacao(fornecedor);
-  return linha.cotacoes.findIndex((c) => (orcamento != null && c.orcamentoId === orcamento)
+  return linha.cotacoes.findIndex((c) => (orcamento != null && c.orcamentoId === orcamento && (!porOrgao || normalizarCotacao(c.fornecedor) === nome))
     || (c.orcamentoId == null && !!nome && normalizarCotacao(c.fornecedor) === nome));
 }
 
 function incluirCotacao(linha: LinhaItem, nova: LinhaCotacao) {
-  const preenchida = localizarCotacao(linha, nova.orcamentoId, nova.fornecedor);
+  const preenchida = localizarCotacao(linha, nova.orcamentoId, nova.fornecedor, nova.fonte === "banco_precos");
   if (preenchida >= 0) {
     return { ...linha, cotacoes: linha.cotacoes.map((c, i) => i === preenchida ? {
       ...nova, ...c, orcamentoId: nova.orcamentoId, fornecedor: c.fornecedor || nova.fornecedor, valor: c.valor || nova.valor,
@@ -110,8 +117,8 @@ const precoLido = (v: number | null) => v != null && v > 0 && v <= 1e12 ? String
  * do mesmo orçamento anexado ou, sem anexo, do mesmo nome de fornecedor.
  */
 interface Coluna { chave: string; fornecedor: string; orcamentoId: number | null; fonte?: FonteCotacao; link?: string; consultadoEm?: string }
-const chaveDe = (c: { orcamentoId: number | null; fornecedor: string }) =>
-  c.orcamentoId != null ? `o${c.orcamentoId}` : `n${normalizarCotacao(limparNomeFornecedor(c.fornecedor))}`;
+const chaveDe = (c: { orcamentoId: number | null; fornecedor: string; fonte?: FonteCotacao }) =>
+  c.orcamentoId != null ? `o${c.orcamentoId}${c.fonte === "banco_precos" ? `:${normalizarCotacao(limparNomeFornecedor(c.fornecedor))}` : ""}` : `n${normalizarCotacao(limparNomeFornecedor(c.fornecedor))}`;
 function colunasDosDados(linhas: LinhaItem[]): Coluna[] {
   const vistas = new Map<string, Coluna>();
   for (const l of linhas) for (const c of l.cotacoes) {
@@ -258,15 +265,34 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, or
       const destino = destinos[i];
       if (!leitura.usar[i] || destino.ambigua) continue;
       const anterior = destino.indice == null ? linhaVazia() : resultado[destino.indice];
-      if (anterior.cotacoes.filter(cotacaoPreenchida).length >= 20 && localizarCotacao(anterior, leitura.id, fornecedor) < 0) continue;
-      const item = incluirCotacao({
-        ...anterior, descricao: anterior.descricao || lido.descricao.trim().slice(0, 500),
-        unidade: anterior.unidade || (lido.unidade ?? "").trim().slice(0, 30),
-        quantidade: anterior.quantidade || (lido.quantidade != null && lido.quantidade >= 0 && lido.quantidade <= 1e12 ? String(lido.quantidade).replace(".", ",") : ""),
-      }, {
-        orcamentoId: leitura.id, fornecedor,
-        valor: precoLido(lido.valor_unitario), fonte: leitura.dados.fonte ?? "fornecedor", consultadoEm: dataConsulta(),
-      });
+      let item: LinhaItem;
+      if (lido.precos?.length) {
+        // Relatório de pesquisa: cada preço individual vira uma cotação (fonte, órgão, data do preço); sai a cotação agregada antiga do mesmo relatório.
+        item = { ...anterior, cotacoes: anterior.cotacoes.filter((c) => c.orcamentoId !== leitura.id) };
+        item = { ...item, descricao: item.descricao || lido.descricao.trim().slice(0, 500), unidade: item.unidade || (lido.unidade ?? "").trim().slice(0, 30),
+          quantidade: item.quantidade || (lido.quantidade != null && lido.quantidade >= 0 && lido.quantidade <= 1e12 ? String(lido.quantidade).replace(".", ",") : "") };
+        for (const preco of lido.precos) {
+          if (item.cotacoes.filter(cotacaoPreenchida).length >= 20) break;
+          item = incluirCotacao(item, {
+            orcamentoId: leitura.id, fornecedor: preco.orgao.slice(0, 200), valor: precoLido(preco.valor), fonte: "banco_precos",
+            consultadoEm: leitura.dados.data ?? dataConsulta(), dataPreco: preco.data ?? undefined, cnpj: preco.cnpj ?? undefined,
+            produto: preco.produto, obs: [preco.tipo === "compras" ? "Compras governamentais" : preco.tipo === "publico" ? "Preço público" : "Tabela de referência", preco.identificacao].filter(Boolean).join(" · "),
+          });
+        }
+      } else {
+        if (anterior.cotacoes.filter(cotacaoPreenchida).length >= 20 && localizarCotacao(anterior, leitura.id, fornecedor) < 0) continue;
+        item = incluirCotacao({
+          ...anterior, descricao: anterior.descricao || lido.descricao.trim().slice(0, 500),
+          unidade: anterior.unidade || (lido.unidade ?? "").trim().slice(0, 30),
+          quantidade: anterior.quantidade || (lido.quantidade != null && lido.quantidade >= 0 && lido.quantidade <= 1e12 ? String(lido.quantidade).replace(".", ",") : ""),
+        }, {
+          orcamentoId: leitura.id, fornecedor,
+          valor: precoLido(lido.valor_unitario), fonte: leitura.dados.fonte ?? "fornecedor",
+          // Datas e condições do próprio documento: a data da proposta é a do preço; validade, frete e produto cotado vêm da leitura.
+          consultadoEm: leitura.dados.data ?? dataConsulta(), dataPreco: leitura.dados.data ?? undefined, validade: leitura.dados.validade ?? undefined,
+          frete: leitura.dados.fonte ? undefined : leitura.dados.frete, produto: lido.descricao.trim().slice(0, 300), cnpj: leitura.dados.cnpj ?? undefined,
+        });
+      }
       if (destino.indice != null) resultado[destino.indice] = item;
       else {
         const vaga = resultado.findIndex((l) => !l.descricao.trim() && !l.quantidade && !l.unidade && !l.cotacoes.some(cotacaoPreenchida));
@@ -365,7 +391,7 @@ export function ItensSolicitacao({ processoId, linhas, setLinhas, orcamentos, or
     const nome = `${r.organization || "PNCP"} · ${r.control} · item ${r.itemNumber}`;
     alterar(k, incluirCotacao(item, {
       orcamentoId: id, fornecedor: nome.slice(0, 200), valor: precoLido(r.unitValue),
-      fonte: "pncp", link: r.sourceUrl, consultadoEm: data,
+      fonte: "pncp", link: r.sourceUrl, consultadoEm: data, dataPreco: /^\d{4}-\d{2}-\d{2}/.test(r.publicationDate ?? "") ? r.publicationDate.slice(0, 10) : undefined, produto: r.description?.slice(0, 300),
     }));
     await recarregar();
     setAviso("Referência do PNCP lançada e comprovante anexado.");

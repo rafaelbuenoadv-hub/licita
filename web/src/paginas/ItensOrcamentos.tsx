@@ -6,6 +6,7 @@ import { limparNomeFornecedor, nomeFornecedorOrcamento, type OrcamentoLido } fro
 import { CRITERIOS_PRECO, FONTES_COTACAO, valorDasCotacoes, normalizarCotacao, type CriterioPreco, type FonteCotacao, type ItemSolicitacao } from "../../../shared/solicitacao";
 import type { ResultadoPncp } from "../../../shared/pncp";
 import { BuscaPncpItem } from "./BuscaPncpItem";
+import { alertasDosPrecos } from "../../../shared/analise-precos";
 import { cotacaoPreenchida, dataConsulta, linhaVazia, lerLinhas, type LinhaCotacao, type LinhaItem } from "./ItensSolicitacao";
 
 const UNIDADES = ["UN", "CX", "PCT", "KG", "G", "L", "ML", "M", "M²", "M³", "T", "PAR", "JG", "RL", "FD", "GL", "SERV", "MÊS", "HORA", "DIÁRIA", "KIT", "CJ"];
@@ -270,7 +271,7 @@ const valorValido = (c: LinhaCotacao) => { const v = numBR(c.valor); return v !=
 function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, anexando, enviar, executar, recarregar, usarPncp, setAviso, focarPncp, fechar }: Props & { k: number; focarPncp: boolean; fechar: () => void }) {
   const linha = linhas[k];
   const { nome, descricao } = separarDescricao(linha.descricao);
-  const vazio = { fonte: "fornecedor" as FonteCotacao, data: dataConsulta(), fornecedor: "", valor: "", link: "", obs: "" };
+  const vazio = { fonte: "fornecedor" as FonteCotacao, data: dataConsulta(), dataPreco: "", frete: "" as "" | "incluso" | "nao_incluso" | "nao_informado", fornecedor: "", valor: "", link: "", obs: "" };
   const [f, setF] = useState(vazio);
   const [erro, setErro] = useState("");
   const [anexarEm, setAnexarEm] = useState<number | "">("");
@@ -287,6 +288,7 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
   const lido = lerLinhas([linha]).itens[0];
   const comprovadas = lido?.cotacoes ?? [];
   const criterio = linha.criterio ?? "media";
+  const alertas = lido ? alertasDosPrecos([lido], dataConsulta()) : [];
 
   const incluir = () => {
     const v = numBR(f.valor);
@@ -294,7 +296,8 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
     if (!f.fornecedor.trim()) return setErro(f.fonte === "fornecedor" ? "Informe o fornecedor." : "Informe a fonte da referência (site, órgão ou documento).");
     if (cotacoes.length >= 20) return setErro("O item já tem 20 valores.");
     setErro("");
-    const nova: LinhaCotacao = { orcamentoId: null, fornecedor: f.fornecedor.trim().slice(0, 200), valor: f.valor.trim(), fonte: f.fonte, link: f.link.trim(), consultadoEm: f.data, obs: f.obs.trim() };
+    const nova: LinhaCotacao = { orcamentoId: null, fornecedor: f.fornecedor.trim().slice(0, 200), valor: f.valor.trim(), fonte: f.fonte, link: f.link.trim(), consultadoEm: f.data, obs: f.obs.trim(),
+      ...(f.dataPreco ? { dataPreco: f.dataPreco } : {}), ...(f.fonte === "fornecedor" && f.frete ? { frete: f.frete } : {}) };
     alterarLinha({ cotacoes: [...linha.cotacoes.filter(cotacaoPreenchida), nova], valorAnterior: undefined });
     setF({ ...vazio, fonte: f.fonte, data: f.data });
     setAnexarEm(linha.cotacoes.filter(cotacaoPreenchida).length);
@@ -324,6 +327,11 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
                 {Object.entries(FONTES_COTACAO).filter(([x]) => x !== "pncp").map(([x, t]) => <option key={x} value={x}>{t}</option>)}</select></label>
               <label>Data da consulta<input type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></label>
             </div>
+            <div className="grade-2">
+              <label>{f.fonte === "fornecedor" ? "Data da proposta" : "Data do preço (contratação ou publicação)"}<input type="date" value={f.dataPreco} onChange={(e) => setF({ ...f, dataPreco: e.target.value })} /></label>
+              {f.fonte === "fornecedor" && <label>Frete<select value={f.frete} onChange={(e) => setF({ ...f, frete: e.target.value as typeof f.frete })}>
+                <option value="">—</option><option value="incluso">Incluso no preço</option><option value="nao_incluso">Não incluso</option><option value="nao_informado">Não informado</option></select></label>}
+            </div>
             <label>{f.fonte === "fornecedor" ? "Fornecedor" : "Fonte (site, órgão ou documento)"}
               <input list="fornecedores-orc" value={f.fornecedor} maxLength={200} onChange={(e) => setF({ ...f, fornecedor: e.target.value })} placeholder={f.fonte === "fornecedor" ? "Selecione ou digite o fornecedor" : "Ex.: Loja X, Prefeitura Y"} />
               <datalist id="fornecedores-orc">{conhecidos.map((x) => <option key={x} value={x} />)}</datalist></label>
@@ -339,11 +347,11 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
           <section className="orc-bloco sem-pad">
             <h3 className="orc-tit">Valores cadastrados</h3>
             <div className="tw"><table className="t">
-              <thead><tr><th>Fonte</th><th>Data</th><th>Fornecedor / referência</th><th className="r">Valor unitário</th><th>Comprovante</th><th className="r">Ações</th></tr></thead>
+              <thead><tr><th>Fonte</th><th>Data do preço</th><th>Fornecedor / referência</th><th className="r">Valor unitário</th><th>Comprovante</th><th className="r">Ações</th></tr></thead>
               <tbody>{cotacoes.length === 0 ? <tr><td colSpan={6} className="muted centro">Nenhum orçamento cadastrado para este item.</td></tr>
                 : cotacoes.map(({ c, i }) => <tr key={i}>
                   <td className="small">{FONTES_COTACAO[c.fonte ?? "fornecedor"]}</td>
-                  <td className="small">{brData(c.consultadoEm)}</td>
+                  <td className="small" title={c.dataPreco ? `Data do preço; consulta em ${brData(c.consultadoEm)}` : "Data da consulta"}>{brData(c.dataPreco ?? c.consultadoEm)}</td>
                   <td>{c.fornecedor || "—"}{c.obs && <div className="small muted">{c.obs}</div>}{c.link && <div className="small">{/^https?:\/\//.test(c.link) ? <a href={c.link} target="_blank" rel="noopener noreferrer">link</a> : c.link}</div>}</td>
                   <td className="r num">{valorValido(c) ? <span className={c.descarte ? "valor-descartado" : undefined}>{brl(numBR(c.valor)!)}</span> : <input aria-label="Valor unitário" className="valor-inline" inputMode="decimal" placeholder="informar" defaultValue={c.valor}
                     onBlur={(e) => alterarLinha({ cotacoes: linha.cotacoes.map((x, n) => (n === i ? { ...x, valor: e.target.value.trim() } : x)) })} />}
@@ -355,6 +363,11 @@ function ModalOrcamentos({ k, linhas, setLinhas, orcamentos, caminho, ocupado, a
                 </tr>)}</tbody>
             </table></div>
           </section>
+          {alertas.length > 0 && <section className="orc-bloco aviso-anexo" role="status">
+            <strong>Pontos de atenção antes de calcular</strong>
+            <ul className="small">{alertas.map((a, n) => <li key={n}>{a.fornecedor ? `${a.fornecedor}: ` : ""}{a.texto}</li>)}</ul>
+            <span className="small">Descarte o preço, marque-o como somente referência ou justifique a manutenção na análise complementar da pesquisa de preços.</span>
+          </section>}
 
           <section className="orc-bloco">
             <div className="row"><div><h3 className="orc-tit">Anexos dos orçamentos</h3><p className="small muted">Opcional: anexe a proposta, cotação ou documento que comprova o preço deste item.</p></div></div>

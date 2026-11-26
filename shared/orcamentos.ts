@@ -1,7 +1,21 @@
 // Dados que a IA lê de um orçamento e a comparação entre as propostas (regras fixas, sem IA).
 
 export type Inclusao = "incluso" | "nao_incluso" | "nao_informado";
-export interface ItemOrcamento { descricao: string; unidade: string | null; quantidade: number | null; valor_unitario: number | null; valor_total: number | null }
+/** Um preço individual de um relatório de pesquisa (ex.: cada contratação listada pelo Banco de Preços). */
+export interface PrecoPesquisado {
+  orgao: string; cnpj: string | null;
+  /** Data do preço (da contratação), AAAA-MM-DD. */
+  data: string | null;
+  valor: number; identificacao: string | null;
+  tipo: "compras" | "publico" | "tabela";
+  /** Descrição do produto, quando o relatório a traz (tabelas de referência). */
+  produto?: string;
+}
+export interface ItemOrcamento {
+  descricao: string; unidade: string | null; quantidade: number | null; valor_unitario: number | null; valor_total: number | null;
+  /** Preços individuais que formam o preço do item no relatório; cada um vira uma cotação própria. */
+  precos?: PrecoPesquisado[];
+}
 export interface DadosOrcamento {
   fornecedor: string | null; cnpj: string | null;
   /** Datas no formato AAAA-MM-DD. */

@@ -6,6 +6,8 @@ import { secretariosDoProcesso } from "./portarias.js";
 import { ehMunicipioIbaiti } from "./municipio-ibaiti.js";
 import { analiseCriticaDosPrecos, SEM_DESCARTES, FONTES_COTACAO, CRITERIOS_PRECO, planejamentoDoProcesso, quadroDeItens, totalDosItens, type ItemSolicitacao } from "../shared/solicitacao.js";
 import { reaisPorExtenso } from "../shared/extenso.js";
+import { INCISOS_ART23, analiseDosPrecos, dataBaseDosPrecos, incisosUsados, quadroDasFontes, quadroEstatistico } from "../shared/analise-precos.js";
+const hojeIso = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
 import { ETAPAS, TIPOS, VIAS, textoDoCampo, type Tipo, type Valores, type Via } from "../shared/etapas.js";
 
 interface Proc {
@@ -128,31 +130,36 @@ export async function documentoPrecos(p: Proc, campos: Record<string, Valores>, 
     `O presente relatório, elaborado nos termos do art. 23, ${obra ? "§ 2º" : "§ 1º"}, da Lei Federal nº 14.133/2021${c.ibaiti ? " e do art. 11 do Decreto Municipal nº 2.533/2024" : ""}, tem por finalidade fixar o valor estimado da contratação, compatível com os valores praticados pelo mercado, considerados os preços constantes de bancos de dados públicos e as quantidades a contratar, e registrar a memória de cálculo adotada.`);
   l.push(secao(1, "Objeto"), campo(campos, "dfd", "objeto") || c.instrucao.objeto || p.objeto);
   l.push(secao(2, "Secretarias contempladas"), `${listaDeSecretarias(c.secretarias) || "—"}.`);
-  const parametros = pr(obra ? "parametros_obra" : "parametros");
+  // 3. Parâmetros: derivados do tipo de cada fonte usada no cálculo (o inciso não é digitado).
+  const usados = obra ? [] : incisosUsados(c.itens);
+  const parametros = usados.length
+    ? usados.map(([inciso, n]) => `- ${inciso} — ${INCISOS_ART23[inciso]}: ${n} ${n === 1 ? "preço" : "preços"}`).join("\n")
+    : pr(obra ? "parametros_obra" : "parametros");
   l.push(secao(3, `Parâmetros utilizados (art. 23, ${obra ? "§ 2º" : "§ 1º"})`), parametros || falta("parâmetros utilizados"));
   const unica = pr(obra ? "fonte_unica_obra" : "fonte_unica");
-  if (unica) l.push(`Justificativa do uso de fonte única: ${unica}`);
-  l.push(secao(4, "Data-base"), pr("data_base") ? `Os preços têm como data-base ${pr("data_base")}, que será adotada em todas as peças do processo.` : falta("data-base do orçamento"));
+  if (usados.length === 1 || (!usados.length && unica)) l.push(unica ? `Justificativa do uso de um único parâmetro: ${unica}` : falta("justificativa do uso de um único parâmetro do art. 23"));
+  // 4. Data-base: menor e maior data dos preços considerados.
+  const base = dataBaseDosPrecos(c.itens);
+  l.push(secao(4, "Data-base"), base
+    ? `Os preços considerados no cálculo são de ${base.includes(" a ") ? "" : "data de "}${base}${base.includes(" a ") ? " (menor e maior data dos preços considerados)" : ""}.`
+    : pr("data_base") ? `Os preços têm como data-base ${pr("data_base")}.` : falta("data-base do orçamento"));
   l.push(secao(5, "Quadro comparativo de preços"));
   if (c.itens.length) l.push(quadroDeItens(c.itens, true, false).replace("Total estimado da solicitação", "Total estimado"));
   else l.push(falta("quadro de preços por item"));
-  const fontes = c.itens.flatMap((i) => (i.cotacoes ?? []).filter((x) => x.valor_unitario != null));
-  const vistas = new Map<string, (typeof fontes)[number]>();
-  for (const f of fontes) if (!vistas.has(f.fornecedor)) vistas.set(f.fornecedor, f);
-  if (vistas.size) {
-    l.push(secao(6, "Fontes consultadas"), [
-      "| Fonte | Tipo | Data da consulta | Referência | Comprovante |", "|---|---|:---:|---|:---:|",
-      ...[...vistas.values()].map((f) => `| ${celula(f.fornecedor)} | ${FONTES_COTACAO[f.fonte ?? "fornecedor"]} | ${brData(f.consultado_em)} | ${celula(f.link ?? "")} | ${f.orcamento_id != null ? "Anexado" : "—"} |`),
-    ].join("\n"));
-  } else l.push(secao(6, "Fontes consultadas"), falta("fontes consultadas, com data e hora de acesso"));
-  const criterio = c.itens.find((i) => i.criterio)?.criterio;
+  const fontes = quadroDasFontes(c.itens);
+  l.push(secao(6, "Fontes consultadas"), fontes || falta("fontes consultadas, com data do preço e data da consulta"));
+  // 7. Método e memória: o método de cada item e o resultado do cálculo; o texto do responsável entra como complemento.
+  const criterios = [...new Set(c.itens.filter((i) => i.cotacoes?.length).map((i) => i.criterio ?? "media"))];
   l.push(secao(7, "Método de cálculo e memória"),
-    `Método adotado: ${pr("metodo") || (criterio ? CRITERIOS_PRECO[criterio] : falta("método de cálculo"))}.`,
-    pr("memoria") || falta("memória de cálculo"));
-  const analise = analiseCriticaDosPrecos(c.itens);
-  l.push(secao(8, "Análise crítica dos preços"), analise);
+    criterios.length
+      ? `Método adotado: ${criterios.map((x) => CRITERIOS_PRECO[x].toLowerCase()).join("; ")} dos preços considerados no cálculo de cada item. O valor total de cada item é o preço unitário adotado multiplicado pela quantidade; o valor estimado da contratação é a soma dos totais dos itens.`
+      : `Método adotado: ${pr("metodo") || falta("método de cálculo")}.`,
+    ...(c.itens.some((i) => i.cotacoes?.length) ? [quadroEstatistico(c.itens)] : []),
+    ...(pr("memoria") ? [`Observações do responsável: ${pr("memoria")}`] : c.itens.some((i) => i.cotacoes?.length) ? [] : [falta("memória de cálculo")]));
+  // 8. Análise crítica gerada do cálculo e dos alertas de comparabilidade.
   const complemento = pr("analise_critica");
-  if (complemento && complemento !== analise && !complemento.startsWith(SEM_DESCARTES) && !complemento.startsWith("Preços riscados no quadro comparativo")) l.push(`Análise complementar: ${complemento}`);
+  const justificativa = complemento && !complemento.startsWith(SEM_DESCARTES) && !complemento.startsWith("Preços riscados no quadro comparativo") ? complemento : "";
+  l.push(secao(8, "Análise crítica dos preços"), analiseDosPrecos(c.itens, hojeIso(), justificativa));
   if (obra) l.push(secao(9, "BDI e encargos sociais"), pr("bdi") || falta("BDI e encargos sociais"));
   const valorCampo = typeof campos.precos?.valor_total === "string" ? Number((campos.precos.valor_total as string).replace(/\./g, "").replace(",", ".")) : NaN;
   const valor = c.itens.length ? c.total : Number.isFinite(valorCampo) && valorCampo > 0 ? valorCampo : c.total;

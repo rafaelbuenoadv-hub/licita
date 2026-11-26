@@ -64,6 +64,14 @@ export interface CotacaoItem {
   consultado_em?: string;
   /** Validade da proposta, condições ou outras informações. */
   obs?: string;
+  /** Data do preço (da proposta ou da contratação pesquisada), AAAA-MM-DD; consultado_em é a data da consulta. */
+  data_preco?: string;
+  /** Produto como descrito na fonte, para conferir a equivalência com o item. */
+  produto?: string;
+  frete?: "incluso" | "nao_incluso" | "nao_informado";
+  /** Validade da proposta, AAAA-MM-DD. */
+  validade?: string;
+  cnpj?: string;
   descarte?: DescartePreco;
   apenas_referencia?: boolean;
 }

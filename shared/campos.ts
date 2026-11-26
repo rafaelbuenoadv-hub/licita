@@ -97,7 +97,7 @@ export const CAMPOS: Record<string, Campo[]> = {
     { id: "analise_critica", rotulo: "Análise complementar dos preços (opcional)", tipo: "area", opcional: true,
       ajuda: "Classifique os preços no quadro de tratamento desta etapa. O relatório registra automaticamente os valores usados, somente de referência e descartados. Use este campo para complementar a análise (Dec. 2.533/2024, art. 11, §§ 2º e 3º)." },
     { id: "bdi", rotulo: "BDI e encargos sociais", tipo: "texto", cond: "obra", ajuda: "Percentuais adotados e onde está a composição." },
-    { id: "data_base", rotulo: "Data-base do orçamento", tipo: "texto", ajuda: "Mês e ano de referência dos preços, igual em todas as peças." },
+    { id: "data_base", rotulo: "Data-base do orçamento", tipo: "texto", opcional: true, ajuda: "Calculada pelo sistema com a menor e a maior data dos preços considerados. Só preencha se as cotações não tiverem data." },
     { id: "valor_total", rotulo: "Valor estimado total (R$)", tipo: "valor" },
     { id: "atesto", rotulo: "Atestação do responsável pela pesquisa", tipo: "marcas", opcoes: [
       ["conferi", "Conferi as fontes, os valores e a memória de cálculo e atesto que a pesquisa observou o art. 23 da Lei nº 14.133/2021"],
